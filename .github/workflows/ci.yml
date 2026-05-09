@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test -race -count=1 ./...
+      - name: Example workflow
+        run: go run ./cmd/example-workflow
+
+  pg:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agentloop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENT_LOOP_PG_DSN: postgres://postgres:postgres@localhost:5432/agentloop?sslmode=disable
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Vet (pg tag)
+        run: go vet -tags=pg ./...
+      - name: Test (pg integration)
+        run: go test -tags=pg -race -count=1 ./store/pg/...

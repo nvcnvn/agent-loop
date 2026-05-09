@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Loop Debug Console</title>
+  <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sessions-pane">
+      <div class="brand">
+        <span class="mark">AL</span>
+        <div>
+          <h1>Debug Console</h1>
+          <p id="health-text">Checking server</p>
+        </div>
+      </div>
+
+      <form id="new-session-form" class="new-session-form">
+        <input id="session-title" name="title" type="text" autocomplete="off" placeholder="New session title">
+        <button type="submit" title="Create session">+</button>
+      </form>
+
+      <div class="section-head">
+        <span>Sessions</span>
+        <button id="refresh-sessions" type="button">Refresh</button>
+      </div>
+      <nav id="session-list" class="session-list" aria-label="Sessions"></nav>
+    </aside>
+
+    <main class="chat-pane">
+      <header class="chat-header">
+        <div>
+          <p class="eyebrow">Session</p>
+          <h2 id="session-heading">No session selected</h2>
+        </div>
+        <div class="run-actions">
+          <select id="agent-select" aria-label="Agent"></select>
+          <button id="cancel-run" type="button" disabled>Cancel Run</button>
+        </div>
+      </header>
+
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <form id="composer" class="composer">
+        <textarea id="message-input" rows="3" placeholder="Send a prompt to the selected agent" disabled></textarea>
+        <div class="composer-footer">
+          <label>
+            <input id="start-run-toggle" type="checkbox" checked>
+            Start run
+          </label>
+          <button id="send-message" type="submit" disabled>Send</button>
+        </div>
+      </form>
+    </main>
+
+    <aside class="debug-pane">
+      <div class="tabs" role="tablist" aria-label="Debug views">
+        <button class="tab active" type="button" data-tab="events">Events</button>
+        <button class="tab" type="button" data-tab="runs">Runs</button>
+        <button class="tab" type="button" data-tab="setup">Setup</button>
+        <button class="tab" type="button" data-tab="requests">HTTP</button>
+      </div>
+
+      <section id="tab-events" class="tab-panel active">
+        <div class="panel-title">
+          <h3>Realtime Stream</h3>
+          <span id="stream-status" class="status-pill">idle</span>
+        </div>
+        <div id="event-list" class="debug-list"></div>
+      </section>
+
+      <section id="tab-runs" class="tab-panel">
+        <div class="panel-title">
+          <h3>Runs</h3>
+          <button id="refresh-runs" type="button">Refresh</button>
+        </div>
+        <div id="run-list" class="debug-list"></div>
+      </section>
+
+      <section id="tab-setup" class="tab-panel">
+        <div class="panel-title"><h3>Agents</h3></div>
+        <div id="agent-list" class="debug-list compact"></div>
+        <div class="panel-title spaced"><h3>Tools</h3></div>
+        <div id="tool-list" class="debug-list compact"></div>
+      </section>
+
+      <section id="tab-requests" class="tab-panel">
+        <div class="panel-title">
+          <h3>Requests</h3>
+          <button id="clear-log" type="button">Clear</button>
+        </div>
+        <div id="request-log" class="debug-list"></div>
+      </section>
+    </aside>
+  </div>
+
+  <template id="empty-state-template">
+    <div class="empty-state">Create or select a session to begin.</div>
+  </template>
+
+  <script src="/ui/app.js" defer></script>
+</body>
+</html>
