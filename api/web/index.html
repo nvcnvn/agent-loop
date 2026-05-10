@@ -41,6 +41,14 @@
         </div>
       </header>
 
+      <section id="agent-status" class="agent-status" aria-live="polite" hidden>
+        <span class="activity-spinner" aria-hidden="true"></span>
+        <div>
+          <strong id="agent-status-text">Agent is working</strong>
+          <span id="agent-status-meta">Waiting for stream events</span>
+        </div>
+      </section>
+
       <section id="messages" class="messages" aria-live="polite"></section>
 
       <form id="composer" class="composer">

@@ -10,6 +10,7 @@ const state = {
   activeRunID: "",
   eventSource: null,
   lastEventID: "",
+  sessionBusy: false,
 };
 
 const els = {
@@ -21,6 +22,9 @@ const els = {
   sessionHeading: document.querySelector("#session-heading"),
   agentSelect: document.querySelector("#agent-select"),
   cancelRun: document.querySelector("#cancel-run"),
+  agentStatus: document.querySelector("#agent-status"),
+  agentStatusText: document.querySelector("#agent-status-text"),
+  agentStatusMeta: document.querySelector("#agent-status-meta"),
   messages: document.querySelector("#messages"),
   composer: document.querySelector("#composer"),
   messageInput: document.querySelector("#message-input"),
@@ -166,15 +170,22 @@ async function loadSessions(selectFirst = false) {
 }
 
 async function selectSession(id) {
-  const session = state.sessions.find((item) => sessionID(item) === id) || await api(`/v1/sessions/${id}`);
-  state.selectedSession = session;
-  state.events = [];
-  state.lastEventID = "";
-  closeStream();
-  renderSessions();
-  renderHeader();
-  await Promise.all([loadMessages(), loadRuns()]);
-  renderEvents();
+  setSessionBusy(true);
+  try {
+    const session = state.sessions.find((item) => sessionID(item) === id) || await api(`/v1/sessions/${id}`);
+    state.selectedSession = session;
+    state.events = [];
+    state.lastEventID = "";
+    state.activeRunID = "";
+    closeStream();
+    setStreamStatus("idle");
+    renderSessions();
+    renderHeader();
+    await Promise.all([loadMessages(), loadRuns()]);
+    renderEvents();
+  } finally {
+    setSessionBusy(false);
+  }
 }
 
 async function loadMessages() {
@@ -192,12 +203,18 @@ async function loadRuns() {
 }
 
 async function createSession(title) {
-  const data = await api("/v1/sessions", {
-    method: "POST",
-    body: { title: title || `Debug ${new Date().toLocaleTimeString()}` },
-  });
-  await loadSessions();
-  await selectSession(data.session_id || data.SessionID);
+  setSessionBusy(true);
+  try {
+    const data = await api("/v1/sessions", {
+      method: "POST",
+      body: { title: title || `Debug ${new Date().toLocaleTimeString()}` },
+    });
+    await loadSessions();
+    await selectSession(data.session_id || data.SessionID);
+  } catch (error) {
+    setSessionBusy(false);
+    throw error;
+  }
 }
 
 function selectedAgentName() {
@@ -247,6 +264,7 @@ async function sendMessage(content) {
   const id = data.run_id || data.RunID;
   state.activeRunID = id;
   els.cancelRun.disabled = false;
+  setAgentStatus("Starting agent run", id.slice(0, 8));
   await loadRuns();
   openStream(id);
 }
@@ -290,10 +308,14 @@ function handleSSEEvent(type, event) {
   const item = { type, id: event.lastEventId, at: new Date().toISOString(), data };
   state.events.push(item);
   state.events = state.events.slice(-200);
+  updateAgentActivity(type, data);
   maybeAppendAssistantMessage(type, data);
   renderEvents();
 
   const status = data?.payload?.status || data?.payload?.Status;
+  if (type === "run_state_changed" && status) {
+    setStreamStatus(status);
+  }
   if (type === "run_state_changed" && ["succeeded", "failed", "canceled", "timed_out"].includes(status)) {
     setStreamStatus(status);
     els.cancelRun.disabled = true;
@@ -317,6 +339,7 @@ function maybeAppendAssistantMessage(type, data) {
 
 async function cancelRun() {
   if (!state.activeRunID) return;
+  setAgentStatus("Canceling agent run", state.activeRunID.slice(0, 8));
   await api(`/v1/runs/${state.activeRunID}/cancel`, { method: "POST" });
   els.cancelRun.disabled = true;
   await loadRuns();
@@ -324,7 +347,69 @@ async function cancelRun() {
 
 function setStreamStatus(value) {
   els.streamStatus.textContent = value;
-  els.streamStatus.classList.toggle("live", value === "live");
+  const active = ["live", "queued", "running", "awaiting_approval", "reconnecting", "canceling"].includes(value);
+  els.streamStatus.classList.toggle("live", active);
+  if (active) {
+    setAgentStatus(statusLabel(value), state.activeRunID ? state.activeRunID.slice(0, 8) : "Waiting for run events");
+  } else {
+    hideAgentStatus();
+  }
+}
+
+function statusLabel(value) {
+  switch (value) {
+    case "queued":
+      return "Agent run is queued";
+    case "running":
+    case "live":
+      return "Agent is working";
+    case "awaiting_approval":
+      return "Agent is waiting for approval";
+    case "reconnecting":
+      return "Reconnecting to agent stream";
+    case "canceling":
+      return "Canceling agent run";
+    default:
+      return "Agent is working";
+  }
+}
+
+function setAgentStatus(text, meta = "") {
+  els.agentStatus.hidden = false;
+  els.agentStatusText.textContent = text;
+  els.agentStatusMeta.textContent = meta;
+}
+
+function hideAgentStatus() {
+  els.agentStatus.hidden = true;
+}
+
+function updateAgentActivity(type, data) {
+  const payload = data?.payload || {};
+  const agent = payload.agent || payload.Agent || selectedAgentName();
+  const stage = payload.stage || payload.Stage || "reply";
+  switch (type) {
+    case "task_spawned":
+      setAgentStatus(`${agent} is preparing`, `stage ${stage}`);
+      break;
+    case "model_call_started":
+      setAgentStatus(`${agent} is calling the model`, `stage ${stage}`);
+      break;
+    case "tool_call_started":
+    case "tool_call_scheduled":
+      setAgentStatus(`${agent} is using a tool`, payload.tool || payload.Tool || `stage ${stage}`);
+      break;
+    case "tool_call_completed":
+      setAgentStatus(`${agent} finished a tool call`, payload.tool || payload.Tool || `stage ${stage}`);
+      break;
+    case "model_call_completed":
+      setAgentStatus(`${agent} is composing a response`, `stage ${stage}`);
+      break;
+    case "agent_message_created":
+    case "task_completed":
+      setAgentStatus(`${agent} completed a step`, `stage ${stage}`);
+      break;
+  }
 }
 
 function showError(error) {
@@ -354,8 +439,15 @@ function renderSessions() {
 function renderHeader() {
   const hasSession = Boolean(state.selectedSession);
   els.sessionHeading.textContent = hasSession ? titleOf(state.selectedSession) : "No session selected";
-  els.messageInput.disabled = !hasSession;
-  els.sendMessage.disabled = !hasSession;
+  els.messageInput.disabled = !hasSession || state.sessionBusy;
+  els.sendMessage.disabled = !hasSession || state.sessionBusy;
+}
+
+function setSessionBusy(value) {
+  state.sessionBusy = value;
+  els.newSessionForm.querySelector("button").disabled = value;
+  els.refreshSessions.disabled = value;
+  renderHeader();
 }
 
 function renderMessages() {

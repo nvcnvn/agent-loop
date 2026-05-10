@@ -216,7 +216,7 @@ select:focus {
 
 .chat-pane {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   background: #fbfcfd;
 }
 
@@ -232,6 +232,48 @@ select:focus {
 
 .run-actions {
   width: min(430px, 48%);
+}
+
+.agent-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 11px 18px;
+  border-bottom: 1px solid #b7ded6;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.agent-status[hidden] {
+  display: none;
+}
+
+.agent-status strong,
+.agent-status span {
+  display: block;
+}
+
+.agent-status span:not(.activity-spinner) {
+  margin-top: 2px;
+  color: #315f5a;
+  font-size: 12px;
+}
+
+.activity-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 3px solid rgba(15, 118, 110, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .messages {
