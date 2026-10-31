@@ -12,6 +12,9 @@
 //	GET    /v1/runs/{rid}/stream     (SSE; honours Last-Event-ID)
 //	POST   /v1/runs/{rid}/cancel
 //	POST   /v1/approvals/{aid}
+//
+// With Server.Debug set it also serves the debug console at / and /ui/, and:
+//
 //	GET    /v1/debug/agents
 //	GET    /v1/debug/tools
 package api
@@ -42,6 +45,8 @@ var webFS embed.FS
 type Server struct {
 	Orch  *runtime.Orchestrator
 	Store store.Store
+	// Debug serves the debug console and /v1/debug/*, which expose agent instructions.
+	Debug bool
 }
 
 func NewServer(orch *runtime.Orchestrator, s store.Store) *Server {
@@ -51,12 +56,16 @@ func NewServer(orch *runtime.Orchestrator, s store.Store) *Server {
 // Handler returns an http.Handler with all v1 routes wired.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	assets, err := fs.Sub(webFS, "web")
-	if err != nil {
-		panic(err)
+	if s.Debug {
+		assets, err := fs.Sub(webFS, "web")
+		if err != nil {
+			panic(err)
+		}
+		mux.Handle("GET /ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(assets))))
+		mux.HandleFunc("GET /", s.debugConsole)
+		mux.HandleFunc("GET /v1/debug/agents", s.listAgents)
+		mux.HandleFunc("GET /v1/debug/tools", s.listTools)
 	}
-	mux.Handle("GET /ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(assets))))
-	mux.HandleFunc("GET /", s.debugConsole)
 	mux.HandleFunc("POST /v1/sessions", s.createSession)
 	mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	mux.HandleFunc("GET /v1/sessions/{sid}", s.getSession)
@@ -69,8 +78,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{rid}/stream", s.streamEvents)
 	mux.HandleFunc("POST /v1/runs/{rid}/cancel", s.cancelRun)
 	mux.HandleFunc("POST /v1/approvals/{aid}", s.resolveApproval)
-	mux.HandleFunc("GET /v1/debug/agents", s.listAgents)
-	mux.HandleFunc("GET /v1/debug/tools", s.listTools)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

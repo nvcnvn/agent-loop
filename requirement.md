@@ -327,7 +327,7 @@ Requirements:
 - [ ] Redaction support for logs and traces.
 - [ ] Data retention policy.
 - [ ] Optional encryption at rest for sensitive fields.
-- [ ] **Blocker:** Debug console and `/v1/debug/*` endpoints can be disabled; they expose agent instructions.
+- [x] Debug console and `/v1/debug/*` endpoints are off unless enabled (`-debug`); they expose agent instructions.
 - [x] Single-tenant deployment is the initial scope (see §17).
 
 ## 12. Memory and Retrieval

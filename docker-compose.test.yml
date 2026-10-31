@@ -49,7 +49,7 @@ services:
     build:
       context: .
       target: app
-    command: ["-addr", ":8080"]
+    command: ["-addr", ":8080", "-debug"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

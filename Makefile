@@ -71,14 +71,14 @@ api-local-docker-ollama: pg-up ollama-up
 	OLLAMA_BASE_URL='$(DOCKER_OLLAMA_URL)' \
 	OLLAMA_MODEL='$(OLLAMA_MODEL)' \
 	OLLAMA_TIMEOUT_SECONDS='$(OLLAMA_TIMEOUT_SECONDS)' \
-	go run ./cmd/agent-loop -addr '$(LOCAL_API_ADDR)'
+	go run ./cmd/agent-loop -addr '$(LOCAL_API_ADDR)' -debug
 
 api-local-host-ollama: pg-up
 	AGENT_LOOP_PG_DSN='$(LOCAL_PG_DSN)' \
 	OLLAMA_BASE_URL='$(HOST_OLLAMA_URL)' \
 	OLLAMA_MODEL='$(OLLAMA_MODEL)' \
 	OLLAMA_TIMEOUT_SECONDS='$(OLLAMA_TIMEOUT_SECONDS)' \
-	go run ./cmd/agent-loop -addr '$(LOCAL_API_ADDR)'
+	go run ./cmd/agent-loop -addr '$(LOCAL_API_ADDR)' -debug
 
 test-local:
 	AGENT_LOOP_REST_URL='$(LOCAL_API_URL)' \

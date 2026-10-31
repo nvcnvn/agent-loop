@@ -31,7 +31,24 @@ func newTestServer(t *testing.T) (*httptest.Server, *runtime.Orchestrator, store
 		{Name: "echo", Model: "mock", Provider: prov},
 	})
 	srv := api.NewServer(orch, s)
+	srv.Debug = true
 	return httptest.NewServer(srv.Handler()), orch, s
+}
+
+func TestDebugRoutesOffByDefault(t *testing.T) {
+	s := store.NewMemStore()
+	srv := httptest.NewServer(api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s).Handler())
+	defer srv.Close()
+	for _, path := range []string{"/", "/ui/app.js", "/v1/debug/agents", "/v1/debug/tools"} {
+		r, err := srv.Client().Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if r.StatusCode != http.StatusNotFound {
+			t.Fatalf("GET %s status=%d want 404", path, r.StatusCode)
+		}
+	}
 }
 
 func TestRESTSessionAndRun(t *testing.T) {

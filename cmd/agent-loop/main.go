@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	go run ./cmd/agent-loop
+//	go run ./cmd/agent-loop -debug
 //
 // Then:
 //
@@ -34,6 +34,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
+	debug := flag.Bool("debug", false, "serve the debug console and /v1/debug/* (exposes agent instructions)")
 	flag.Parse()
 
 	persistence := openStore()
@@ -54,6 +55,7 @@ func main() {
 	orch := runtime.NewOrchestrator(persistence, reg, []runtime.Agent{agent})
 
 	srv := api.NewServer(orch, persistence)
+	srv.Debug = *debug
 	log.Printf("agent-loop listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, srv.Handler()); err != nil {
 		log.Fatal(err)

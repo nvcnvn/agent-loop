@@ -34,7 +34,7 @@ The recommended first vertical slice from
 | Orchestrator with sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`), parallel tool calls for read-safe tools, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats | [api/server.go](api/server.go) |
-| Embedded responsive debug console for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
+| Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
 | HTTP server example | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
 | Programmatic example: planner -> parallel researchers -> synthesizer + replay | [cmd/example-workflow/main.go](cmd/example-workflow/main.go) |
 
@@ -67,7 +67,7 @@ go run ./cmd/example-workflow
 HTTP server with mock provider:
 
 ```sh
-go run ./cmd/agent-loop
+go run ./cmd/agent-loop -debug
 # open http://localhost:8080/ for the debug console
 # then in another shell
 curl -X POST http://localhost:8080/v1/sessions -d '{"title":"demo"}'
@@ -88,7 +88,8 @@ run state, list run events, cancel runs, resolve approval IDs, call
 coverage and an advanced log tab showing raw request headers, request
 bodies, responses, and stream activity.
 
-Debug-only setup endpoints are available for local inspection:
+The console and the debug-only setup endpoints below are served only with
+`-debug`, because they expose agent instructions:
 
 ```sh
 curl http://localhost:8080/v1/debug/agents
@@ -168,7 +169,7 @@ AGENT_LOOP_PG_DSN='postgres://postgres:postgres@localhost:45432/agentloop?sslmod
 OLLAMA_BASE_URL='http://localhost:41434' \
 OLLAMA_MODEL='gemma4:e2b-it-qat' \
 OLLAMA_TIMEOUT_SECONDS=900 \
-go run ./cmd/agent-loop -addr :8080
+go run ./cmd/agent-loop -addr :8080 -debug
 
 AGENT_LOOP_REST_URL='http://localhost:8080' \
 AGENT_LOOP_REST_TIMEOUT=900 \
