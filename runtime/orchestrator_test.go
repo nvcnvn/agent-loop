@@ -622,6 +622,98 @@ func TestRejectedApprovalReturnsToAgent(t *testing.T) {
 	}
 }
 
+// Acceptance: §Human Approval #4 – an unanswered approval expires.
+func TestApprovalExpires(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "echo", Input: json.RawMessage(`{"text":"x"}`)}}},
+		model.MockResponse{Content: "gave up"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"echo"}}})
+	orch.Policy.ApprovalRequired = []string{"echo"}
+	orch.ApprovalTimeout = 50 * time.Millisecond
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalID := awaitApprovalRequest(t, s, runID)
+	res, err := orch.Wait(ctx, runID)
+	if err != nil || res.Outputs["s"] != "gave up" {
+		t.Fatalf("status=%s err=%v reason=%s", res.Status, err, res.FailureReason)
+	}
+	msgs := prov.Calls()[1].Messages
+	if last := msgs[len(msgs)-1]; !strings.Contains(last.Content, "expired") {
+		t.Fatalf("agent was not told the approval expired: %+v", last)
+	}
+	a, err := s.GetApproval(ctx, core.DefaultTenant, approvalID)
+	if err != nil || a.Status != "expired" {
+		t.Fatalf("approval=%+v err=%v", a, err)
+	}
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "approved", nil); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("late approval err=%v want ErrConflict", err)
+	}
+	requested, resolved := approvalEvents(t, s, runID)
+	if requested["expires_at"] == nil || resolved["status"] != "expired" {
+		t.Fatalf("requested=%v resolved=%v", requested, resolved)
+	}
+}
+
+func approvalEvents(t *testing.T, s store.Store, runID core.RunID) (requested, resolved map[string]any) {
+	t.Helper()
+	events, err := s.ListRunEvents(context.Background(), core.DefaultTenant, runID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		var p map[string]any
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatal(err)
+		}
+		switch ev.Type {
+		case core.EvApprovalReq:
+			requested = p
+		case core.EvApprovalRes:
+			resolved = p
+		}
+	}
+	return requested, resolved
+}
+
+func TestCanceledRunCancelsPendingApproval(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "echo", Input: json.RawMessage(`{"text":"x"}`)}}},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"echo"}}})
+	orch.Policy.ApprovalRequired = []string{"echo"}
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalID := awaitApprovalRequest(t, s, runID)
+	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := orch.Wait(ctx, runID); res.Status != core.RunCanceled {
+		t.Fatalf("status=%s want canceled", res.Status)
+	}
+	a, err := s.GetApproval(ctx, core.DefaultTenant, approvalID)
+	if err != nil || a.Status != "canceled" {
+		t.Fatalf("approval=%+v err=%v", a, err)
+	}
+	if _, resolved := approvalEvents(t, s, runID); resolved["status"] != "canceled" {
+		t.Fatalf("resolved=%v", resolved)
+	}
+}
+
 // Acceptance: §Persistence and Replay #2 – strict replay reconstructs status.
 func TestStrictReplay(t *testing.T) {
 	prov := model.NewMockProvider(model.MockResponse{Content: "hi"})

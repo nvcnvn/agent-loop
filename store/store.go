@@ -87,6 +87,9 @@ type Approval struct {
 	Resolution json.RawMessage
 	CreatedAt  time.Time
 	ResolvedAt time.Time
+	// ExpiresAt, when set, is the time after which only "expired" or
+	// "canceled" can resolve the approval.
+	ExpiresAt time.Time
 }
 
 // Artifact is the stored shape of a produced artifact.
@@ -141,7 +144,8 @@ type TaskStore interface {
 	ListRunTasks(ctx context.Context, tenant core.TenantID, run core.RunID) ([]Task, error)
 }
 
-// ApprovalStore manages approvals.
+// ApprovalStore manages approvals. ResolveApproval returns core.ErrConflict
+// for an approval that is already resolved or expired.
 type ApprovalStore interface {
 	CreateApproval(ctx context.Context, a Approval) (core.ApprovalID, error)
 	GetApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID) (Approval, error)
@@ -432,7 +436,8 @@ func (m *MemStore) ResolveApproval(_ context.Context, tenant core.TenantID, id c
 	if !ok || e.approval.TenantID != tenant {
 		return core.ErrNotFound
 	}
-	if e.approval.Status != "requested" {
+	expired := !e.approval.ExpiresAt.IsZero() && !time.Now().Before(e.approval.ExpiresAt)
+	if e.approval.Status != "requested" || (expired && status != "expired" && status != "canceled") {
 		return core.ErrConflict
 	}
 	e.approval.Status = status

@@ -460,10 +460,10 @@ func (s *Store) CreateApproval(ctx context.Context, a store.Approval) (core.Appr
 		a.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO approvals (approval_id, tenant_id, run_id, step_id, reason, status, request, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		INSERT INTO approvals (approval_id, tenant_id, run_id, step_id, reason, status, request, created_at, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		string(a.ID), string(a.TenantID), nullableUUID(string(a.RunID)), nullableUUID(string(a.StepID)),
-		a.Reason, a.Status, encJSON(a.Request), a.CreatedAt,
+		a.Reason, a.Status, encJSON(a.Request), a.CreatedAt, nullableTime(a.ExpiresAt),
 	)
 	if err != nil {
 		return "", mapErr(err)
@@ -471,18 +471,17 @@ func (s *Store) CreateApproval(ctx context.Context, a store.Approval) (core.Appr
 	return a.ID, nil
 }
 
-func (s *Store) GetApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID) (store.Approval, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT approval_id, tenant_id, run_id, step_id, reason, status, request, resolution, created_at, resolved_at
-		FROM approvals WHERE approval_id=$1 AND tenant_id=$2`, string(id), string(tenant))
+const approvalColumns = `approval_id, tenant_id, run_id, step_id, reason, status, request, resolution, created_at, resolved_at, expires_at`
+
+func scanApproval(row rowScanner) (store.Approval, error) {
 	var (
-		a        store.Approval
-		aid, tid string
-		rid, sid *string
-		req, res []byte
-		resolved *time.Time
+		a                 store.Approval
+		aid, tid          string
+		rid, sid          *string
+		req, res          []byte
+		resolved, expires *time.Time
 	)
-	if err := row.Scan(&aid, &tid, &rid, &sid, &a.Reason, &a.Status, &req, &res, &a.CreatedAt, &resolved); err != nil {
+	if err := row.Scan(&aid, &tid, &rid, &sid, &a.Reason, &a.Status, &req, &res, &a.CreatedAt, &resolved, &expires); err != nil {
 		return store.Approval{}, mapErr(err)
 	}
 	a.ID = core.ApprovalID(aid)
@@ -493,25 +492,33 @@ func (s *Store) GetApproval(ctx context.Context, tenant core.TenantID, id core.A
 	if sid != nil {
 		a.StepID = core.StepID(*sid)
 	}
-	a.Request = req
-	a.Resolution = res
+	a.Request, a.Resolution = req, res
 	if resolved != nil {
 		a.ResolvedAt = *resolved
 	}
+	if expires != nil {
+		a.ExpiresAt = *expires
+	}
 	return a, nil
+}
+
+func (s *Store) GetApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID) (store.Approval, error) {
+	return scanApproval(s.pool.QueryRow(ctx, `
+		SELECT `+approvalColumns+` FROM approvals WHERE approval_id=$1 AND tenant_id=$2`, string(id), string(tenant)))
 }
 
 func (s *Store) ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, resolution json.RawMessage) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE approvals SET status=$3, resolution=$4, resolved_at=now()
-		WHERE approval_id=$1 AND tenant_id=$2 AND status='requested'`,
+		WHERE approval_id=$1 AND tenant_id=$2 AND status='requested'
+		  AND ($3 IN ('expired', 'canceled') OR expires_at IS NULL OR expires_at > now())`,
 		string(id), string(tenant), status, nullableJSON(resolution),
 	)
 	if err != nil {
 		return mapErr(err)
 	}
 	if tag.RowsAffected() == 0 {
-		// Either not found or already resolved.
+		// Not found, already resolved, or expired.
 		if _, gerr := s.GetApproval(ctx, tenant, id); gerr != nil {
 			return gerr
 		}
@@ -525,30 +532,10 @@ func (s *Store) WaitForApproval(ctx context.Context, id core.ApprovalID) (store.
 	t := time.NewTicker(PollInterval)
 	defer t.Stop()
 	for {
-		row := s.pool.QueryRow(ctx, `
-			SELECT approval_id, tenant_id, run_id, step_id, reason, status, request, resolution, created_at, resolved_at
-			FROM approvals WHERE approval_id=$1`, string(id))
-		var (
-			a        store.Approval
-			aid, tid string
-			rid, sid *string
-			req, res []byte
-			resolved *time.Time
-		)
-		if err := row.Scan(&aid, &tid, &rid, &sid, &a.Reason, &a.Status, &req, &res, &a.CreatedAt, &resolved); err != nil {
-			return store.Approval{}, mapErr(err)
-		}
-		a.ID = core.ApprovalID(aid)
-		a.TenantID = core.TenantID(tid)
-		if rid != nil {
-			a.RunID = core.RunID(*rid)
-		}
-		if sid != nil {
-			a.StepID = core.StepID(*sid)
-		}
-		a.Request, a.Resolution = req, res
-		if resolved != nil {
-			a.ResolvedAt = *resolved
+		a, err := scanApproval(s.pool.QueryRow(ctx, `
+			SELECT `+approvalColumns+` FROM approvals WHERE approval_id=$1`, string(id)))
+		if err != nil {
+			return store.Approval{}, err
 		}
 		if a.Status != "requested" {
 			return a, nil

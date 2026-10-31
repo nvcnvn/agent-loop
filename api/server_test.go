@@ -436,6 +436,28 @@ func TestResolveApprovalEndpoint(t *testing.T) {
 	}
 }
 
+func TestResolveApprovalConflicts(t *testing.T) {
+	srv, _, s := newTestServer(t)
+	defer srv.Close()
+	expired, err := s.CreateApproval(context.Background(), store.Approval{TenantID: core.DefaultTenant, ExpiresAt: time.Now().Add(-time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]int{
+		"/v1/approvals/" + string(expired): http.StatusConflict,
+		"/v1/approvals/missing":            http.StatusNotFound,
+	} {
+		resp, err := srv.Client().Post(srv.URL+path, "application/json", strings.NewReader(`{"decision":"approved"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Fatalf("POST %s status=%d want %d", path, resp.StatusCode, want)
+		}
+	}
+}
+
 func TestSessionDebugListEndpoints(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	defer srv.Close()

@@ -15,6 +15,7 @@ package pg_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -245,6 +246,26 @@ func TestPg_ApprovalResolveRoundtrip(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout waiting for approval")
+	}
+}
+
+func TestPg_ExpiredApprovalCannotBeApproved(t *testing.T) {
+	s := freshStore(t)
+	ctx := context.Background()
+	expires := time.Now().Add(-time.Second).UTC().Truncate(time.Microsecond)
+	id, err := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, ExpiresAt: expires})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "approved", nil); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("approve after expiry err=%v want ErrConflict", err)
+	}
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "expired", nil); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	a, err := s.GetApproval(ctx, core.DefaultTenant, id)
+	if err != nil || a.Status != "expired" || !a.ExpiresAt.Equal(expires) {
+		t.Fatalf("approval=%+v err=%v", a, err)
 	}
 }
 

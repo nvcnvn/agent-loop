@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TYPE principal_type AS ENUM ('human', 'service', 'system', 'agent', 'external');
 CREATE TYPE lifecycle_status AS ENUM ('draft', 'active', 'deprecated', 'disabled', 'archived', 'deleted');
 CREATE TYPE session_status AS ENUM ('active', 'archived', 'deleted');
-CREATE TYPE run_status AS ENUM ('queued', 'running', 'awaiting_approval', 'paused', 'canceling', 'canceled', 'succeeded', 'failed', 'timed_out', 'expired', 'superseded');
+CREATE TYPE run_status AS ENUM ('queued', 'running', 'awaiting_approval', 'paused', 'canceling', 'canceled', 'succeeded', 'failed', 'timed_out', 'superseded');
 CREATE TYPE task_status AS ENUM ('pending', 'ready', 'running', 'blocked', 'completed', 'failed', 'retry_scheduled', 'canceled', 'skipped');
 CREATE TYPE task_group_mode AS ENUM ('sequential', 'parallel', 'race', 'quorum', 'best_effort');
 CREATE TYPE task_group_status AS ENUM ('pending', 'running', 'completed', 'partially_completed', 'failed', 'canceled');

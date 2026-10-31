@@ -109,6 +109,8 @@ type Orchestrator struct {
 	MaxLimits core.Limits
 	// Log receives run lifecycle and error logs; NewOrchestrator sets slog.Default().
 	Log *slog.Logger
+	// ApprovalTimeout is how long a tool approval stays open; zero or less means it never expires.
+	ApprovalTimeout time.Duration
 
 	mu   sync.Mutex
 	runs map[core.RunID]*runState
@@ -139,13 +141,14 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		am[a.Name] = a
 	}
 	return &Orchestrator{
-		Store:     s,
-		Tools:     reg,
-		Agents:    am,
-		Budget:    policy.NewBudgetManager(),
-		LoopDet:   policy.NewLoopDetector(5),
-		Approvals: s,
-		Log:       slog.Default(),
+		Store:           s,
+		Tools:           reg,
+		Agents:          am,
+		Budget:          policy.NewBudgetManager(),
+		LoopDet:         policy.NewLoopDetector(5),
+		Approvals:       s,
+		Log:             slog.Default(),
+		ApprovalTimeout: 15 * time.Minute,
 		MaxLimits: core.Limits{
 			MaxDepth:      8,
 			MaxSubAgents:  64,
@@ -781,11 +784,16 @@ func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.Tenant
 	if reason == "" {
 		reason = "tool requires approval"
 	}
+	var expiresAt time.Time
+	if o.ApprovalTimeout > 0 {
+		expiresAt = time.Now().UTC().Add(o.ApprovalTimeout)
+	}
 	approvalID, err := o.Approvals.CreateApproval(ctx, store.Approval{
-		TenantID: tenant,
-		RunID:    runID,
-		StepID:   call.StepID,
-		Reason:   reason,
+		TenantID:  tenant,
+		RunID:     runID,
+		StepID:    call.StepID,
+		Reason:    reason,
+		ExpiresAt: expiresAt,
 		Request: mustJSON(map[string]any{
 			"tool":  call.Tool.Name,
 			"input": json.RawMessage(call.Input),
@@ -807,14 +815,29 @@ func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.Tenant
 			"approval_id": approvalID,
 			"tool":        call.Tool.Name,
 			"reason":      reason,
+			"expires_at":  expiresAt,
 		}),
 	})
 
-	approval, err := o.Approvals.WaitForApproval(ctx, approvalID)
-	if err != nil {
-		return "", fmt.Errorf("approval %s: %w", approvalID, err)
+	waitCtx, cancel := context.WithCancel(ctx)
+	if !expiresAt.IsZero() {
+		waitCtx, cancel = context.WithDeadline(ctx, expiresAt)
 	}
-	o.emit(ctx, core.Event{
+	approval, waitErr := o.Approvals.WaitForApproval(waitCtx, approvalID)
+	cancel()
+	if waitErr != nil {
+		status := "expired"
+		if ctx.Err() != nil {
+			status = "canceled"
+		} else if !errors.Is(waitErr, context.DeadlineExceeded) {
+			return "", fmt.Errorf("approval %s: %w", approvalID, waitErr)
+		}
+		approval, err = o.closeApproval(context.WithoutCancel(ctx), tenant, approvalID, status)
+		if err != nil {
+			return "", fmt.Errorf("approval %s: %w", approvalID, err)
+		}
+	}
+	o.emit(context.WithoutCancel(ctx), core.Event{
 		TenantID:   tenant,
 		SessionID:  session,
 		RunID:      runID,
@@ -828,8 +851,20 @@ func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.Tenant
 			"status":      approval.Status,
 		}),
 	})
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("approval %s: %w", approvalID, ctx.Err())
+	}
 	o.transitionRun(ctx, runID, tenant, core.RunRunning, "")
 	return approval.Status, nil
+}
+
+// closeApproval resolves an open approval with status, or returns the
+// decision a human recorded first.
+func (o *Orchestrator) closeApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string) (store.Approval, error) {
+	if err := o.Approvals.ResolveApproval(ctx, tenant, id, status, nil); err != nil && !errors.Is(err, core.ErrConflict) {
+		return store.Approval{}, err
+	}
+	return o.Approvals.GetApproval(ctx, tenant, id)
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call tool.Call, tc model.ToolCall, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (model.Message, error) {

@@ -293,7 +293,8 @@ Support approval checkpoints for:
 - [x] Dangerous tools and tools with external side effects, when flagged.
 - [ ] High-cost actions.
 - [ ] Final answer publication in selected workflows.
-- [ ] **Blocker:** Approval expiry.
+- [x] Approval expiry (`Orchestrator.ApprovalTimeout`): an expired approval can no longer be granted and
+  the agent gets the expiry as the tool result. An approval still open when its run ends is canceled.
 - [x] A rejection returned to the agent as a tool result instead of failing the run.
 
 ## 10. Observability and Operations

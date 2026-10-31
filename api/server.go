@@ -411,8 +411,15 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "validation_error", "decision must be approved|rejected")
 		return
 	}
-	if err := s.Store.ResolveApproval(r.Context(), tenantOf(r), aid, req.Decision, req.Payload); err != nil {
-		writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
+	switch err := s.Store.ResolveApproval(r.Context(), tenantOf(r), aid, req.Decision, req.Payload); {
+	case errors.Is(err, core.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	case errors.Is(err, core.ErrConflict):
+		writeErr(w, http.StatusConflict, "conflict", "approval is already resolved or expired")
+		return
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusOK)

@@ -2,8 +2,10 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/store"
@@ -125,5 +127,24 @@ func TestSubscribeDeliversInOrderUnderConcurrentAppendAndCancel(t *testing.T) {
 		if ev := <-ch; ev.Sequence != want {
 			t.Fatalf("sequence=%d want %d", ev.Sequence, want)
 		}
+	}
+}
+
+func TestExpiredApprovalCannotBeApproved(t *testing.T) {
+	s := store.NewMemStore()
+	ctx := context.Background()
+	id, err := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, ExpiresAt: time.Now().Add(-time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "approved", nil); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("approve after expiry err=%v want ErrConflict", err)
+	}
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "expired", nil); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	a, err := s.GetApproval(ctx, core.DefaultTenant, id)
+	if err != nil || a.Status != "expired" || a.ExpiresAt.IsZero() {
+		t.Fatalf("approval=%+v err=%v", a, err)
 	}
 }
