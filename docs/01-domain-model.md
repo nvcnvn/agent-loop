@@ -294,6 +294,7 @@ Tool invocation state:
 ```text
 scheduled -> running -> succeeded
 scheduled -> canceled
+scheduled -> failed     # refused: tool not available to the agent or not registered
 running -> failed
 running -> timed_out
 running -> canceled

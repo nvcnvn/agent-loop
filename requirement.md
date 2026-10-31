@@ -156,7 +156,9 @@ Requirements:
 - [ ] Input validated against the schema before execution.
 - [x] Context propagation for run timeout and cancellation.
 - [ ] Per-tool timeout.
-- [ ] **Blocker:** Structured error handling: a tool error goes back to the model as a result; today it fails the task.
+- [x] Structured error handling: a tool error or panic, or a call to a tool the agent may not use, goes
+  back to the model as an `{"error": ...}` result instead of failing the task. A refused call still
+  counts toward the tool-call budget.
 - [x] Tool metadata: name, description, version, idempotency hint, side-effect level.
 
 ### 6.2 MCP Tools
@@ -196,7 +198,8 @@ Requirements:
 - [x] Support fan-out and fan-in patterns where multiple tool results are collected before the next reasoning step.
 - [x] Partial failure handling for parallel sub-agent stages: fail-fast, wait-all, best-effort.
 - [ ] Quorum failure handling for parallel sub-agent stages.
-- [ ] Partial failure handling for parallel tool groups (any tool error fails the step).
+- [x] Partial failure handling for parallel tool groups: a failed call becomes an error result and the
+  rest of the group still runs.
 - [x] Concurrency limit per run for parallel sub-agents.
 - [ ] **Blocker:** Concurrency limits globally, per tenant, per workflow, per agent, and per tool; parallel tool calls in one step are unbounded.
 - [x] Preserve deterministic event ordering in persisted run history even when execution is concurrent.

@@ -650,6 +650,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 		requiresApproval bool
 		approvalReason   string
 		runParallel      bool
+		refused          error
 	}
 
 	if err := o.Budget.ReserveToolCalls(runID, len(calls)); err != nil {
@@ -665,11 +666,6 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 	}()
 
 	for i, tc := range calls {
-		allowedTool, ok := allowed[tc.Name]
-		if !ok {
-			return nil, fmt.Errorf("tool not allowed: %s", tc.Name)
-		}
-		def := allowedTool.def
 		if stalled, count := o.LoopDet.Observe(runID, tc.Name, hashInput(tc.Input)); stalled {
 			o.emit(ctx, core.Event{
 				TenantID:   tenant,
@@ -682,19 +678,26 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			})
 			return nil, fmt.Errorf("loop detected on tool %s after %d identical calls", tc.Name, count)
 		}
-
-		_, exec, ok := o.Tools.Get(tc.Name)
-		if !ok {
-			return nil, fmt.Errorf("tool not found: %s", tc.Name)
-		}
 		callRec := tool.Call{
 			TenantID: tenant,
 			RunID:    runID,
 			TaskID:   taskID,
 			StepID:   core.StepID(core.NewID()),
-			Tool:     def,
+			Tool:     core.ToolDefinition{Name: tc.Name},
 			Input:    tc.Input,
 		}
+		allowedTool, ok := allowed[tc.Name]
+		if !ok {
+			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, refused: fmt.Errorf("%w: tool %s is not available to this agent", core.ErrPolicyDenied, tc.Name)})
+			continue
+		}
+		_, exec, found := o.Tools.Get(tc.Name)
+		if !found {
+			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, refused: fmt.Errorf("unknown tool %s", tc.Name)})
+			continue
+		}
+		def := allowedTool.def
+		callRec.Tool = def
 		plans = append(plans, plannedTool{
 			idx:              i,
 			tc:               tc,
@@ -734,6 +737,10 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 	}
 
 	for _, plan := range plans {
+		if plan.refused != nil {
+			results <- toolOut{idx: plan.idx, msg: o.toolFailed(ctx, tenant, session, runID, taskID, plan.call, plan.tc, plan.refused)}
+			continue
+		}
 		if plan.runParallel {
 			wg.Add(1)
 			go func(plan plannedTool) {
@@ -834,20 +841,13 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		Visibility: core.VisibilityInternal,
 		Payload:    mustJSON(map[string]any{"tool": call.Tool.Name}),
 	})
-	res, err := exec.Execute(ctx, call)
+	res, err := safeExecute(ctx, exec, call)
 	if err != nil {
-		o.Log.WarnContext(ctx, "tool call failed", "run_id", runID, "task_id", taskID, "tool", call.Tool.Name, "err", err)
-		o.emit(ctx, core.Event{
-			TenantID:   tenant,
-			SessionID:  session,
-			RunID:      runID,
-			TaskID:     taskID,
-			StepID:     call.StepID,
-			Type:       core.EvToolCompleted,
-			Visibility: core.VisibilityInternal,
-			Payload:    mustJSON(map[string]any{"tool": call.Tool.Name, "error": err.Error()}),
-		})
-		return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
+		if ctx.Err() != nil {
+			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err)
+			return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
+		}
+		return o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err), nil
 	}
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
@@ -865,6 +865,35 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		ToolCallID: tc.ID,
 		Content:    string(res.Output),
 	}, nil
+}
+
+func safeExecute(ctx context.Context, exec tool.Executor, call tool.Call) (res tool.Result, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return exec.Execute(ctx, call)
+}
+
+func (o *Orchestrator) toolFailed(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, tc model.ToolCall, err error) model.Message {
+	o.Log.WarnContext(ctx, "tool call failed", "run_id", runID, "task_id", taskID, "tool", call.Tool.Name, "err", err)
+	o.emit(ctx, core.Event{
+		TenantID:   tenant,
+		SessionID:  session,
+		RunID:      runID,
+		TaskID:     taskID,
+		StepID:     call.StepID,
+		Type:       core.EvToolCompleted,
+		Visibility: core.VisibilityInternal,
+		Payload:    mustJSON(map[string]any{"tool": call.Tool.Name, "error": err.Error()}),
+	})
+	return model.Message{
+		Role:       model.RoleTool,
+		Name:       call.Tool.Name,
+		ToolCallID: tc.ID,
+		Content:    string(mustJSON(map[string]string{"error": err.Error()})),
+	}
 }
 
 func (o *Orchestrator) transitionRun(ctx context.Context, runID core.RunID, tenant core.TenantID, status core.RunStatus, reason string) {

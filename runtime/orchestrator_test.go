@@ -306,7 +306,7 @@ func TestToolDeniedByPolicy(t *testing.T) {
 		model.MockResponse{ToolCalls: []model.ToolCall{echoCall("hi", "1")}},
 		model.MockResponse{Content: "fallback"},
 	)
-	orch, _, sid := setup(t, []runtime.Agent{
+	orch, s, sid := setup(t, []runtime.Agent{
 		{Name: "ag", Model: "m", Provider: prov, Tools: []string{"echo"}},
 	})
 	orch.Policy.Denylist = []string{"echo"}
@@ -324,13 +324,102 @@ func TestToolDeniedByPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := orch.Wait(ctx, runID)
-	if err == nil {
-		// Model still returned tool calls; the runtime should refuse them
-		// because the tool was filtered out of the allowed set.
-		t.Fatalf("expected failure, got status=%s", res.Status)
+	if err != nil || res.Outputs["s"] != "fallback" {
+		t.Fatalf("status=%s err=%v outputs=%v; want the model to answer after the refusal", res.Status, err, res.Outputs)
 	}
-	if !strings.Contains(err.Error(), "echo") {
-		t.Fatalf("err=%v", err)
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	for _, ev := range events {
+		if ev.Type == core.EvToolStarted {
+			t.Fatalf("denied tool was executed: %s", ev.Payload)
+		}
+	}
+	calls := prov.Calls()
+	last := calls[len(calls)-1].Messages
+	if msg := last[len(last)-1]; msg.Role != model.RoleTool || !strings.Contains(msg.Content, "not available") {
+		t.Fatalf("model did not get the refusal as a tool result: %+v", msg)
+	}
+}
+
+func TestToolErrorsReturnToModel(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{
+			{ID: "1", Name: "fails", Input: json.RawMessage(`{}`)},
+			{ID: "2", Name: "panics", Input: json.RawMessage(`{}`)},
+		}},
+		model.MockResponse{Content: "recovered"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "ag", Model: "m", Provider: prov, Tools: []string{"fails", "panics"}},
+	})
+	_ = orch.Tools.Register(core.ToolDefinition{Name: "fails"}, tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) {
+		return tool.Result{}, errors.New("disk full")
+	}))
+	_ = orch.Tools.Register(core.ToolDefinition{Name: "panics", Concurrency: core.ConcurrencyParallelRead}, tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) {
+		panic("nil map")
+	}))
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name:   "s",
+			Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := orch.Wait(ctx, runID)
+	if err != nil || res.Outputs["s"] != "recovered" {
+		t.Fatalf("status=%s err=%v reason=%s", res.Status, err, res.FailureReason)
+	}
+	msgs := prov.Calls()[1].Messages
+	results := msgs[len(msgs)-2:]
+	if !strings.Contains(results[0].Content, "disk full") || !strings.Contains(results[1].Content, "nil map") {
+		t.Fatalf("tool errors not returned to the model: %+v", results)
+	}
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	stored := map[string]string{}
+	for _, ev := range events {
+		if ev.Type == core.EvToolCompleted {
+			var p struct{ Tool, Error string }
+			_ = json.Unmarshal(ev.Payload, &p)
+			stored[p.Tool] = p.Error
+		}
+	}
+	if !strings.Contains(stored["fails"], "disk full") || !strings.Contains(stored["panics"], "nil map") {
+		t.Fatalf("tool_call_completed events missing errors: %v", stored)
+	}
+}
+
+func TestToolErrorAfterCancelFailsTask(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "blocks", Input: json.RawMessage(`{}`)}}},
+		model.MockResponse{Content: "should not be asked"},
+	)
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"blocks"}}})
+	started := make(chan struct{})
+	_ = orch.Tools.Register(core.ToolDefinition{Name: "blocks"}, tool.ExecutorFunc(func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+		close(started)
+		<-ctx.Done()
+		return tool.Result{}, ctx.Err()
+	}))
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := orch.Wait(ctx, runID)
+	if res.Status != core.RunCanceled || len(prov.Calls()) != 1 {
+		t.Fatalf("status=%s model calls=%d; want canceled after 1 call", res.Status, len(prov.Calls()))
 	}
 }
 
