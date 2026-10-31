@@ -202,7 +202,9 @@ Requirements:
 - [x] Partial failure handling for parallel tool groups: a failed call becomes an error result and the
   rest of the group still runs.
 - [x] Concurrency limit per run for parallel sub-agents.
-- [ ] **Blocker:** Concurrency limits globally, per tenant, per workflow, per agent, and per tool; parallel tool calls in one step are unbounded.
+- [x] Concurrency limits globally (`MaxActiveRuns`), per tenant and per workflow (runs), per agent (model
+  calls) and per tool (executions; `exclusive` tools run one at a time), set in `Orchestrator.Concurrency`.
+  Parallel tool calls in one step are bounded by the run's `MaxConcurrent`.
 - [x] Preserve deterministic event ordering in persisted run history even when execution is concurrent.
 - [x] Propagate cancellation, timeout, and budget exhaustion to all in-flight tool calls.
 
@@ -450,7 +452,7 @@ The first implementation is viable when the framework can:
 - [x] Call native Go tools.
 - [ ] Call MCP tools.
 - [x] Execute safe tool calls concurrently with cancellation.
-- [ ] Bound concurrent tool calls with limits.
+- [x] Bound concurrent tool calls with limits.
 - [x] Enforce limits and stop runaway runs.
 - [x] Replay a failed run.
 - [ ] Resume a failed run.

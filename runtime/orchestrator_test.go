@@ -7,11 +7,13 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
+	"github.com/nvcnvn/agent-loop/policy"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 	"github.com/nvcnvn/agent-loop/tool"
@@ -277,6 +279,210 @@ func TestCancelQueuedRun(t *testing.T) {
 	}
 	if res, _ := orch.Wait(ctx, core.DefaultTenant, queued); res.Status != core.RunCanceled {
 		t.Fatalf("status=%s want canceled", res.Status)
+	}
+}
+
+// Acceptance: §Concurrent Sub-Agent Workflow #4 – excess runs wait for their tenant or workflow slot.
+func TestTenantAndWorkflowConcurrencyLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		limits policy.ConcurrencyLimits
+		other  func(*runtime.StartRunInput, core.SessionID)
+	}{
+		{"tenant", policy.ConcurrencyLimits{PerTenant: 1}, func(in *runtime.StartRunInput, sid core.SessionID) {
+			in.TenantID, in.SessionID = "other-tenant", sid
+		}},
+		{"workflow", policy.ConcurrencyLimits{PerWorkflow: 1}, func(in *runtime.StartRunInput, _ core.SessionID) {
+			in.Workflow.Name = "other-workflow"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(gateProvider)
+			orch, s, sid := setup(t, []runtime.Agent{{Name: "gated", Model: "m", Provider: release}})
+			orch.Concurrency = tc.limits
+			ctx, cancel := waitCtx()
+			defer cancel()
+			otherSID, _ := s.CreateSession(ctx, store.Session{TenantID: "other-tenant", CreatedBy: core.DefaultPrincipal})
+			in := func() runtime.StartRunInput {
+				return runtime.StartRunInput{TenantID: core.DefaultTenant, SessionID: sid, Workflow: runtime.Workflow{
+					Name:   "wf",
+					Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}}}},
+				}}
+			}
+			status := func(tenant core.TenantID, id core.RunID) core.RunStatus {
+				run, _ := s.GetRun(ctx, tenant, id)
+				return run.Status
+			}
+			awaitRunning := func(tenant core.TenantID, id core.RunID) {
+				for status(tenant, id) != core.RunRunning {
+					if ctx.Err() != nil {
+						t.Fatalf("run %s never started", id)
+					}
+					time.Sleep(time.Millisecond)
+				}
+			}
+			first, _ := orch.StartRun(ctx, in())
+			awaitRunning(core.DefaultTenant, first)
+			second, _ := orch.StartRun(ctx, in())
+			otherIn := in()
+			tc.other(&otherIn, otherSID)
+			other, err := orch.StartRun(ctx, otherIn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			awaitRunning(otherIn.TenantID, other)
+			time.Sleep(20 * time.Millisecond)
+			if got := status(core.DefaultTenant, second); got != core.RunQueued {
+				t.Fatalf("second run status=%s want queued", got)
+			}
+			close(release)
+			for _, r := range []struct {
+				tenant core.TenantID
+				id     core.RunID
+			}{{core.DefaultTenant, first}, {core.DefaultTenant, second}, {otherIn.TenantID, other}} {
+				if res, err := orch.Wait(ctx, r.tenant, r.id); err != nil {
+					t.Fatalf("status=%s err=%v", res.Status, err)
+				}
+			}
+		})
+	}
+}
+
+// Acceptance: §Tool Calling #5 – exclusive tools are serialized across runs; tool groups are bounded.
+func TestToolConcurrencyLimits(t *testing.T) {
+	var mu sync.Mutex
+	active, peak := map[string]int{}, map[string]int{}
+	track := func(key string, d time.Duration) {
+		mu.Lock()
+		active[key]++
+		peak[key] = max(peak[key], active[key])
+		mu.Unlock()
+		time.Sleep(d)
+		mu.Lock()
+		active[key]--
+		mu.Unlock()
+	}
+	calls := []model.ToolCall{
+		{ID: "1", Name: "read", Input: json.RawMessage(`{"n":1}`)},
+		{ID: "2", Name: "read", Input: json.RawMessage(`{"n":2}`)},
+		{ID: "3", Name: "read", Input: json.RawMessage(`{"n":3}`)},
+		{ID: "4", Name: "lock", Input: json.RawMessage(`{}`)},
+	}
+	var agents []runtime.Agent
+	var steps []runtime.AgentStep
+	for _, name := range []string{"a", "b", "c"} {
+		prov := model.NewMockProvider(model.MockResponse{ToolCalls: calls}, model.MockResponse{Content: "ok"})
+		agents = append(agents, runtime.Agent{Name: name, Model: "m", Provider: prov, Tools: []string{"read", "lock"}})
+		steps = append(steps, runtime.AgentStep{Name: name, Prompt: "x"})
+	}
+	orch, _, sid := setup(t, agents)
+	orch.Concurrency = policy.ConcurrencyLimits{PerTool: 2}
+	_ = orch.Tools.Register(core.ToolDefinition{Name: "read", Concurrency: core.ConcurrencyParallelRead}, tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) {
+		track("read", 20*time.Millisecond)
+		return tool.Result{Output: json.RawMessage(`{}`)}, nil
+	}))
+	_ = orch.Tools.Register(core.ToolDefinition{Name: "lock", Concurrency: core.ConcurrencyExclusive}, tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) {
+		track("lock", 20*time.Millisecond)
+		return tool.Result{Output: json.RawMessage(`{}`)}, nil
+	}))
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "fan", Kind: runtime.StageParallel, Agents: steps}}},
+		Limits:    core.Limits{MaxConcurrent: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatalf("status=%s err=%v", res.Status, err)
+	}
+	if peak["read"] != 2 || peak["lock"] != 1 {
+		t.Fatalf("peak concurrency=%v want read=2 (PerTool) and lock=1 (exclusive)", peak)
+	}
+}
+
+func TestPerAgentConcurrencyLimit(t *testing.T) {
+	prov := &peakProvider{}
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "a", Model: "m", Provider: prov}})
+	orch.Concurrency = policy.ConcurrencyLimits{PerAgent: 1}
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{Name: "fan", Kind: runtime.StageParallel, Agents: []runtime.AgentStep{
+			{Name: "a", Prompt: "1"}, {Name: "a", Prompt: "2"}, {Name: "a", Prompt: "3"},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatalf("status=%s err=%v", res.Status, err)
+	}
+	if prov.peak != 1 {
+		t.Fatalf("peak concurrent model calls of agent a=%d want 1", prov.peak)
+	}
+}
+
+type peakProvider struct {
+	mu           sync.Mutex
+	active, peak int
+}
+
+func (p *peakProvider) Name() string { return "peak" }
+func (p *peakProvider) Capabilities(context.Context, string) (model.Capabilities, error) {
+	return model.Capabilities{}, nil
+}
+func (p *peakProvider) Chat(context.Context, model.ChatRequest) (model.ChatResponse, error) {
+	p.mu.Lock()
+	p.active++
+	p.peak = max(p.peak, p.active)
+	p.mu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	p.mu.Lock()
+	p.active--
+	p.mu.Unlock()
+	return model.ChatResponse{Message: model.Message{Role: model.RoleAssistant, Content: "ok"}}, nil
+}
+
+func TestToolGroupBoundedByMaxConcurrent(t *testing.T) {
+	var mu sync.Mutex
+	active, peak := 0, 0
+	calls := []model.ToolCall{
+		{ID: "1", Name: "read", Input: json.RawMessage(`{"n":1}`)},
+		{ID: "2", Name: "read", Input: json.RawMessage(`{"n":2}`)},
+		{ID: "3", Name: "read", Input: json.RawMessage(`{"n":3}`)},
+	}
+	prov := model.NewMockProvider(model.MockResponse{ToolCalls: calls}, model.MockResponse{Content: "ok"})
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "a", Model: "m", Provider: prov, Tools: []string{"read"}}})
+	_ = orch.Tools.Register(core.ToolDefinition{Name: "read", Concurrency: core.ConcurrencyParallelRead}, tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) {
+		mu.Lock()
+		active++
+		peak = max(peak, active)
+		mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+		mu.Lock()
+		active--
+		mu.Unlock()
+		return tool.Result{Output: json.RawMessage(`{}`)}, nil
+	}))
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "a", Prompt: "x"}}}}},
+		Limits:    core.Limits{MaxConcurrent: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatalf("status=%s err=%v", res.Status, err)
+	}
+	if peak != 2 {
+		t.Fatalf("peak parallel tools=%d want 2 (MaxConcurrent)", peak)
 	}
 }
 

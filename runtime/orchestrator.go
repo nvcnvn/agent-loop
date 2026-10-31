@@ -118,6 +118,10 @@ type Orchestrator struct {
 	MaxActiveRuns int
 	// MaxQueuedRuns caps how many runs wait for a slot; read at the first StartRun.
 	MaxQueuedRuns int
+	// Concurrency bounds runs per tenant and workflow, model calls per agent, and executions per
+	// tool; set it before the first StartRun. A run waiting for its tenant or workflow slot counts
+	// toward MaxQueuedRuns.
+	Concurrency policy.ConcurrencyLimits
 	// MaxHistoryMessages caps how many earlier session messages an agent sees; zero means all.
 	MaxHistoryMessages int
 	// IdleWarnAfter is how long a run may go without an event before it gets an idle_wait diagnostic; zero disables it.
@@ -129,6 +133,7 @@ type Orchestrator struct {
 	capacity int // MaxActiveRuns+MaxQueuedRuns when slots was made
 	slots    chan struct{}
 	queued   atomic.Int64
+	sems     policy.Semaphores
 }
 
 type runState struct {
@@ -267,19 +272,56 @@ func (o *Orchestrator) release() {
 	o.mu.Unlock()
 }
 
-// queueAndExecute waits for a free run slot, then executes the run.
+// queueAndExecute waits for the run's tenant, workflow and global slots, then
+// executes the run.
 func (o *Orchestrator) queueAndExecute(ctx context.Context, runID core.RunID, in StartRunInput, st *runState) {
 	defer o.release()
-	if o.slots != nil {
-		o.queued.Add(1)
-		select {
-		case o.slots <- struct{}{}:
-			defer func() { <-o.slots }()
-		case <-ctx.Done():
-		}
-		o.queued.Add(-1)
+	o.queued.Add(1)
+	releaseSlots, err := o.acquireRunSlots(ctx, in)
+	o.queued.Add(-1)
+	if err == nil {
+		defer releaseSlots()
 	}
 	o.execute(ctx, runID, in, st)
+}
+
+// acquireRunSlots takes the tenant and workflow slots before the global one,
+// so a run blocked on its own tenant or workflow does not hold a global slot.
+func (o *Orchestrator) acquireRunSlots(ctx context.Context, in StartRunInput) (func(), error) {
+	var releases []func()
+	releaseAll := func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}
+	keys := []struct {
+		key   string
+		limit int
+	}{{"tenant:" + string(in.TenantID), o.Concurrency.PerTenant}}
+	if in.Workflow.Name != "" {
+		keys = append(keys, struct {
+			key   string
+			limit int
+		}{"workflow:" + string(in.TenantID) + "/" + in.Workflow.Name, o.Concurrency.PerWorkflow})
+	}
+	for _, k := range keys {
+		release, err := o.sems.Acquire(ctx, k.key, k.limit)
+		if err != nil {
+			releaseAll()
+			return nil, err
+		}
+		releases = append(releases, release)
+	}
+	if o.slots != nil {
+		select {
+		case o.slots <- struct{}{}:
+			releases = append(releases, func() { <-o.slots })
+		case <-ctx.Done():
+			releaseAll()
+			return nil, ctx.Err()
+		}
+	}
+	return releaseAll, nil
 }
 
 // QueuedRuns returns how many runs are waiting for a slot.
@@ -696,7 +738,12 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 			Messages: messages,
 			Tools:    toolSpecs,
 		}
+		releaseAgent, err := o.sems.Acquire(ctx, "agent:"+agent.Name, o.Concurrency.PerAgent)
+		if err != nil {
+			return "", o.failTask(ctx, in.TenantID, taskID, err)
+		}
 		resp, err := agent.Provider.Chat(ctx, req)
+		releaseAgent()
 		if err != nil {
 			return "", o.failTask(ctx, in.TenantID, taskID, fmt.Errorf("model: %w", err))
 		}
@@ -761,7 +808,7 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 
 		// Execute tool calls (in parallel for parallel-safe tools).
 		messages = append(messages, resp.Message)
-		toolMessages, err := o.runToolCalls(ctx, in.TenantID, in.SessionID, runID, taskID, resp.ToolCalls, allowed)
+		toolMessages, err := o.runToolCalls(ctx, in.TenantID, in.SessionID, runID, taskID, resp.ToolCalls, allowed, in.Limits.MaxConcurrent)
 		if err != nil {
 			return "", o.failTask(ctx, in.TenantID, taskID, err)
 		}
@@ -817,7 +864,7 @@ func (o *Orchestrator) logErr(ctx context.Context, op string, err error, attrs .
 	}
 }
 
-func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, calls []model.ToolCall, allowed map[string]allowedTool) ([]model.Message, error) {
+func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, calls []model.ToolCall, allowed map[string]allowedTool, maxParallel int) ([]model.Message, error) {
 	type toolOut struct {
 		idx int
 		msg model.Message
@@ -893,6 +940,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 	o.persistUsage(ctx, tenant, runID)
 
 	results := make(chan toolOut, len(calls))
+	group := make(chan struct{}, max(maxParallel, 1))
 	gctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -928,9 +976,16 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			continue
 		}
 		if plan.runParallel {
+			select {
+			case group <- struct{}{}:
+			case <-gctx.Done():
+				results <- toolOut{idx: plan.idx, err: gctx.Err()}
+				continue
+			}
 			wg.Add(1)
 			go func(plan plannedTool) {
 				defer wg.Done()
+				defer func() { <-group }()
 				msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, tenant, session, runID, taskID)
 				results <- toolOut{idx: plan.idx, msg: msg, err: err}
 			}(plan)
@@ -1047,6 +1102,15 @@ func (o *Orchestrator) closeApproval(ctx context.Context, tenant core.TenantID, 
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call tool.Call, tc model.ToolCall, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (model.Message, error) {
+	limit := o.Concurrency.PerTool
+	if call.Tool.Concurrency == core.ConcurrencyExclusive {
+		limit = 1
+	}
+	releaseTool, err := o.sems.Acquire(ctx, "tool:"+call.Tool.Name, limit)
+	if err != nil {
+		return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
+	}
+	defer releaseTool()
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
 		SessionID:  session,

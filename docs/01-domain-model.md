@@ -303,7 +303,7 @@ Concurrency classes:
 - `serial`: default, scheduler runs exclusively per tool policy scope
 - `parallel_read`: safe for concurrent read-only calls
 - `parallel_isolated_write`: safe when idempotency and target isolation are proven
-- `exclusive`: requires exclusive execution across configured scope
+- `exclusive`: runs one call at a time across all runs in the process
 - `external_side_effect`: approval and idempotency policy required
 
 ### Approval
