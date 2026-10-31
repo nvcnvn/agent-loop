@@ -12,10 +12,21 @@ const state = {
   eventSource: null,
   lastEventID: "",
   sessionBusy: false,
+  apiKey: readStoredKey(),
 };
+
+function readStoredKey() {
+  try {
+    return localStorage.getItem("agentLoopApiKey") || "";
+  } catch {
+    return "";
+  }
+}
 
 const els = {
   healthText: document.querySelector("#health-text"),
+  apiKeyForm: document.querySelector("#api-key-form"),
+  apiKey: document.querySelector("#api-key"),
   newSessionForm: document.querySelector("#new-session-form"),
   sessionTitle: document.querySelector("#session-title"),
   refreshSessions: document.querySelector("#refresh-sessions"),
@@ -112,6 +123,7 @@ async function api(path, options = {}) {
   const requestBody = options.body && typeof options.body !== "string" ? JSON.stringify(options.body) : options.body;
   const headers = { ...(options.headers || {}) };
   if (requestBody && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  if (state.apiKey) headers.Authorization = `Bearer ${state.apiKey}`;
 
   const started = performance.now();
   const response = await fetch(path, { ...options, method, headers, body: requestBody });
@@ -275,7 +287,10 @@ function openStream(id, after = "") {
   closeStream();
   state.lastEventID = after || state.lastEventID || "";
   setStreamStatus("live");
-  const url = `/v1/runs/${id}/stream${state.lastEventID ? `?after=${encodeURIComponent(state.lastEventID)}` : ""}`;
+  const params = new URLSearchParams();
+  if (state.lastEventID) params.set("after", state.lastEventID);
+  if (state.apiKey) params.set("access_token", state.apiKey);
+  const url = `/v1/runs/${id}/stream${params.size ? `?${params}` : ""}`;
   const source = new EventSource(url);
   state.eventSource = source;
 
@@ -286,7 +301,7 @@ function openStream(id, after = "") {
 
   pushRequest({
     method: "GET",
-    path: url,
+    path: url.replace(/access_token=[^&]*/, "access_token=…"),
     status: "SSE",
     request: { "Last-Event-ID": state.lastEventID || null },
     response: "stream opened",
@@ -695,6 +710,16 @@ function bindEvents() {
     state.requests = [];
     renderRequests();
   });
+  els.apiKeyForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.apiKey = els.apiKey.value.trim();
+    try {
+      localStorage.setItem("agentLoopApiKey", state.apiKey);
+    } catch {
+      // Storage can be blocked; the key still applies until the page reloads.
+    }
+    loadSetup().then(() => loadSessions(true)).catch(showError);
+  });
   els.composer.addEventListener("submit", (event) => {
     event.preventDefault();
     sendMessage(els.messageInput.value).catch(showError);
@@ -710,6 +735,7 @@ function bindEvents() {
 }
 
 async function init() {
+  els.apiKey.value = state.apiKey;
   bindEvents();
   renderHeader();
   renderMessages();

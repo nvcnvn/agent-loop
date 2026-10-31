@@ -68,7 +68,7 @@ go run ./cmd/example-workflow
 HTTP server with mock provider:
 
 ```sh
-go run ./cmd/agent-loop -debug
+go run ./cmd/agent-loop -debug -trust-identity-headers
 # open http://localhost:8080/ for the debug console
 # then in another shell
 curl -X POST http://localhost:8080/v1/sessions -d '{"title":"demo"}'
@@ -80,12 +80,22 @@ curl -X POST http://localhost:8080/v1/runs \
 curl -N http://localhost:8080/v1/runs/<run_id>/stream
 ```
 
+The server refuses to start until you choose how `/v1` requests are
+authenticated. In production set `AGENT_LOOP_API_KEYS` to comma-separated
+`<tenant>:<principal>:<key>` entries; clients send `Authorization: Bearer
+<key>` (SSE clients may pass `?access_token=<key>` instead), and the key alone
+decides the tenant and principal. `-trust-identity-headers` takes them from
+`X-Tenant-ID` and `X-Principal-ID` unchecked, for local development only.
+`/healthz`, `/readyz` and `/metrics` need no key. Any key of a tenant may act
+on everything in that tenant.
+
 The debug console is served by the same Go binary and has no separate
 frontend build step. It can create or resume sessions, send human
 messages, start agent runs, inspect current agent and tool setup, poll
 run state, list run events, cancel runs, resolve approval IDs, call
 `/healthz`, and subscribe to run events through HTTP SSE with
-`Last-Event-ID` resume. The console also includes REST/SSE checkpoint
+`Last-Event-ID` resume. When the server checks API keys, enter one in the
+console's key field; it is kept in the browser's local storage. The console also includes REST/SSE checkpoint
 coverage and an advanced log tab showing raw request headers, request
 bodies, responses, and stream activity.
 
@@ -173,7 +183,7 @@ AGENT_LOOP_PG_DSN='postgres://postgres:postgres@localhost:45432/agentloop?sslmod
 OLLAMA_BASE_URL='http://localhost:41434' \
 OLLAMA_MODEL='gemma4:e2b-it-qat' \
 OLLAMA_TIMEOUT_SECONDS=900 \
-go run ./cmd/agent-loop -addr :8080 -debug
+go run ./cmd/agent-loop -addr :8080 -debug -trust-identity-headers
 
 AGENT_LOOP_REST_URL='http://localhost:8080' \
 AGENT_LOOP_REST_TIMEOUT=900 \

@@ -155,8 +155,12 @@ Budget enforcement should reserve before execution and commit or release afterwa
 Decide v1 deployment mode explicitly:
 - data model: multi-tenant capable
 - initial deployment: single tenant by default
-- auth: pluggable principal resolver
-- authorization: tenant-scoped checks on every store method
+- auth: `api.Server.Auth` resolves every request outside the public routes (`/healthz`, `/readyz`,
+  `/metrics`, the debug console's static files) to a tenant and principal, or answers 401.
+  `api.APIKeys` maps a bearer key to one identity and ignores identity headers;
+  `api.HeaderIdentity` trusts them and is for local development only
+- authorization: tenant-scoped checks on every store method; any identity of a tenant may act on
+  all of that tenant's data
 - secrets: stored outside normal config tables by reference
 - logs/traces: redaction before export
 
@@ -300,6 +304,8 @@ Each error should include:
 2. Redact secrets from logs and traces.
 3. Verify audit records for user actions and approval decisions.
 4. Enforce artifact retention policy.
+5. Reject a request without a valid API key with 401; a valid key fixes the tenant and principal,
+   whatever identity headers say.
 
 ## Recommended First Development Slice
 

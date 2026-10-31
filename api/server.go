@@ -52,6 +52,8 @@ var webFS embed.FS
 type Server struct {
 	Orch  *runtime.Orchestrator
 	Store store.Store
+	// Auth resolves who a request acts as; nil means the default tenant and principal.
+	Auth Authenticator
 	// Debug serves the debug console and /v1/debug/*, which expose agent instructions.
 	Debug bool
 	// MaxBodyBytes caps request bodies (zero means no cap); larger ones get 413.
@@ -66,7 +68,7 @@ type Server struct {
 }
 
 func NewServer(orch *runtime.Orchestrator, s store.Store) *Server {
-	return &Server{Orch: orch, Store: s, MaxBodyBytes: 1 << 20, Log: slog.Default(), Metrics: orch.Metrics, streamsClosed: make(chan struct{})}
+	return &Server{Orch: orch, Store: s, Auth: HeaderIdentity, MaxBodyBytes: 1 << 20, Log: slog.Default(), Metrics: orch.Metrics, streamsClosed: make(chan struct{})}
 }
 
 // HTTPServer returns an http.Server for Handler with read and idle timeouts.
@@ -109,7 +111,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs", s.startRun)
 	mux.HandleFunc("GET /v1/runs/{rid}", s.getRun)
 	mux.HandleFunc("GET /v1/runs/{rid}/events", s.listEvents)
-	mux.HandleFunc("GET /v1/runs/{rid}/stream", s.streamEvents)
+	mux.HandleFunc(streamRoute, s.streamEvents)
 	mux.HandleFunc("POST /v1/runs/{rid}/cancel", s.cancelRun)
 	mux.HandleFunc("POST /v1/runs/{rid}/resume", s.resumeRun)
 	mux.HandleFunc("POST /v1/approvals/{aid}", s.resolveApproval)
@@ -127,21 +129,44 @@ func (s *Server) Handler() http.Handler {
 		}
 		started := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		mux.ServeHTTP(rec, r)
+		_, r.Pattern = mux.Handler(r)
 		route := r.Pattern
+		id, err := s.resolve(r)
+		if err != nil {
+			rec.Header().Set("WWW-Authenticate", "Bearer")
+			writeErr(rec, http.StatusUnauthorized, "unauthorized", err.Error())
+		} else {
+			r = withIdentity(r, id)
+			mux.ServeHTTP(rec, r)
+		}
 		if route == "" {
 			route = "unmatched"
 		}
 		s.Metrics.Observe("agentloop_http_request_duration_seconds", time.Since(started).Seconds(),
 			"route", route, "code", strconv.Itoa(rec.status))
-		s.Log.InfoContext(r.Context(), "http request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rec.status,
-			"duration", time.Since(started),
-			"tenant_id", tenantOf(r),
-		)
+		attrs := []any{"method", r.Method, "path", r.URL.Path, "status", rec.status, "duration", time.Since(started)}
+		if err == nil {
+			attrs = append(attrs, "tenant_id", id.Tenant)
+		}
+		s.Log.InfoContext(r.Context(), "http request", attrs...)
 	})
+}
+
+// publicRoutes need no identity; every other route, matched or not, does.
+var publicRoutes = map[string]bool{
+	"GET /healthz": true,
+	"GET /readyz":  true,
+	"GET /metrics": true,
+	"GET /":        true,
+	"GET /ui/":     true,
+}
+
+// resolve authenticates a request whose r.Pattern is the route it will match.
+func (s *Server) resolve(r *http.Request) (Identity, error) {
+	if s.Auth == nil || publicRoutes[r.Pattern] {
+		return identityOf(r), nil
+	}
+	return s.Auth(r)
 }
 
 type statusRecorder struct {
@@ -229,21 +254,9 @@ func writeDecodeErr(w http.ResponseWriter, err error) {
 	writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
 }
 
-// tenantOf resolves the tenant ID from headers or returns the default.
-// Single-tenant deployments can ignore the header entirely.
-func tenantOf(r *http.Request) core.TenantID {
-	if t := r.Header.Get("X-Tenant-ID"); t != "" {
-		return core.TenantID(t)
-	}
-	return core.DefaultTenant
-}
+func tenantOf(r *http.Request) core.TenantID { return identityOf(r).Tenant }
 
-func principalOf(r *http.Request) core.PrincipalID {
-	if p := r.Header.Get("X-Principal-ID"); p != "" {
-		return core.PrincipalID(p)
-	}
-	return core.DefaultPrincipal
-}
+func principalOf(r *http.Request) core.PrincipalID { return identityOf(r).Principal }
 
 // ---- handlers ----
 

@@ -338,7 +338,10 @@ Requirements:
 - [x] Tenant-scoped reads and writes in both stores.
 - [x] Tenant-scoped run cancellation.
 - [ ] Tenant-scoped tool registries.
-- [ ] **Blocker:** Authentication and authorization (`X-Tenant-ID` and `X-Principal-ID` are trusted as sent).
+- [x] Authentication and authorization: `/v1` requests authenticate with an API key that fixes their
+  tenant and principal (`AGENT_LOOP_API_KEYS`), and every store call is scoped to that tenant. Trusting
+  `X-Tenant-ID`/`X-Principal-ID` needs `-trust-identity-headers`.
+- [ ] Roles and permissions within a tenant (any of its keys may do anything in it).
 - [ ] Secret management for tool credentials.
 - [ ] Redaction support for logs and traces.
 - [ ] Data retention policy.
@@ -423,8 +426,9 @@ The product vision is met when the framework can:
 
 ## 17. Design Decisions
 
-- Tenancy: the initial deployment is single-tenant. Every record carries a `tenant_id`, and requests
-  without `X-Tenant-ID` use `core.DefaultTenant`.
+- Tenancy: the initial deployment is single-tenant. Every record carries a `tenant_id`; an API key
+  fixes the tenant of its requests (with `-trust-identity-headers`, requests without `X-Tenant-ID` use
+  `core.DefaultTenant`).
 - Hidden reasoning: persisted by default in `hidden_payload` and never served by the public REST or
   SSE endpoints.
 - Workflow definitions: both. Agents and tools are registered in Go; workflows are JSON sent with

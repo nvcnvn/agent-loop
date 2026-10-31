@@ -415,6 +415,23 @@ type ToolAuthorization struct {
 }
 ```
 
+## Authentication
+
+```go
+package api
+
+type Identity struct {
+    Tenant    core.TenantID
+    Principal core.PrincipalID
+}
+
+// Authenticator resolves the caller of a request to a non-public route; an error answers 401.
+type Authenticator func(*http.Request) (Identity, error)
+
+func APIKeys(keys map[string]Identity) Authenticator // Authorization: Bearer <key>
+func HeaderIdentity(r *http.Request) (Identity, error) // trusts X-Tenant-ID / X-Principal-ID
+```
+
 ## Real-Time Delivery
 
 ```go

@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	go run ./cmd/agent-loop -debug
+//	go run ./cmd/agent-loop -debug -trust-identity-headers
 //
 // Then:
 //
@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -38,9 +39,11 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	debug := flag.Bool("debug", false, "serve the debug console and /v1/debug/* (exposes agent instructions)")
+	trustHeaders := flag.Bool("trust-identity-headers", false, "take the tenant and principal from X-Tenant-ID/X-Principal-ID without authentication (local development only)")
 	drain := flag.Duration("shutdown-timeout", 30*time.Second, "on SIGINT/SIGTERM, how long to let requests and runs finish before checkpointing runs")
 	flag.Parse()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	auth := authenticator(*trustHeaders)
 
 	persistence := openStore()
 	reg := tool.NewRegistry()
@@ -66,6 +69,7 @@ func main() {
 
 	srv := api.NewServer(orch, persistence)
 	srv.Debug = *debug
+	srv.Auth = auth
 	hs := srv.HTTPServer(*addr)
 	signals, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -87,6 +91,22 @@ func main() {
 	if err := orch.Shutdown(ctx); err != nil {
 		slog.Warn("runs still executing were checkpointed for the next start", "err", err)
 	}
+}
+
+func authenticator(trustHeaders bool) api.Authenticator {
+	if spec := os.Getenv("AGENT_LOOP_API_KEYS"); spec != "" {
+		keys, err := api.ParseAPIKeys(spec)
+		if err != nil {
+			fatal("AGENT_LOOP_API_KEYS", err)
+		}
+		slog.Info("authenticating API keys", "keys", len(keys))
+		return api.APIKeys(keys)
+	}
+	if !trustHeaders {
+		fatal("authentication", errors.New("set AGENT_LOOP_API_KEYS or pass -trust-identity-headers"))
+	}
+	slog.Warn("trusting identity headers without authentication")
+	return api.HeaderIdentity
 }
 
 func fatal(msg string, err error) {
