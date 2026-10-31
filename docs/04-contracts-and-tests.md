@@ -209,6 +209,8 @@ Each error should include:
 2. Start a run with an idempotency key twice and verify only one run is created.
 3. Cancel a running run and verify in-flight model/tool calls receive cancellation.
 4. Resume a run after process restart and continue from the latest durable event.
+5. Agents see the session's earlier human messages (always as user turns) and earlier runs' answers
+   (as assistant turns) between their instructions and the stage prompt.
 
 ### Sequential Multi-Agent Workflow
 

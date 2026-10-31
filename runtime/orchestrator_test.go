@@ -105,6 +105,64 @@ func TestRunLifecycleIsLogged(t *testing.T) {
 	}
 }
 
+// Acceptance: §Session and Run Lifecycle #5 – agents see earlier session messages.
+func TestRunSeesEarlierSessionMessages(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{Content: "first answer"},
+		model.MockResponse{Content: "second answer"},
+		model.MockResponse{Content: "reviewed"},
+		model.MockResponse{Content: "capped"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "a", Model: "m", Provider: prov, Instructions: "be brief"},
+		{Name: "b", Model: "m", Provider: prov},
+	})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	for _, m := range []store.MessageProjection{
+		{SessionID: sid, Role: "user", Visibility: core.VisibilityParticipant, Content: "my name is Ada"},
+		{SessionID: sid, Role: "assistant", Visibility: core.VisibilityParticipant, Content: "posted as assistant"},
+	} {
+		if err := s.AddMessage(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := func(stage runtime.Stage) {
+		t.Helper()
+		runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{stage}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res, err := orch.Wait(ctx, runID); err != nil {
+			t.Fatalf("status=%s err=%v", res.Status, err)
+		}
+	}
+	start(runtime.Stage{Name: "s", Agents: []runtime.AgentStep{{Name: "a", Prompt: "hello"}}})
+	start(runtime.Stage{Name: "s", Agents: []runtime.AgentStep{{Name: "a", Prompt: "what is my name?"}, {Name: "b", Prompt: "review"}}})
+
+	render := func(msgs []model.Message) string {
+		var parts []string
+		for _, m := range msgs {
+			parts = append(parts, m.Role+":"+m.Content)
+		}
+		return strings.Join(parts, " | ")
+	}
+	orch.MaxHistoryMessages = 1
+	start(runtime.Stage{Name: "s", Agents: []runtime.AgentStep{{Name: "b", Prompt: "last"}}})
+
+	calls := prov.Calls()
+	for i, want := range []string{
+		"system:be brief | user:my name is Ada | user:posted as assistant | user:hello",
+		"system:be brief | user:my name is Ada | user:posted as assistant | assistant:first answer | user:what is my name?",
+		"user:my name is Ada | user:posted as assistant | assistant:first answer | user:review",
+		"assistant:reviewed | user:last",
+	} {
+		if got := render(calls[i].Messages); got != want {
+			t.Fatalf("call %d messages:\n got %s\nwant %s", i, got, want)
+		}
+	}
+}
+
 // Acceptance: §Session and Run Lifecycle #2 – idempotency.
 func TestIdempotentStartRun(t *testing.T) {
 	prov := model.NewMockProvider(

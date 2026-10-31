@@ -99,7 +99,8 @@ Each session must preserve:
 - [ ] Artifacts produced during execution.
 
 Chat-style sessions require:
-- [ ] **Blocker:** Runs pass the session's prior messages to the model; today an agent sees only its instructions and stage prompt.
+- [x] Runs pass the session's prior messages to the model: human messages and earlier runs' agent
+  answers, the last `Orchestrator.MaxHistoryMessages` of them, between the instructions and the prompt.
 - [ ] Posting a human message can start or continue a run.
 
 ### 5.2 Message Model

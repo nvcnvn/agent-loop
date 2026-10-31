@@ -85,6 +85,8 @@ type StartRunInput struct {
 	Input          map[string]string // available as {{input.<key>}} in templates
 	Limits         core.Limits
 	Metadata       map[string]any
+
+	history []model.Message
 }
 
 // Result is the terminal state returned by Wait.
@@ -111,6 +113,8 @@ type Orchestrator struct {
 	Log *slog.Logger
 	// ApprovalTimeout is how long a tool approval stays open; zero or less means it never expires.
 	ApprovalTimeout time.Duration
+	// MaxHistoryMessages caps how many earlier session messages an agent sees; zero means all.
+	MaxHistoryMessages int
 	// IdleWarnAfter is how long a run may go without an event before it gets an idle_wait diagnostic; zero disables it.
 	IdleWarnAfter time.Duration
 
@@ -147,15 +151,16 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		am[a.Name] = a
 	}
 	return &Orchestrator{
-		Store:           s,
-		Tools:           reg,
-		Agents:          am,
-		Budget:          policy.NewBudgetManager(),
-		LoopDet:         policy.NewLoopDetector(5),
-		Approvals:       s,
-		Log:             slog.Default(),
-		ApprovalTimeout: 15 * time.Minute,
-		IdleWarnAfter:   2 * time.Minute,
+		Store:              s,
+		Tools:              reg,
+		Agents:             am,
+		Budget:             policy.NewBudgetManager(),
+		LoopDet:            policy.NewLoopDetector(5),
+		Approvals:          s,
+		Log:                slog.Default(),
+		ApprovalTimeout:    15 * time.Minute,
+		IdleWarnAfter:      2 * time.Minute,
+		MaxHistoryMessages: 50,
 		MaxLimits: core.Limits{
 			MaxDepth:      8,
 			MaxSubAgents:  64,
@@ -260,6 +265,22 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	log := o.Log.With("run_id", runID, "tenant_id", in.TenantID, "session_id", in.SessionID)
 	log.InfoContext(ctx, "run started", "workflow", in.Workflow.Name)
 	o.transitionRun(ctx, runID, in.TenantID, core.RunRunning, "")
+
+	stageOutputs := map[string]string{}
+	var finalErr error
+	var finalStatus core.RunStatus = core.RunSucceeded
+	var failureReason string
+
+	stages := in.Workflow.Stages
+	if history, err := o.sessionHistory(ctx, in.TenantID, in.SessionID, runID); err != nil {
+		finalErr = fmt.Errorf("session history: %w", err)
+		finalStatus = core.RunFailed
+		failureReason = finalErr.Error()
+		stages = nil
+	} else {
+		in.history = history
+	}
+
 	stopIdleWatch := func() {}
 	if o.IdleWarnAfter > 0 {
 		stop := make(chan struct{})
@@ -268,12 +289,7 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		stopIdleWatch = func() { close(stop); wg.Wait() }
 	}
 
-	stageOutputs := map[string]string{}
-	var finalErr error
-	var finalStatus core.RunStatus = core.RunSucceeded
-	var failureReason string
-
-	for _, stage := range in.Workflow.Stages {
+	for _, stage := range stages {
 		if err := ctx.Err(); err != nil {
 			finalErr = err
 			finalStatus = core.RunCanceled
@@ -510,6 +526,7 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 	if agent.Instructions != "" {
 		messages = append(messages, model.Message{Role: model.RoleSystem, Content: agent.Instructions})
 	}
+	messages = append(messages, in.history...)
 	messages = append(messages, model.Message{Role: model.RoleUser, Content: prompt})
 
 	// Tool specs the model is allowed to call.
@@ -637,6 +654,32 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 	}
 
 	return "", o.failTask(ctx, in.TenantID, taskID, fmt.Errorf("agent %s exceeded MaxToolLoops=%d", agent.Name, maxLoops))
+}
+
+// sessionHistory returns the session's last MaxHistoryMessages messages from
+// humans and from earlier runs; the current run's stage outputs reach agents
+// through prompt templates instead. Only messages a run wrote are assistant
+// turns, whatever role a client posted with.
+func (o *Orchestrator) sessionHistory(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID) ([]model.Message, error) {
+	stored, err := o.Store.ListMessages(ctx, tenant, session)
+	if err != nil {
+		return nil, err
+	}
+	var out []model.Message
+	for _, m := range stored {
+		if m.RunID == runID {
+			continue
+		}
+		role := model.RoleUser
+		if m.RunID != "" {
+			role = model.RoleAssistant
+		}
+		out = append(out, model.Message{Role: role, Content: m.Content})
+	}
+	if o.MaxHistoryMessages > 0 && len(out) > o.MaxHistoryMessages {
+		out = out[len(out)-o.MaxHistoryMessages:]
+	}
+	return out, nil
 }
 
 func (o *Orchestrator) failTask(ctx context.Context, tenant core.TenantID, taskID core.TaskID, err error) error {
