@@ -948,3 +948,21 @@ func TestReExecuteEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestListMessagesHidesInternalMessages(t *testing.T) {
+	srv, _, s := newTestServer(t)
+	defer srv.Close()
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	_ = s.AddMessage(ctx, store.MessageProjection{SessionID: sid, Role: "user", Visibility: core.VisibilityParticipant, Content: "hi"})
+	_ = s.AddMessage(ctx, store.MessageProjection{SessionID: sid, Role: "snapshot", Visibility: core.VisibilityInternal, Content: `{"summary":"secret"}`})
+	resp, err := srv.Client().Get(srv.URL + "/v1/sessions/" + string(sid) + "/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), `"hi"`) || strings.Contains(string(body), "secret") {
+		t.Fatalf("messages: %s", body)
+	}
+}

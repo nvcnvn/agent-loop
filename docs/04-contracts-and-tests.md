@@ -121,8 +121,9 @@ for output gates, `output`, where tool approvals have `tool`.
 ### 4. Agent Definition Contract
 
 Agents are `runtime.Agent` values registered in Go, or come from the JSON file passed to
-`cmd/agent-loop -config`, which also holds the named workflow templates. `runtime.ParseConfig`
-rejects unknown fields, duplicate names, unknown child agents and invalid workflows.
+`cmd/agent-loop -config`, which also holds the named workflow templates and history compaction.
+`runtime.ParseConfig` rejects unknown fields, duplicate names, unknown child agents, invalid
+workflows, and a compaction whose agent is unknown or that has no trigger.
 
 ```json
 {
@@ -133,7 +134,8 @@ rejects unknown fields, duplicate names, unknown child agents and invalid workfl
   ],
   "workflows": [
     {"name": "research", "stages": [{"name": "answer", "agents": [{"name": "lead", "prompt": "{{input.question}}"}]}]}
-  ]
+  ],
+  "compaction": {"agent": "lead", "max_tokens": 6000, "keep_recent": 6}
 }
 ```
 
@@ -383,10 +385,13 @@ Each error should include:
 
 ### Snapshot and Compaction
 
-1. Trigger snapshot by message count.
-2. Trigger snapshot by token count.
+1. Trigger snapshot by message count (`TestCompactionSummarizesOlderHistory`).
+2. Trigger snapshot by token count (`TestCompactionByTokens`).
 3. Verify raw history remains available after snapshot.
 4. Verify snapshot generation creates auditable events and model call records.
+5. Fold the previous summary into the next (`TestCompactionFoldsTheLastSummaryIntoTheNext`).
+6. Keep facts from early turns through two summaries on a hosted model
+   (`TestLiveLongSessionCompaction`, paid: `make test-paid`).
 
 ### Budget and Safety
 

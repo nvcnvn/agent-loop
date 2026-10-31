@@ -451,6 +451,8 @@ func TestParseConfig(t *testing.T) {
 		"duplicate agent":  `{"agents":[{"name":"a"},{"name":"a"}]}`,
 		"unknown agent":    `{"agents":[],"workflows":[{"name":"w","stages":[{"name":"s","agents":[{"name":"a"}]}]}]}`,
 		"unnamed workflow": `{"agents":[{"name":"a"}],"workflows":[{"stages":[{"name":"s","agents":[{"name":"a"}]}]}]}`,
+		"compaction agent": `{"agents":[{"name":"a"}],"compaction":{"agent":"b","max_messages":5}}`,
+		"compaction never": `{"agents":[{"name":"a"}],"compaction":{"agent":"a"}}`,
 	} {
 		if _, err := runtime.ParseConfig([]byte(bad)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -460,6 +462,7 @@ func TestParseConfig(t *testing.T) {
 
 func FuzzParseConfig(f *testing.F) {
 	f.Add([]byte(sampleConfig))
+	f.Add([]byte(`{"agents":[{"name":"a"}],"compaction":{"agent":"a","max_tokens":8000,"keep_recent":6}}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"workflows":[{"name":"w","stages":[{"name":"s","depends_on":["s"],"agents":[{"name":"a"}]}]}]}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"workflows":[{"name":"w","stages":[{"name":"s","output_schema":{"$ref":"#/x"},"agents":[{"name":"a"}]}]}]}`))
 	f.Fuzz(func(t *testing.T, data []byte) {

@@ -7,10 +7,12 @@ import (
 	"fmt"
 )
 
-// Config holds the agents and named workflow templates an operator defines in a file.
+// Config holds the agents, named workflow templates and history compaction an
+// operator defines in a file.
 type Config struct {
-	Agents    []Agent    `json:"agents"`
-	Workflows []Workflow `json:"workflows,omitempty"`
+	Agents     []Agent     `json:"agents"`
+	Workflows  []Workflow  `json:"workflows,omitempty"`
+	Compaction *Compaction `json:"compaction,omitempty"`
 }
 
 // ParseConfig decodes a JSON config and checks its agents and workflows against each other.
@@ -44,6 +46,14 @@ func (c Config) Validate() error {
 			if _, ok := agents[child]; !ok {
 				return fmt.Errorf("agent %q: unknown child agent %q", a.Name, child)
 			}
+		}
+	}
+	if c := c.Compaction; c != nil {
+		if _, ok := agents[c.Agent]; !ok {
+			return fmt.Errorf("compaction: unknown agent %q", c.Agent)
+		}
+		if c.MaxMessages < 0 || c.MaxTokens < 0 || c.KeepRecent < 0 || c.MaxMessages == 0 && c.MaxTokens == 0 {
+			return errors.New("compaction: needs max_messages or max_tokens, and no negative values")
 		}
 	}
 	names := map[string]bool{}

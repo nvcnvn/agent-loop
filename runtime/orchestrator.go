@@ -101,6 +101,8 @@ type Orchestrator struct {
 	Concurrency policy.ConcurrencyLimits
 	// MaxHistoryMessages caps how many earlier session messages an agent sees; zero means all.
 	MaxHistoryMessages int
+	// Compaction summarizes long session history when a run starts.
+	Compaction Compaction
 	// IdleWarnAfter is how long a run may go without an event before it gets an idle_wait diagnostic; zero disables it.
 	IdleWarnAfter time.Duration
 
@@ -730,7 +732,7 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		failureReason = "canceled while queued"
 	} else {
 		o.transitionRun(ctx, runID, in.TenantID, core.RunRunning, "")
-		history, err := o.sessionHistory(ctx, in.TenantID, in.SessionID, runID)
+		history, err := o.sessionHistory(ctx, in, runID)
 		if err != nil {
 			finalStatus = core.RunFailed
 			failureReason = "session history: " + err.Error()
@@ -1096,75 +1098,13 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 	}
 
 	for range agent.MaxToolLoops {
-		if err := o.Budget.ReserveModelCall(runID); err != nil {
-			return "", err
-		}
-		stepID := core.StepID(core.NewID())
-		req := model.ChatRequest{
-			TenantID:       in.TenantID,
-			RunID:          runID,
-			StepID:         stepID,
-			Model:          agent.Model,
+		resp, err := o.modelCall(ctx, runID, in, taskID, agent, model.ChatRequest{
 			Messages:       messages,
 			Tools:          toolSpecs,
 			ResponseSchema: spec.rawSchema,
-		}
-		// ponytail: the whole request is stored per call, so a task's stored history
-		// grows quadratically with its tool loops; store deltas if that ever matters.
-		o.emit(ctx, core.Event{
-			TenantID:      in.TenantID,
-			SessionID:     in.SessionID,
-			RunID:         runID,
-			TaskID:        taskID,
-			StepID:        stepID,
-			Type:          core.EvModelStarted,
-			Visibility:    core.VisibilityInternal,
-			Payload:       mustJSON(map[string]any{"model": agent.Model, "agent": agent.Name}),
-			HiddenPayload: mustJSON(map[string]any{"request": req}),
 		})
-
-		releaseAgent, err := o.sems.Acquire(ctx, "agent:"+agent.Name, o.Concurrency.PerAgent)
 		if err != nil {
 			return "", err
-		}
-		callStart := time.Now()
-		cctx, span := o.startSpan(ctx, "chat "+agent.Model,
-			attribute.String("gen_ai.operation.name", "chat"),
-			attribute.String("gen_ai.request.model", agent.Model),
-			attribute.String("agentloop.step_id", string(stepID)))
-		resp, err := o.chat(cctx, agent, req, Delta{RunID: runID, TaskID: taskID, StepID: stepID, Agent: agent.Name})
-		span.SetAttributes(
-			attribute.Int64("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
-			attribute.Int64("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
-			attribute.Int("agentloop.tool_calls", len(resp.ToolCalls)))
-		endSpan(span, err)
-		releaseAgent()
-		o.Metrics.Observe("agentloop_model_call_duration_seconds", time.Since(callStart).Seconds(), "model", agent.Model)
-		if err != nil {
-			o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "error")
-			return "", fmt.Errorf("model: %w", err)
-		}
-		o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "ok")
-		o.Metrics.Add("agentloop_tokens_total", float64(resp.Usage.PromptTokens), "model", agent.Model, "type", "prompt")
-		o.Metrics.Add("agentloop_tokens_total", float64(resp.Usage.CompletionTokens), "model", agent.Model, "type", "completion")
-		o.Metrics.Add("agentloop_cost_units_total", float64(resp.Usage.CostUnits), "model", agent.Model)
-		usage := resp.Usage
-		usage.ModelCalls = 0
-		o.emit(ctx, core.Event{
-			TenantID:      in.TenantID,
-			SessionID:     in.SessionID,
-			RunID:         runID,
-			TaskID:        taskID,
-			StepID:        stepID,
-			Type:          core.EvModelCompleted,
-			Visibility:    core.VisibilityInternal,
-			Payload:       mustJSON(map[string]any{"usage": resp.Usage, "tool_calls": len(resp.ToolCalls)}),
-			HiddenPayload: mustJSON(map[string]any{"content": resp.Message.Content, "thinking": resp.Message.Thinking, "response": withoutRaw(resp)}),
-		})
-		commitErr := o.Budget.Commit(runID, usage)
-		o.persistUsage(ctx, in.TenantID, runID)
-		if commitErr != nil {
-			return "", commitErr
 		}
 
 		messages = append(messages, resp.Message)
@@ -1193,6 +1133,71 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 	return "", fmt.Errorf("agent %s exceeded MaxToolLoops=%d", agent.Name, agent.MaxToolLoops)
 }
 
+// modelCall makes one budgeted, traced and recorded model call for agent,
+// filling the request's IDs and model.
+func (o *Orchestrator) modelCall(ctx context.Context, runID core.RunID, in StartRunInput, taskID core.TaskID, agent Agent, req model.ChatRequest) (model.ChatResponse, error) {
+	if err := o.Budget.ReserveModelCall(runID); err != nil {
+		return model.ChatResponse{}, err
+	}
+	stepID := core.StepID(core.NewID())
+	req.TenantID, req.RunID, req.StepID, req.Model = in.TenantID, runID, stepID, agent.Model
+	// ponytail: the whole request is stored per call, so a task's stored history
+	// grows quadratically with its tool loops; store deltas if that ever matters.
+	o.emit(ctx, core.Event{
+		TenantID:      in.TenantID,
+		SessionID:     in.SessionID,
+		RunID:         runID,
+		TaskID:        taskID,
+		StepID:        stepID,
+		Type:          core.EvModelStarted,
+		Visibility:    core.VisibilityInternal,
+		Payload:       mustJSON(map[string]any{"model": agent.Model, "agent": agent.Name}),
+		HiddenPayload: mustJSON(map[string]any{"request": req}),
+	})
+
+	releaseAgent, err := o.sems.Acquire(ctx, "agent:"+agent.Name, o.Concurrency.PerAgent)
+	if err != nil {
+		return model.ChatResponse{}, err
+	}
+	callStart := time.Now()
+	cctx, span := o.startSpan(ctx, "chat "+agent.Model,
+		attribute.String("gen_ai.operation.name", "chat"),
+		attribute.String("gen_ai.request.model", agent.Model),
+		attribute.String("agentloop.step_id", string(stepID)))
+	resp, err := o.chat(cctx, agent, req, Delta{RunID: runID, TaskID: taskID, StepID: stepID, Agent: agent.Name})
+	span.SetAttributes(
+		attribute.Int64("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
+		attribute.Int64("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
+		attribute.Int("agentloop.tool_calls", len(resp.ToolCalls)))
+	endSpan(span, err)
+	releaseAgent()
+	o.Metrics.Observe("agentloop_model_call_duration_seconds", time.Since(callStart).Seconds(), "model", agent.Model)
+	if err != nil {
+		o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "error")
+		return model.ChatResponse{}, fmt.Errorf("model: %w", err)
+	}
+	o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "ok")
+	o.Metrics.Add("agentloop_tokens_total", float64(resp.Usage.PromptTokens), "model", agent.Model, "type", "prompt")
+	o.Metrics.Add("agentloop_tokens_total", float64(resp.Usage.CompletionTokens), "model", agent.Model, "type", "completion")
+	o.Metrics.Add("agentloop_cost_units_total", float64(resp.Usage.CostUnits), "model", agent.Model)
+	usage := resp.Usage
+	usage.ModelCalls = 0
+	o.emit(ctx, core.Event{
+		TenantID:      in.TenantID,
+		SessionID:     in.SessionID,
+		RunID:         runID,
+		TaskID:        taskID,
+		StepID:        stepID,
+		Type:          core.EvModelCompleted,
+		Visibility:    core.VisibilityInternal,
+		Payload:       mustJSON(map[string]any{"usage": resp.Usage, "tool_calls": len(resp.ToolCalls)}),
+		HiddenPayload: mustJSON(map[string]any{"content": resp.Message.Content, "thinking": resp.Message.Thinking, "response": withoutRaw(resp)}),
+	})
+	commitErr := o.Budget.Commit(runID, usage)
+	o.persistUsage(ctx, in.TenantID, runID)
+	return resp, commitErr
+}
+
 func withoutRaw(r model.ChatResponse) model.ChatResponse {
 	r.Raw = nil
 	return r
@@ -1205,7 +1210,7 @@ func (o *Orchestrator) chat(ctx context.Context, agent Agent, req model.ChatRequ
 		return agent.Provider.Chat(ctx, req)
 	}
 	return s.ChatStream(ctx, req, func(md model.Delta) {
-		if md.Content != "" {
+		if md.Content != "" && d.TaskID != "" {
 			d.Content = md.Content
 			o.deltas.publish(d)
 		}
@@ -1284,32 +1289,6 @@ func (o *Orchestrator) systemEvent(ctx context.Context, in StartRunInput, runID 
 		Visibility: core.VisibilityInternal,
 		Payload:    mustJSON(payload),
 	})
-}
-
-// sessionHistory returns the session's last MaxHistoryMessages messages from
-// humans and from earlier runs; the current run's stage outputs reach agents
-// through prompt templates instead. Only messages a run wrote are assistant
-// turns, whatever role a client posted with.
-func (o *Orchestrator) sessionHistory(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID) ([]model.Message, error) {
-	stored, err := o.Store.ListMessages(ctx, tenant, session)
-	if err != nil {
-		return nil, err
-	}
-	var out []model.Message
-	for _, m := range stored {
-		if m.RunID == runID {
-			continue
-		}
-		role := model.RoleUser
-		if m.RunID != "" {
-			role = model.RoleAssistant
-		}
-		out = append(out, model.Message{Role: role, Content: m.Content})
-	}
-	if o.MaxHistoryMessages > 0 && len(out) > o.MaxHistoryMessages {
-		out = out[len(out)-o.MaxHistoryMessages:]
-	}
-	return out, nil
 }
 
 func (o *Orchestrator) failTask(ctx context.Context, tenant core.TenantID, taskID core.TaskID, err error) error {

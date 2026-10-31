@@ -34,6 +34,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -309,6 +310,7 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
+	messages = slices.DeleteFunc(messages, func(m store.MessageProjection) bool { return !externallyVisible(m.Visibility) })
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
 }
 

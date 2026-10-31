@@ -82,6 +82,9 @@ func main() {
 	for _, wf := range cfg.Workflows {
 		orch.Workflows[wf.Name] = wf
 	}
+	if cfg.Compaction != nil {
+		orch.Compaction = *cfg.Compaction
+	}
 	if n, err := orch.Recover(context.Background()); err != nil {
 		slog.Error("recover runs", "resumed", n, "err", err)
 	} else if n > 0 {

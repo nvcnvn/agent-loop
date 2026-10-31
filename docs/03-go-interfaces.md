@@ -177,9 +177,12 @@ type StepExecutor interface {
     ExecuteStep(ctx context.Context, step StepContext) (StepResult, error)
 }
 
-type Snapshotter interface {
-    ShouldSnapshot(ctx context.Context, runID core.RunID) (bool, error)
-    CreateSnapshot(ctx context.Context, request SnapshotRequest) (SnapshotResult, error)
+// Compaction (Orchestrator.Compaction) summarizes session history when a run starts.
+type Compaction struct {
+    Agent       string // writes the summary; empty disables compaction
+    MaxMessages int    // trigger: messages since the last summary
+    MaxTokens   int64  // trigger: their estimated tokens (characters / 4)
+    KeepRecent  int    // messages left verbatim after the summary
 }
 ```
 

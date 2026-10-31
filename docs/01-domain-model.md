@@ -329,21 +329,22 @@ Rules:
 
 ### Snapshot
 
-A `snapshot` is an auditable compaction artifact for context reconstruction.
-
-Important fields:
-- `snapshot_id`
-- `run_id`
-- `covers_event_sequence_from`
-- `covers_event_sequence_to`
-- `summary`
-- `model_call_ref`
-- `created_by_step_id`
+A `snapshot` summarizes a session's earlier messages so agents see the summary plus the recent
+messages instead of the whole history. It is a session message with role `snapshot` and `internal`
+visibility, written by the run that made it, whose content is:
+- `summary`: the text agents see first, as a user turn "Summary of the earlier conversation: …"
+- `through`: when the last summarized message was written; messages after it follow the summary
+- `messages`: how many messages the summary covers, across every earlier snapshot
 
 Rules:
-- Raw events are never deleted because a snapshot exists.
-- Replay may choose raw history or snapshot plus tail events.
-- Snapshot generation itself is a model/tool step with stored inputs and outputs.
+- A run compacts when it starts, if the messages after the latest snapshot exceed
+  `Compaction.MaxMessages` or `Compaction.MaxTokens` (characters / 4). The `Compaction.Agent`
+  folds the previous summary and all but the last `KeepRecent` messages into a new summary.
+- Raw messages and events are never deleted because a snapshot exists.
+- Generating a snapshot is a model call of the run, recorded like any other (request and response
+  in `model_call_*` events, counted against the run's budget), followed by `snapshot_created` with
+  the summary in its hidden payload. Re-executing the run replays it.
+- Clients never see snapshot messages; agents see the latest one.
 
 ### Artifact
 

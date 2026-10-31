@@ -101,8 +101,9 @@ Each session must preserve:
 - [ ] Artifacts produced during execution.
 
 Chat-style sessions require:
-- [x] Runs pass the session's prior messages to the model: human messages and earlier runs' agent
-  answers, the last `Orchestrator.MaxHistoryMessages` of them, between the instructions and the prompt.
+- [x] Runs pass the session's prior messages to the model: the latest history summary, then human
+  messages and earlier runs' agent answers written after it, the last `Orchestrator.MaxHistoryMessages`
+  of them, between the instructions and the prompt.
 - [ ] Posting a human message can start or continue a run.
 
 ### 5.2 Message Model
@@ -115,7 +116,7 @@ Support at least these message and event types:
 - [x] Tool call.
 - [x] Tool result.
 - [x] Approval request and approval result.
-- [ ] Snapshot.
+- [x] Snapshot (an internal session message holding a history summary, and `snapshot_created`).
 - [ ] Error event (failures appear only as a reason on the run state change).
 
 Requirements:
@@ -132,10 +133,13 @@ Requirements:
 Support snapshots that summarize earlier context to control token growth.
 
 Requirements:
-- [ ] Trigger snapshots by message count, token count, or workflow boundary.
-- [ ] Preserve the raw history even when summarized.
-- [ ] Make snapshot generation auditable.
-- [ ] Allow replay from raw history or from snapshot plus tail events.
+- [x] Trigger snapshots by message count or token count, checked at the start of each run
+  (`Orchestrator.Compaction`, or `compaction` in the `-config` file).
+- [ ] Compact within a run, when one task's tool loop grows its context.
+- [x] Preserve the raw history even when summarized.
+- [x] Make snapshot generation auditable (a recorded model call and `snapshot_created`).
+- [x] Allow replay from raw history (strict replay) or from snapshot plus tail (re-execution
+  replays the summarizing call and sees the same summary and tail).
 
 ### 5.4 Resumability and Replay
 

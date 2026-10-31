@@ -180,7 +180,7 @@ func (o *Orchestrator) replayOrchestrator(p model.Provider, tools tool.Executor)
 		agents = append(agents, a)
 	}
 	c := NewOrchestrator(o.Store, reg, agents)
-	c.Workflows, c.MaxLimits, c.MaxHistoryMessages, c.Concurrency = o.Workflows, o.MaxLimits, o.MaxHistoryMessages, o.Concurrency
+	c.Workflows, c.MaxLimits, c.MaxHistoryMessages, c.Concurrency, c.Compaction = o.Workflows, o.MaxLimits, o.MaxHistoryMessages, o.Concurrency, o.Compaction
 	c.Policy = o.Policy
 	c.Policy.ApprovalRequired = nil
 	c.Log, c.Tracer = o.Log, o.Tracer

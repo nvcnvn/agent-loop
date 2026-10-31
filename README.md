@@ -37,6 +37,7 @@ The recommended first vertical slice from
 | Loop / stall detector; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Workflows as stage graphs (`depends_on`) with hand-backs to earlier stages, stop conditions, retries, stage/agent/tool timeouts, stage approval gates, and JSON Schema for input and stage outputs; agents delegating to child agents at runtime (`delegate` tool, depth-limited); agents and named workflow templates loaded from a JSON config | [runtime/workflow.go](runtime/workflow.go), [runtime/config.go](runtime/config.go) |
 | Orchestrator with session history passed to every agent, sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`), parallel tool calls for read-safe tools, resuming interrupted runs (also on startup), run queueing with backpressure, concurrency limits per tenant/workflow/agent/tool, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
+| Session history compaction: summaries of older messages by a configured agent, at the start of a run | [runtime/compaction.go](runtime/compaction.go) |
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
 | Re-execution of a finished run from its recorded model requests/responses and tool results (`POST /v1/runs/{rid}/reexecute`) | [runtime/reexecute.go](runtime/reexecute.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
@@ -46,7 +47,7 @@ The recommended first vertical slice from
 | HTTP server example: JSON logs (`log/slog`) to stdout, resumes unfinished runs at startup, graceful shutdown on SIGINT/SIGTERM (`-shutdown-timeout`) | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
 | Programmatic example: planner -> parallel researchers -> synthesizer + replay | [cmd/example-workflow/main.go](cmd/example-workflow/main.go) |
 
-Snapshot/compaction and pgvector memory are still doc-only. Both the in-memory store and the PostgreSQL driver implement
+pgvector memory is still doc-only. Both the in-memory store and the PostgreSQL driver implement
 the aggregate `store.Store` interface, so `runtime` and `api` are
 driver-agnostic.
 
