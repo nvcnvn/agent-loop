@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -190,6 +191,9 @@ func (w *world) try(in runtime.StartRunInput) (runtime.Result, []core.Event) {
 	events, err := w.store.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 10000)
 	if err != nil {
 		w.t.Fatal(err)
+	}
+	if again, _ := w.orch.ReExecute(ctx, core.DefaultTenant, runID); again.Status != res.Status || !maps.Equal(again.Outputs, res.Outputs) {
+		w.t.Errorf("re-execution diverged: status=%s reason=%s outputs=%v, original status=%s outputs=%v", again.Status, again.FailureReason, again.Outputs, res.Status, res.Outputs)
 	}
 	return res, events
 }

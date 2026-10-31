@@ -38,6 +38,7 @@ The recommended first vertical slice from
 | Workflows as stage graphs (`depends_on`) with hand-backs to earlier stages, stop conditions, retries, stage/agent/tool timeouts, stage approval gates, and JSON Schema for input and stage outputs; agents delegating to child agents at runtime (`delegate` tool, depth-limited); agents and named workflow templates loaded from a JSON config | [runtime/workflow.go](runtime/workflow.go), [runtime/config.go](runtime/config.go) |
 | Orchestrator with session history passed to every agent, sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`), parallel tool calls for read-safe tools, resuming interrupted runs (also on startup), run queueing with backpressure, concurrency limits per tenant/workflow/agent/tool, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
+| Re-execution of a finished run from its recorded model requests/responses and tool results (`POST /v1/runs/{rid}/reexecute`) | [runtime/reexecute.go](runtime/reexecute.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
 | Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
 | MCP tools: servers over stdio or streamable HTTP, tools discovered and translated at startup, auth headers from the environment, reconnects, retries of idempotent calls, a circuit breaker | [tool/mcp/mcp.go](tool/mcp/mcp.go) |
@@ -245,9 +246,9 @@ were resolved in code:
 4. **Loop / stall detector algorithm** — a simple sliding counter on
    `(tool, hash(input))` per run, configurable threshold. Verified by
    `TestLoopDetectorTripsOnRepeats`.
-5. **Replay scope** — strict replay (rebuild from events, verify
-   terminal state) is implemented for v1; provider-replay and tool-replay
-   remain doc-only.
+5. **Replay scope** — strict replay rebuilds the terminal state from
+   events; re-execution runs the run again on its recorded model and
+   tool outputs and fails on the first request that was never recorded.
 6. **Concurrent tool group ordering** — parallel-safe tool calls are
    dispatched concurrently but ordered by ordinal before reply messages
    are appended, so persisted history is deterministic.

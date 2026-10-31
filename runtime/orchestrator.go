@@ -54,6 +54,7 @@ type StartRunInput struct {
 	Metadata map[string]any
 
 	history []model.Message
+	parent  core.RunID
 	reuse   *completedTasks
 	plan    *plan
 }
@@ -246,6 +247,7 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		Status:         core.RunQueued,
 		Limits:         in.Limits,
 		IdempotencyKey: in.IdempotencyKey,
+		ParentRunID:    in.parent,
 		Workflow:       wfRaw,
 		Input:          inRaw,
 	}
@@ -1098,17 +1100,6 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			return "", err
 		}
 		stepID := core.StepID(core.NewID())
-		o.emit(ctx, core.Event{
-			TenantID:   in.TenantID,
-			SessionID:  in.SessionID,
-			RunID:      runID,
-			TaskID:     taskID,
-			StepID:     stepID,
-			Type:       core.EvModelStarted,
-			Visibility: core.VisibilityInternal,
-			Payload:    mustJSON(map[string]any{"model": agent.Model, "agent": agent.Name}),
-		})
-
 		req := model.ChatRequest{
 			TenantID:       in.TenantID,
 			RunID:          runID,
@@ -1118,6 +1109,20 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			Tools:          toolSpecs,
 			ResponseSchema: spec.rawSchema,
 		}
+		// ponytail: the whole request is stored per call, so a task's stored history
+		// grows quadratically with its tool loops; store deltas if that ever matters.
+		o.emit(ctx, core.Event{
+			TenantID:      in.TenantID,
+			SessionID:     in.SessionID,
+			RunID:         runID,
+			TaskID:        taskID,
+			StepID:        stepID,
+			Type:          core.EvModelStarted,
+			Visibility:    core.VisibilityInternal,
+			Payload:       mustJSON(map[string]any{"model": agent.Model, "agent": agent.Name}),
+			HiddenPayload: mustJSON(map[string]any{"request": req}),
+		})
+
 		releaseAgent, err := o.sems.Acquire(ctx, "agent:"+agent.Name, o.Concurrency.PerAgent)
 		if err != nil {
 			return "", err
@@ -1154,7 +1159,7 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			Type:          core.EvModelCompleted,
 			Visibility:    core.VisibilityInternal,
 			Payload:       mustJSON(map[string]any{"usage": resp.Usage, "tool_calls": len(resp.ToolCalls)}),
-			HiddenPayload: mustJSON(map[string]any{"content": resp.Message.Content, "thinking": resp.Message.Thinking}),
+			HiddenPayload: mustJSON(map[string]any{"content": resp.Message.Content, "thinking": resp.Message.Thinking, "response": withoutRaw(resp)}),
 		})
 		commitErr := o.Budget.Commit(runID, usage)
 		o.persistUsage(ctx, in.TenantID, runID)
@@ -1186,6 +1191,11 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 		return content, nil
 	}
 	return "", fmt.Errorf("agent %s exceeded MaxToolLoops=%d", agent.Name, agent.MaxToolLoops)
+}
+
+func withoutRaw(r model.ChatResponse) model.ChatResponse {
+	r.Raw = nil
+	return r
 }
 
 // chat streams the reply to delta subscribers when the provider can stream.

@@ -416,4 +416,13 @@ func TestPg_EndToEndRunOverREST(t *testing.T) {
 	if r.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", r.StatusCode)
 	}
+
+	// Re-execution reads the stored requests and responses back out of Postgres.
+	again, err := orch.ReExecute(wctx, core.DefaultTenant, rresp.RunID)
+	if err != nil || again.Outputs["s"] != "hello pg" {
+		t.Fatalf("re-execute: %+v err=%v", again, err)
+	}
+	if copyRun, err := s.GetRun(wctx, core.DefaultTenant, again.RunID); err != nil || copyRun.ParentRunID != rresp.RunID {
+		t.Fatalf("copy parent=%q err=%v", copyRun.ParentRunID, err)
+	}
 }

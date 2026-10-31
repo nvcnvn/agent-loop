@@ -229,19 +229,25 @@ Usage reports prompt, completion and cached tokens. The OpenAI adapter prices th
 
 ### 7. Replay Contract
 
-Define what deterministic replay means for v1:
-- strict replay: use stored model/tool outputs and verify state transitions
-- provider replay: re-call model provider with stored inputs for comparison
-- tool replay: re-run idempotent tools only
+A run stores what replaying it needs: its workflow, input, limits and input images; each model
+call's full request (messages, tools, schema, parameters) in `model_call_started.hidden_payload.request`
+and response in `model_call_completed.hidden_payload.response`; each tool call's input
+(`tool_call_scheduled`) and output or error (`tool_call_completed`); and the event order.
 
-Replay should store:
-- model inputs and outputs
-- tool inputs and outputs
-- workflow and agent definition versions
-- policy decisions
-- budget reservations and commits
-- random seeds when used
-- event ordering
+Two kinds of replay use them:
+- **Strict replay** (`runtime.Replay`) rebuilds the run's terminal state from its events and checks
+  it against the stored run.
+- **Re-execution** (`Orchestrator.ReExecute`, `POST /v1/runs/{rid}/reexecute`) runs the run again
+  through the current runtime, as a child run (`parent_run_id`) in a new session that holds the
+  history the original saw. Every model call is answered with the response recorded for an
+  identical request, and every tool call with the result recorded for the same tool and input, in
+  recorded order; approvals are not asked again, since their outcome is in the recorded result.
+  The copy ends like the original unless the runtime now builds different requests or treats the
+  same responses differently; a request that was never recorded fails the copy with
+  `model.ErrNoFixture`, naming the request. A run recorded before requests were stored answers 422
+  (`runtime.ErrNotRecorded`); one that has not finished answers 409.
+
+Not yet stored: agent definition versions, budget reservations, and random seeds.
 
 ### 8. Policy and Budget Contract
 
@@ -369,6 +375,9 @@ Each error should include:
 
 1. Store every model input/output, tool input/output, and policy decision for a run.
 2. Replay from raw events and verify the same terminal state.
+2a. Re-execute a run from its recorded model and tool outputs and reach the same result
+    (`TestReExecuteReproducesRun`, and every scenario re-executes its runs); a changed prompt
+    fails the copy (`TestReExecuteDetectsDivergence`).
 3. Replay from snapshot plus tail events and verify the same terminal state.
 4. Detect replay mismatch when a stored tool result differs from a recomputed result.
 

@@ -901,3 +901,50 @@ func FuzzRESTBodies(f *testing.F) {
 		}
 	})
 }
+
+func TestReExecuteEndpoint(t *testing.T) {
+	srv, orch, s := newTestServer(t)
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{
+		{Name: "s", Agents: []runtime.AgentStep{{Name: "echo", Prompt: "x"}}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/runs/"+string(runID)+"/reexecute", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res runtime.Result
+	_ = json.NewDecoder(resp.Body).Decode(&res)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || res.Status != core.RunSucceeded || res.Outputs["s"] != "hello world" || res.RunID == runID {
+		t.Fatalf("status=%d result=%+v", resp.StatusCode, res)
+	}
+
+	for _, tenant := range []string{"", "00000000-0000-0000-0000-0000000000bb"} {
+		path := "/v1/runs/" + string(runID) + "/reexecute"
+		if tenant == "" {
+			path = "/v1/runs/missing/reexecute"
+		}
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+path, nil)
+		if tenant != "" {
+			req.Header.Set("X-Tenant-ID", tenant)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("POST %s tenant=%q status=%d want 404", path, tenant, resp.StatusCode)
+		}
+	}
+}

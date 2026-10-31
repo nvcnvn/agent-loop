@@ -144,8 +144,9 @@ The framework must:
 - [ ] Retry failed steps safely.
 - [x] Replay a run for debugging by rebuilding its terminal state from stored events.
 - [x] Store the workflow, input, limits, tool inputs and outputs, and model output for each run.
-- [ ] Store model requests (messages, tools, parameters).
-- [ ] Re-execute a run deterministically using recorded model and tool outputs.
+- [x] Store model requests (messages, tools, parameters).
+- [x] Re-execute a run deterministically using recorded model and tool outputs (`Orchestrator.ReExecute`,
+  `POST /v1/runs/{rid}/reexecute`).
 
 ## 6. Tool Calling
 

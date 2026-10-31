@@ -73,6 +73,11 @@ func LoadReplayer(path string) (*Replayer, error) {
 	if err := json.Unmarshal(buf, &exchanges); err != nil {
 		return nil, fmt.Errorf("replay: %s: %w", path, err)
 	}
+	return NewReplayer(exchanges)
+}
+
+// NewReplayer answers requests from exchanges, as LoadReplayer does.
+func NewReplayer(exchanges []Exchange) (*Replayer, error) {
 	r := &Replayer{pending: map[string][]ChatResponse{}}
 	for _, ex := range exchanges {
 		k, err := matchKey(ex.Request)

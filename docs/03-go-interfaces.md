@@ -156,7 +156,9 @@ type Orchestrator interface {
     StartRun(ctx context.Context, input core.RunInput) (core.RunHandle, error)
     ResumeRun(ctx context.Context, tenantID core.TenantID, runID core.RunID) error
     CancelRun(ctx context.Context, tenantID core.TenantID, runID core.RunID, reason string) error
-    ReplayRun(ctx context.Context, request ReplayRequest) (ReplayResult, error)
+    // ReExecute runs a finished run again as a child run, answering model and tool calls
+    // from its recorded outputs, and waits for the copy's result.
+    ReExecute(ctx context.Context, tenantID core.TenantID, runID core.RunID) (Result, error)
 }
 
 type Scheduler interface {
@@ -173,11 +175,6 @@ type AgentRunner interface {
 
 type StepExecutor interface {
     ExecuteStep(ctx context.Context, step StepContext) (StepResult, error)
-}
-
-type ReplayEngine interface {
-    BuildReplayPlan(ctx context.Context, request ReplayRequest) (ReplayPlan, error)
-    ExecuteReplay(ctx context.Context, plan ReplayPlan) (ReplayResult, error)
 }
 
 type Snapshotter interface {

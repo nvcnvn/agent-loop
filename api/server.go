@@ -12,6 +12,7 @@
 //	GET    /v1/runs/{rid}/stream     (SSE; honours Last-Event-ID; ?deltas=1 adds reply deltas)
 //	POST   /v1/runs/{rid}/cancel
 //	POST   /v1/runs/{rid}/resume
+//	POST   /v1/runs/{rid}/reexecute  (replays recorded model and tool outputs; waits)
 //	POST   /v1/approvals/{aid}
 //	GET    /healthz                  (liveness)
 //	GET    /readyz                   (readiness: the store answers a ping)
@@ -115,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc(streamRoute, s.streamEvents)
 	mux.HandleFunc("POST /v1/runs/{rid}/cancel", s.cancelRun)
 	mux.HandleFunc("POST /v1/runs/{rid}/resume", s.resumeRun)
+	mux.HandleFunc("POST /v1/runs/{rid}/reexecute", s.reExecuteRun)
 	mux.HandleFunc("POST /v1/approvals/{aid}", s.resolveApproval)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -446,6 +448,24 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// reExecuteRun answers with the copy's result, whatever its status; an error
+// means the copy could not start.
+func (s *Server) reExecuteRun(w http.ResponseWriter, r *http.Request) {
+	res, err := s.Orch.ReExecute(r.Context(), tenantOf(r), core.RunID(r.PathValue("rid")))
+	switch {
+	case res.RunID != "":
+		writeJSON(w, http.StatusOK, res)
+	case errors.Is(err, core.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, core.ErrConflict):
+		writeErr(w, http.StatusConflict, "conflict", err.Error())
+	case errors.Is(err, runtime.ErrNotRecorded):
+		writeErr(w, http.StatusUnprocessableEntity, "not_recorded", err.Error())
+	default:
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+	}
 }
 
 func (s *Server) resumeRun(w http.ResponseWriter, r *http.Request) {
