@@ -14,6 +14,7 @@
 //	POST   /v1/approvals/{aid}
 //	GET    /healthz                  (liveness)
 //	GET    /readyz                   (readiness: the store answers a ping)
+//	GET    /metrics                  (Prometheus text format)
 //
 // With Server.Debug set it also serves the debug console at / and /ui/, and:
 //
@@ -37,6 +38,7 @@ import (
 	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
+	"github.com/nvcnvn/agent-loop/observe"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 )
@@ -54,10 +56,12 @@ type Server struct {
 	MaxBodyBytes int64
 	// Log receives request and error logs; NewServer sets slog.Default().
 	Log *slog.Logger
+	// Metrics, when set, is served at /metrics and records HTTP requests; NewServer uses Orch.Metrics.
+	Metrics *observe.Metrics
 }
 
 func NewServer(orch *runtime.Orchestrator, s store.Store) *Server {
-	return &Server{Orch: orch, Store: s, MaxBodyBytes: 1 << 20, Log: slog.Default()}
+	return &Server{Orch: orch, Store: s, MaxBodyBytes: 1 << 20, Log: slog.Default(), Metrics: orch.Metrics}
 }
 
 // HTTPServer returns an http.Server for Handler with read and idle timeouts.
@@ -102,6 +106,9 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /readyz", s.readyz)
+	if s.Metrics != nil {
+		mux.Handle("GET /metrics", s.Metrics)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.MaxBodyBytes > 0 {
 			r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
@@ -109,6 +116,12 @@ func (s *Server) Handler() http.Handler {
 		started := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		mux.ServeHTTP(rec, r)
+		route := r.Pattern
+		if route == "" {
+			route = "unmatched"
+		}
+		s.Metrics.Observe("agentloop_http_request_duration_seconds", time.Since(started).Seconds(),
+			"route", route, "code", strconv.Itoa(rec.status))
 		s.Log.InfoContext(r.Context(), "http request",
 			"method", r.Method,
 			"path", r.URL.Path,

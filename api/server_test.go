@@ -53,6 +53,26 @@ func TestRequestsAreLogged(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpoint(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	defer srv.Close()
+	resp, err := srv.Client().Post(srv.URL+"/v1/sessions", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	resp, err = srv.Client().Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	want := `agentloop_http_request_duration_seconds_count{route="POST /v1/sessions",code="201"} 1`
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), want) {
+		t.Fatalf("status=%d, missing %q in:\n%s", resp.StatusCode, want, body)
+	}
+}
+
 func TestOversizedBodyRejected(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	defer srv.Close()

@@ -10,6 +10,7 @@ Package names are suggestions:
 - `tool`: native and MCP tool registries and executors
 - `policy`: authorization, budgets, approvals
 - `api`: REST/SSE adapters
+- `observe`: metrics
 
 ## Core Types
 
@@ -442,27 +443,36 @@ type Subscription interface {
 
 ## Observability
 
-Logs go to the `log/slog` loggers in `runtime.Orchestrator.Log` and `api.Server.Log`.
-`observe.Recorder` is the planned port for metrics and traces:
+Logs go to the `log/slog` loggers in `runtime.Orchestrator.Log` and `api.Server.Log`. Metrics go to
+an `*observe.Metrics` (a nil one records nothing) and are served at `GET /metrics` in the Prometheus
+text format:
 
 ```go
 package observe
 
-import (
-    "context"
+type Metrics struct{ /* counters, histograms, gauges */ }
 
-    "github.com/nvcnvn/agent-loop/core"
-)
-
-type Recorder interface {
-    RunStarted(ctx context.Context, runID core.RunID, attrs map[string]any)
-    RunEnded(ctx context.Context, runID core.RunID, status core.RunStatus, attrs map[string]any)
-    ModelCall(ctx context.Context, attrs ModelCallAttrs)
-    ToolCall(ctx context.Context, attrs ToolCallAttrs)
-    BudgetUsage(ctx context.Context, tenantID core.TenantID, usage core.Usage)
-    Error(ctx context.Context, err error, attrs map[string]any)
-}
+func New() *Metrics
+func (m *Metrics) Add(name string, v float64, labels ...string)     // counter
+func (m *Metrics) Observe(name string, v float64, labels ...string) // histogram, seconds buckets
+func (m *Metrics) Gauge(name string, f func() float64)              // read at scrape
+func (m *Metrics) ServeHTTP(w http.ResponseWriter, r *http.Request)
 ```
+
+| Metric | Labels |
+| --- | --- |
+| `agentloop_runs_finished_total` | `status` |
+| `agentloop_run_duration_seconds` | |
+| `agentloop_runs_queued`, `agentloop_runs_executing` (gauges) | |
+| `agentloop_model_calls_total` | `model`, `outcome` (`ok`, `error`) |
+| `agentloop_model_call_duration_seconds` | `model` |
+| `agentloop_tokens_total` | `model`, `type` (`prompt`, `completion`) |
+| `agentloop_cost_units_total` | `model` |
+| `agentloop_tool_calls_total` | `tool` (`unknown` for calls to unregistered tools), `outcome` (`ok`, `error`; refused calls are errors) |
+| `agentloop_tool_call_duration_seconds` | `tool` |
+| `agentloop_http_request_duration_seconds` | `route` (mux pattern), `code` |
+
+Traces are not implemented.
 
 ## Implementation Notes
 

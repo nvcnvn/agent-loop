@@ -225,6 +225,19 @@ func TestRunsQueueThenOverload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for {
+		run, err := s.GetRun(ctx, core.DefaultTenant, first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status == core.RunRunning {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("first run never started")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	second, err := start(50 * time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -511,6 +524,50 @@ func TestWaitOnReleasedFailedRunMatchesLiveResult(t *testing.T) {
 	}
 	if liveErr == nil || storedErr == nil || liveErr.Error() != storedErr.Error() || !strings.Contains(storedErr.Error(), "provider down") {
 		t.Fatalf("liveErr=%v storedErr=%v", liveErr, storedErr)
+	}
+}
+
+// Acceptance: §Observability and Operations #2 – metrics.
+func TestRunMetrics(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{
+			{ID: "1", Name: "echo", Input: json.RawMessage(`{"text":"a"}`)},
+			{ID: "2", Name: "nope", Input: json.RawMessage(`{}`)},
+		}, Usage: core.Usage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13, CostUnits: 2}},
+		model.MockResponse{Content: "done", Usage: core.Usage{PromptTokens: 20, CompletionTokens: 5, TotalTokens: 25}},
+	)
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"echo"}}})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	orch.Metrics.WriteText(&b)
+	for _, want := range []string{
+		`agentloop_runs_finished_total{status="succeeded"} 1`,
+		`agentloop_run_duration_seconds_count 1`,
+		`agentloop_model_calls_total{model="m",outcome="ok"} 2`,
+		`agentloop_model_call_duration_seconds_count{model="m"} 2`,
+		`agentloop_tokens_total{model="m",type="prompt"} 30`,
+		`agentloop_tokens_total{model="m",type="completion"} 8`,
+		`agentloop_cost_units_total{model="m"} 2`,
+		`agentloop_tool_calls_total{tool="echo",outcome="ok"} 1`,
+		`agentloop_tool_calls_total{tool="unknown",outcome="error"} 1`,
+		`agentloop_tool_call_duration_seconds_count{tool="echo"} 1`,
+		"agentloop_runs_queued 0",
+		"agentloop_runs_executing 0",
+	} {
+		if !strings.Contains(b.String(), want+"\n") {
+			t.Fatalf("missing %q in:\n%s", want, b.String())
+		}
 	}
 }
 

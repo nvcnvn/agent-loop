@@ -308,7 +308,8 @@ Requirements:
 - [x] Structured logs (`log/slog`; `cmd/agent-loop` writes JSON to stdout): HTTP requests, run start and
   finish with usage, failed tool calls, and store writes that fail.
 - [ ] Traces across model calls, tool calls, and sub-agent boundaries.
-- [ ] **Blocker:** Metrics for latency, token use, cost, queue depth, failures, retries, and tool usage.
+- [x] Metrics for latency, token use, cost, queue depth, failures, and tool usage at `/metrics`
+  (Prometheus text; listed in docs/03). Nothing retries yet, so there is no retry metric.
 - [x] Audit trail of human messages and approvals in the event history.
 - [ ] Audit of run cancellations and of who resolved each approval.
 - [x] Run timeline view data model (events, tasks, and the debug console).

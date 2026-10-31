@@ -23,6 +23,7 @@ import (
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
+	"github.com/nvcnvn/agent-loop/observe"
 	"github.com/nvcnvn/agent-loop/policy"
 	"github.com/nvcnvn/agent-loop/store"
 	"github.com/nvcnvn/agent-loop/tool"
@@ -112,6 +113,9 @@ type Orchestrator struct {
 	MaxLimits core.Limits
 	// Log receives run lifecycle and error logs; NewOrchestrator sets slog.Default().
 	Log *slog.Logger
+	// Metrics records run, model and tool metrics; nil disables them. NewOrchestrator registers
+	// the queue gauges on the instance it creates.
+	Metrics *observe.Metrics
 	// ApprovalTimeout is how long a tool approval stays open; zero or less means it never expires.
 	ApprovalTimeout time.Duration
 	// MaxActiveRuns caps how many runs execute at once (zero means no cap); read at the first StartRun.
@@ -127,13 +131,14 @@ type Orchestrator struct {
 	// IdleWarnAfter is how long a run may go without an event before it gets an idle_wait diagnostic; zero disables it.
 	IdleWarnAfter time.Duration
 
-	mu       sync.Mutex
-	runs     map[core.RunID]*runState
-	inflight int // admitted runs, from admit until queueAndExecute returns
-	capacity int // MaxActiveRuns+MaxQueuedRuns when slots was made
-	slots    chan struct{}
-	queued   atomic.Int64
-	sems     policy.Semaphores
+	mu        sync.Mutex
+	runs      map[core.RunID]*runState
+	inflight  int // admitted runs, from admit until queueAndExecute returns
+	capacity  int // MaxActiveRuns+MaxQueuedRuns when slots was made
+	slots     chan struct{}
+	queued    atomic.Int64
+	executing atomic.Int64
+	sems      policy.Semaphores
 }
 
 type runState struct {
@@ -163,7 +168,8 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		}
 		am[a.Name] = a
 	}
-	return &Orchestrator{
+	o := &Orchestrator{
+		Metrics:            observe.New(),
 		Store:              s,
 		Tools:              reg,
 		Agents:             am,
@@ -189,6 +195,9 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		},
 		runs: map[core.RunID]*runState{},
 	}
+	o.Metrics.Gauge("agentloop_runs_queued", func() float64 { return float64(o.QueuedRuns()) })
+	o.Metrics.Gauge("agentloop_runs_executing", func() float64 { return float64(o.executing.Load()) })
+	return o
 }
 
 // StartRun creates a run record and begins executing the workflow in a
@@ -282,6 +291,8 @@ func (o *Orchestrator) queueAndExecute(ctx context.Context, runID core.RunID, in
 	if err == nil {
 		defer releaseSlots()
 	}
+	o.executing.Add(1)
+	defer o.executing.Add(-1)
 	o.execute(ctx, runID, in, st)
 }
 
@@ -498,6 +509,8 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	if finalStatus == core.RunFailed {
 		level = slog.LevelWarn
 	}
+	o.Metrics.Add("agentloop_runs_finished_total", 1, "status", string(finalStatus))
+	o.Metrics.Observe("agentloop_run_duration_seconds", usage.Runtime.Seconds())
 	log.Log(ctx, level, "run finished",
 		"status", finalStatus,
 		"failure_reason", failureReason,
@@ -742,11 +755,18 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 		if err != nil {
 			return "", o.failTask(ctx, in.TenantID, taskID, err)
 		}
+		callStart := time.Now()
 		resp, err := agent.Provider.Chat(ctx, req)
 		releaseAgent()
+		o.Metrics.Observe("agentloop_model_call_duration_seconds", time.Since(callStart).Seconds(), "model", agent.Model)
 		if err != nil {
+			o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "error")
 			return "", o.failTask(ctx, in.TenantID, taskID, fmt.Errorf("model: %w", err))
 		}
+		o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "ok")
+		o.Metrics.Add("agentloop_tokens_total", float64(resp.Usage.PromptTokens), "model", agent.Model, "type", "prompt")
+		o.Metrics.Add("agentloop_tokens_total", float64(resp.Usage.CompletionTokens), "model", agent.Model, "type", "completion")
+		o.Metrics.Add("agentloop_cost_units_total", float64(resp.Usage.CostUnits), "model", agent.Model)
 		usage := resp.Usage
 		usage.ModelCalls = 0
 		o.emit(ctx, core.Event{
@@ -1121,7 +1141,9 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		Visibility: core.VisibilityInternal,
 		Payload:    mustJSON(map[string]any{"tool": call.Tool.Name}),
 	})
+	callStart := time.Now()
 	res, err := safeExecute(ctx, exec, call)
+	o.Metrics.Observe("agentloop_tool_call_duration_seconds", time.Since(callStart).Seconds(), "tool", call.Tool.Name)
 	if err != nil {
 		if ctx.Err() != nil {
 			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err)
@@ -1129,6 +1151,7 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		}
 		return o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err), nil
 	}
+	o.Metrics.Add("agentloop_tool_calls_total", 1, "tool", call.Tool.Name, "outcome", "ok")
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
 		SessionID:  session,
@@ -1158,6 +1181,12 @@ func safeExecute(ctx context.Context, exec tool.Executor, call tool.Call) (res t
 
 func (o *Orchestrator) toolFailed(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, tc model.ToolCall, err error) model.Message {
 	o.Log.WarnContext(ctx, "tool call failed", "run_id", runID, "task_id", taskID, "tool", call.Tool.Name, "err", err)
+	// A refused call's name comes from model output, so it must not become a label value.
+	label := call.Tool.Name
+	if call.Tool.ID == "" {
+		label = "unknown"
+	}
+	o.Metrics.Add("agentloop_tool_calls_total", 1, "tool", label, "outcome", "error")
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
 		SessionID:  session,
