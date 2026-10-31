@@ -190,6 +190,40 @@ func TestParallelSubAgentBudgetReservesWholeStage(t *testing.T) {
 	}
 }
 
+func TestStartRunCapsClientLimits(t *testing.T) {
+	pa := model.NewMockProvider(model.MockResponse{Content: "A"})
+	pb := model.NewMockProvider(model.MockResponse{Content: "B"})
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "a", Model: "m", Provider: pa},
+		{Name: "b", Model: "m", Provider: pb},
+	})
+	orch.MaxLimits = core.Limits{MaxToolCalls: 8, MaxRuntime: time.Minute}
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name:   "fan",
+			Kind:   runtime.StageParallel,
+			Agents: []runtime.AgentStep{{Name: "a", Prompt: "x"}, {Name: "b", Prompt: "y"}},
+		}}},
+		Limits: core.Limits{MaxToolCalls: 1 << 30, MaxRuntime: 1000 * time.Hour, MaxConcurrent: -1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, runID); err != nil || res.Status != core.RunSucceeded {
+		t.Fatalf("status=%s err=%v", res.Status, err)
+	}
+	run, err := s.GetRun(ctx, core.DefaultTenant, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Limits.MaxToolCalls != 8 || run.Limits.MaxRuntime != time.Minute || run.Limits.MaxConcurrent <= 0 {
+		t.Fatalf("limits not capped: %+v", run.Limits)
+	}
+}
+
 // Acceptance: §Tool Calling #4 – parallel read-only tool calls fan in.
 func TestParallelToolCalls(t *testing.T) {
 	// Model first asks for two parallel echo calls, then returns final answer.

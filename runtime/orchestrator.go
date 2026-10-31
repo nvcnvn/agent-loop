@@ -104,6 +104,8 @@ type Orchestrator struct {
 	Budget    *policy.BudgetManager
 	LoopDet   *policy.LoopDetector
 	Approvals store.ApprovalStore // typically the same Store
+	// MaxLimits caps the limits a caller may request for a run.
+	MaxLimits core.Limits
 
 	mu   sync.Mutex
 	runs map[core.RunID]*runState
@@ -140,7 +142,18 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		Budget:    policy.NewBudgetManager(),
 		LoopDet:   policy.NewLoopDetector(5),
 		Approvals: s,
-		runs:      map[core.RunID]*runState{},
+		MaxLimits: core.Limits{
+			MaxDepth:      8,
+			MaxSubAgents:  64,
+			MaxConcurrent: 16,
+			MaxToolCalls:  256,
+			MaxModelCalls: 256,
+			MaxRuntime:    time.Hour,
+			// Cost stays uncapped until a provider reports it.
+			MaxPromptTokens:     4_000_000,
+			MaxCompletionTokens: 1_000_000,
+		},
+		runs: map[core.RunID]*runState{},
 	}
 }
 
@@ -156,6 +169,7 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 	if _, err := o.Store.GetSession(ctx, in.TenantID, in.SessionID); err != nil {
 		return "", fmt.Errorf("session: %w", err)
 	}
+	in.Limits = in.Limits.Defaults().Cap(o.MaxLimits)
 
 	if in.IdempotencyKey != "" {
 		if existing, err := o.Store.FindByIdempotency(ctx, in.TenantID, in.IdempotencyKey); err == nil {
@@ -170,7 +184,7 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		TenantID:       in.TenantID,
 		SessionID:      in.SessionID,
 		Status:         core.RunQueued,
-		Limits:         in.Limits.Defaults(),
+		Limits:         in.Limits,
 		IdempotencyKey: in.IdempotencyKey,
 		Workflow:       wfRaw,
 		Input:          inRaw,
@@ -181,10 +195,7 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 	}
 	o.Budget.Init(runID, in.Limits)
 
-	runCtx, cancel := context.WithCancel(context.Background())
-	if d := in.Limits.Defaults().MaxRuntime; d > 0 {
-		runCtx, cancel = context.WithTimeout(runCtx, d)
-	}
+	runCtx, cancel := context.WithTimeout(context.Background(), in.Limits.MaxRuntime)
 
 	st := &runState{tenant: in.TenantID, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
 	o.mu.Lock()
@@ -341,8 +352,7 @@ func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, i
 		priorCopy[k] = v
 	}
 
-	limits := in.Limits.Defaults()
-	sem := make(chan struct{}, limits.MaxConcurrent)
+	sem := make(chan struct{}, in.Limits.MaxConcurrent)
 	var wg sync.WaitGroup
 	for i, ag := range stage.Agents {
 		wg.Add(1)

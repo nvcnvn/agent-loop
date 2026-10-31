@@ -507,7 +507,7 @@ func FuzzRESTBodies(f *testing.F) {
 	f.Add(uint8(2), []byte(`{"decision":"approved","payload":{"x":1}}`))
 	f.Add(uint8(2), []byte(`{"decision":1}`))
 	f.Add(uint8(3), []byte(`{"session_id":"x","workflow":{"name":"wf","stages":[{"name":"a","kind":"sequential","agents":[{"name":"missing","prompt":"p"}]}]}}`))
-	f.Add(uint8(3), []byte(`{"session_id":"x","workflow":{"stages":[]},"limits":{"MaxToolCalls":-1}}`))
+	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","workflow":{"stages":[{"name":"a","kind":"parallel","agents":[{"name":"missing"}]}]},"limits":{"max_concurrent":-1,"max_tool_calls":-1}}`))
 	f.Fuzz(func(t *testing.T, which uint8, body []byte) {
 		path := paths[int(which)%len(paths)]
 		rec := httptest.NewRecorder()

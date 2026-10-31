@@ -141,27 +141,44 @@ type Limits struct {
 	MaxCostUnits        int64         `json:"max_cost_units,omitempty"`
 }
 
-// Defaults applies sensible non-zero defaults to unset fields.
+// Defaults replaces unset or negative fields; token and cost limits default to unlimited.
 func (l Limits) Defaults() Limits {
-	if l.MaxDepth == 0 {
-		l.MaxDepth = 4
-	}
-	if l.MaxSubAgents == 0 {
-		l.MaxSubAgents = 16
-	}
-	if l.MaxConcurrent == 0 {
-		l.MaxConcurrent = 4
-	}
-	if l.MaxToolCalls == 0 {
-		l.MaxToolCalls = 64
-	}
-	if l.MaxModelCalls == 0 {
-		l.MaxModelCalls = 64
-	}
-	if l.MaxRuntime == 0 {
-		l.MaxRuntime = 5 * time.Minute
-	}
+	defaultTo(&l.MaxDepth, 4)
+	defaultTo(&l.MaxSubAgents, 16)
+	defaultTo(&l.MaxConcurrent, 4)
+	defaultTo(&l.MaxToolCalls, 64)
+	defaultTo(&l.MaxModelCalls, 64)
+	defaultTo(&l.MaxRuntime, 5*time.Minute)
+	l.MaxPromptTokens = max(l.MaxPromptTokens, 0)
+	l.MaxCompletionTokens = max(l.MaxCompletionTokens, 0)
+	l.MaxCostUnits = max(l.MaxCostUnits, 0)
 	return l
+}
+
+// Cap lowers each field to ceiling's matching positive field.
+func (l Limits) Cap(ceiling Limits) Limits {
+	capAt(&l.MaxDepth, ceiling.MaxDepth)
+	capAt(&l.MaxSubAgents, ceiling.MaxSubAgents)
+	capAt(&l.MaxConcurrent, ceiling.MaxConcurrent)
+	capAt(&l.MaxToolCalls, ceiling.MaxToolCalls)
+	capAt(&l.MaxModelCalls, ceiling.MaxModelCalls)
+	capAt(&l.MaxRuntime, ceiling.MaxRuntime)
+	capAt(&l.MaxPromptTokens, ceiling.MaxPromptTokens)
+	capAt(&l.MaxCompletionTokens, ceiling.MaxCompletionTokens)
+	capAt(&l.MaxCostUnits, ceiling.MaxCostUnits)
+	return l
+}
+
+func defaultTo[T ~int | ~int64](v *T, d T) {
+	if *v <= 0 {
+		*v = d
+	}
+}
+
+func capAt[T ~int | ~int64](v *T, ceiling T) {
+	if ceiling > 0 && (*v <= 0 || *v > ceiling) {
+		*v = ceiling
+	}
 }
 
 type Usage struct {

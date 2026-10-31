@@ -48,7 +48,8 @@ The framework must:
 - [x] Enforce per-run limits on total spawned agents, sub-agent concurrency, tokens, runtime, model calls, and tool calls.
 - [ ] Enforce the recursion depth limit (`MaxDepth` is defined but nothing recurses yet).
 - [x] Allow per-run limits that override the defaults.
-- [ ] **Blocker:** Cap per-run limits at server-side maximums so a client cannot raise them without bound.
+- [x] Cap per-run limits at server-side maximums (`Orchestrator.MaxLimits`) so a client cannot raise them without bound.
+  Cost is not capped by default because no provider reports it yet.
 
 The framework should define a clear execution model:
 - `session`: long-lived collaboration container.

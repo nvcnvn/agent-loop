@@ -77,11 +77,14 @@ type Event struct {
     RecordedAt       time.Time
 }
 
+// Limits are requested per run. StartRun fills unset fields (Defaults) and
+// clamps every field to the server's Orchestrator.MaxLimits (Cap).
 type Limits struct {
     MaxDepth          int
     MaxSubAgents      int
     MaxConcurrent     int
     MaxToolCalls      int
+    MaxModelCalls     int
     MaxRuntime        time.Duration
     MaxPromptTokens   int64
     MaxCompletionTokens int64
