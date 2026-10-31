@@ -35,6 +35,31 @@ func newTestServer(t *testing.T) (*httptest.Server, *runtime.Orchestrator, store
 	return httptest.NewServer(srv.Handler()), orch, s
 }
 
+func TestOversizedBodyRejected(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	defer srv.Close()
+	body := `{"title":"` + strings.Repeat("x", 2<<20) + `"}`
+	resp, err := srv.Client().Post(srv.URL+"/v1/sessions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d want 413", resp.StatusCode)
+	}
+}
+
+func TestHTTPServerTimeouts(t *testing.T) {
+	s := store.NewMemStore()
+	hs := api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s).HTTPServer("")
+	if hs.ReadHeaderTimeout <= 0 || hs.ReadTimeout <= 0 || hs.IdleTimeout <= 0 {
+		t.Fatalf("missing timeouts: %+v", hs)
+	}
+	if hs.WriteTimeout != 0 {
+		t.Fatalf("WriteTimeout=%s would cut SSE streams", hs.WriteTimeout)
+	}
+}
+
 func TestDebugRoutesOffByDefault(t *testing.T) {
 	s := store.NewMemStore()
 	srv := httptest.NewServer(api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s).Handler())

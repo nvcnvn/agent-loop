@@ -47,10 +47,24 @@ type Server struct {
 	Store store.Store
 	// Debug serves the debug console and /v1/debug/*, which expose agent instructions.
 	Debug bool
+	// MaxBodyBytes caps request bodies (zero means no cap); larger ones get 413.
+	MaxBodyBytes int64
 }
 
 func NewServer(orch *runtime.Orchestrator, s store.Store) *Server {
-	return &Server{Orch: orch, Store: s}
+	return &Server{Orch: orch, Store: s, MaxBodyBytes: 1 << 20}
+}
+
+// HTTPServer returns an http.Server for Handler with read and idle timeouts.
+func (s *Server) HTTPServer(addr string) *http.Server {
+	// No WriteTimeout: SSE streams stay open for the whole run.
+	return &http.Server{
+		Addr:              addr,
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
 }
 
 // Handler returns an http.Handler with all v1 routes wired.
@@ -82,7 +96,12 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.MaxBodyBytes > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) debugConsole(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +154,14 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, errorResp{Code: code, Message: msg})
 }
 
+func writeDecodeErr(w http.ResponseWriter, err error) {
+	if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
+		writeErr(w, http.StatusRequestEntityTooLarge, "validation_error", err.Error())
+		return
+	}
+	writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
+}
+
 // tenantOf resolves the tenant ID from headers or returns the default.
 // Single-tenant deployments can ignore the header entirely.
 func tenantOf(r *http.Request) core.TenantID {
@@ -156,7 +183,7 @@ func principalOf(r *http.Request) core.PrincipalID {
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	var req createSessionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
+		writeDecodeErr(w, err)
 		return
 	}
 	id, err := s.Store.CreateSession(r.Context(), store.Session{
@@ -217,7 +244,7 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	var req postMessageReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
+		writeDecodeErr(w, err)
 		return
 	}
 	sid := core.SessionID(r.PathValue("sid"))
@@ -254,7 +281,7 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 	var req startRunReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
+		writeDecodeErr(w, err)
 		return
 	}
 	if req.SessionID == "" {
@@ -333,7 +360,7 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 		Payload  json.RawMessage `json:"payload"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
+		writeDecodeErr(w, err)
 		return
 	}
 	if req.Decision != "approved" && req.Decision != "rejected" {

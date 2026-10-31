@@ -310,7 +310,8 @@ Operational requirements:
 - [ ] **Blocker:** Readiness endpoint that checks the database.
 - [ ] **Blocker:** Backpressure handling (every run starts its own goroutine at once).
 - [ ] Configurable worker pool and queueing model.
-- [ ] **Blocker:** Server timeouts (read header, read, idle) and request body size limits.
+- [x] Server timeouts (read header, read, idle) and request body size limits (`api.Server.HTTPServer`,
+  `MaxBodyBytes`).
 - [ ] **Blocker:** Versioned schema migrations (`EnsureSchema` only creates missing objects).
 - [ ] **Blocker:** In-process state for finished runs is released (the run and budget maps grow without bound).
 - [ ] Run ownership by lease, so several API replicas can share one database.

@@ -57,7 +57,7 @@ func main() {
 	srv := api.NewServer(orch, persistence)
 	srv.Debug = *debug
 	log.Printf("agent-loop listening on %s", *addr)
-	if err := http.ListenAndServe(*addr, srv.Handler()); err != nil {
+	if err := srv.HTTPServer(*addr).ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
