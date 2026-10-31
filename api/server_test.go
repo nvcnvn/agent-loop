@@ -393,6 +393,36 @@ func TestCancelRunRejectsOtherTenant(t *testing.T) {
 	}
 }
 
+// Regression: the live part of a stream was not scoped to the caller's tenant.
+func TestSSEStreamRejectsOtherTenant(t *testing.T) {
+	s := store.NewMemStore()
+	gate := gatedProvider{release: make(chan struct{})}
+	defer close(gate.release)
+	orch := runtime.NewOrchestrator(s, tool.NewRegistry(), []runtime.Agent{{Name: "gated", Model: "m", Provider: gate}})
+	srv := httptest.NewServer(api.NewServer(orch, s).Handler())
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/runs/"+string(runID)+"/stream", nil)
+	req.Header.Set("X-Tenant-ID", "00000000-0000-0000-0000-0000000000bb")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-tenant stream status=%d want 404", resp.StatusCode)
+	}
+}
+
 func TestStartRunOverloaded(t *testing.T) {
 	s := store.NewMemStore()
 	gate := gatedProvider{release: make(chan struct{})}

@@ -537,6 +537,10 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	rid := core.RunID(r.PathValue("rid"))
 	tenant := tenantOf(r)
+	if _, err := s.Store.GetRun(r.Context(), tenant, rid); err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
