@@ -111,12 +111,18 @@ type Orchestrator struct {
 	Log *slog.Logger
 	// ApprovalTimeout is how long a tool approval stays open; zero or less means it never expires.
 	ApprovalTimeout time.Duration
+	// IdleWarnAfter is how long a run may go without an event before it gets an idle_wait diagnostic; zero disables it.
+	IdleWarnAfter time.Duration
 
 	mu   sync.Mutex
 	runs map[core.RunID]*runState
 }
 
 type runState struct {
+	activity  sync.Mutex
+	lastAt    time.Time
+	lastEvent string
+
 	tenant  core.TenantID
 	cancel  context.CancelFunc
 	done    chan struct{}
@@ -149,6 +155,7 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		Approvals:       s,
 		Log:             slog.Default(),
 		ApprovalTimeout: 15 * time.Minute,
+		IdleWarnAfter:   2 * time.Minute,
 		MaxLimits: core.Limits{
 			MaxDepth:      8,
 			MaxSubAgents:  64,
@@ -204,7 +211,7 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 
 	runCtx, cancel := context.WithTimeout(context.Background(), in.Limits.MaxRuntime)
 
-	st := &runState{tenant: in.TenantID, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
+	st := &runState{lastAt: time.Now(), tenant: in.TenantID, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
 	o.mu.Lock()
 	o.runs[runID] = st
 	o.mu.Unlock()
@@ -253,6 +260,13 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	log := o.Log.With("run_id", runID, "tenant_id", in.TenantID, "session_id", in.SessionID)
 	log.InfoContext(ctx, "run started", "workflow", in.Workflow.Name)
 	o.transitionRun(ctx, runID, in.TenantID, core.RunRunning, "")
+	stopIdleWatch := func() {}
+	if o.IdleWarnAfter > 0 {
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() { o.watchIdle(ctx, stop, log, runID, in, st) })
+		stopIdleWatch = func() { close(stop); wg.Wait() }
+	}
 
 	stageOutputs := map[string]string{}
 	var finalErr error
@@ -286,6 +300,8 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 
 	usage := o.Budget.Snapshot(runID)
 	usage.Runtime = time.Since(startedAt)
+
+	stopIdleWatch()
 
 	// Persist final state.
 	if cur, err := o.Store.GetRun(context.Background(), in.TenantID, runID); err == nil {
@@ -955,11 +971,56 @@ func (o *Orchestrator) transitionRun(ctx context.Context, runID core.RunID, tena
 }
 
 func (o *Orchestrator) emit(ctx context.Context, ev core.Event) {
+	o.appendEvent(ctx, ev)
+	o.mu.Lock()
+	st := o.runs[ev.RunID]
+	o.mu.Unlock()
+	if st != nil {
+		st.activity.Lock()
+		st.lastAt, st.lastEvent = time.Now(), ev.Type
+		st.activity.Unlock()
+	}
+}
+
+func (o *Orchestrator) appendEvent(ctx context.Context, ev core.Event) {
 	if ev.OccurredAt.IsZero() {
 		ev.OccurredAt = time.Now().UTC()
 	}
 	_, err := o.Store.Append(ctx, []core.Event{ev})
 	o.logErr(ctx, "append event", err, "run_id", ev.RunID, "type", ev.Type)
+}
+
+// watchIdle emits an idle_wait diagnostic, without counting it as activity,
+// whenever the run has emitted nothing for IdleWarnAfter.
+func (o *Orchestrator) watchIdle(ctx context.Context, stop <-chan struct{}, log *slog.Logger, runID core.RunID, in StartRunInput, st *runState) {
+	timer := time.NewTimer(o.IdleWarnAfter)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-timer.C:
+		}
+		st.activity.Lock()
+		idle, last := time.Since(st.lastAt), st.lastEvent
+		st.activity.Unlock()
+		if idle < o.IdleWarnAfter {
+			timer.Reset(o.IdleWarnAfter - idle)
+			continue
+		}
+		log.WarnContext(ctx, "run idle", "idle_for", idle, "last_event", last)
+		o.appendEvent(ctx, core.Event{
+			TenantID:   in.TenantID,
+			SessionID:  in.SessionID,
+			RunID:      runID,
+			Type:       core.EvSystem,
+			Visibility: core.VisibilityInternal,
+			Payload:    mustJSON(map[string]any{"event": "idle_wait", "idle_for": idle.String(), "last_event": last}),
+		})
+		timer.Reset(o.IdleWarnAfter)
+	}
 }
 
 func mustJSON(v any) json.RawMessage {

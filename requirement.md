@@ -268,10 +268,11 @@ The framework must detect runaway behavior such as:
 - [ ] Repeated near-identical messages.
 - [ ] Excessive delegation without progress.
 - [ ] Retry storms.
-- [ ] **Blocker:** Long idle waits, including approvals that are never resolved.
+- [x] Long idle waits: a run with no events for `Orchestrator.IdleWarnAfter` gets an `idle_wait`
+  diagnostic event and a warning log naming the last event; unresolved approvals expire (§9.3).
 
 Responses may include:
-- [ ] Warn.
+- [x] Warn (idle waits).
 - [ ] Pause run.
 - [ ] Request human approval.
 - [x] Fail run with diagnostic reason.

@@ -30,7 +30,7 @@ The recommended first vertical slice from
 | Native Go tool registry + builtin demo tools (`echo`, `uppercase`, `math.add`) | [tool/tool.go](tool/tool.go) |
 | Tool policy (allow / deny / approval) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost) | [policy/policy.go](policy/policy.go) |
-| Loop / stall detector | [policy/loop.go](policy/loop.go) |
+| Loop / stall detector; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Orchestrator with sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`), parallel tool calls for read-safe tools, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |

@@ -908,6 +908,48 @@ func TestCancelIgnoresOtherTenant(t *testing.T) {
 	}
 }
 
+// Acceptance: §Budget and Safety #5 – long idle wait emits a diagnostic event.
+func TestIdleWaitEmitsDiagnostic(t *testing.T) {
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "slow", Model: "m", Provider: &slowProvider{delay: 300 * time.Millisecond}}})
+	orch.IdleWarnAfter = 50 * time.Millisecond
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "slow", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, runID); err != nil {
+		t.Fatalf("status=%s err=%v", res.Status, err)
+	}
+	events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var idleWaits int
+	for i, ev := range events {
+		var p struct {
+			Event     string
+			LastEvent string `json:"last_event"`
+		}
+		_ = json.Unmarshal(ev.Payload, &p)
+		if ev.Type == core.EvSystem && p.Event == "idle_wait" {
+			idleWaits++
+			if p.LastEvent != core.EvModelStarted {
+				t.Fatalf("idle_wait last_event=%q want %s", p.LastEvent, core.EvModelStarted)
+			}
+		}
+		if i == len(events)-1 && ev.Type != core.EvRunStateChanged {
+			t.Fatalf("last event is %s, want the terminal run_state_changed", ev.Type)
+		}
+	}
+	if idleWaits == 0 {
+		t.Fatal("no idle_wait event")
+	}
+}
+
 type slowProvider struct{ delay time.Duration }
 
 func (s *slowProvider) Name() string { return "slow" }
