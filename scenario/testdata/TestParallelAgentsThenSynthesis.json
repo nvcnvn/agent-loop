@@ -1,0 +1,428 @@
+[
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the uppercase tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Uppercase the text: agent loop"
+        }
+      ],
+      "tools": [
+        {
+          "name": "uppercase",
+          "description": "Return the uppercase version of the provided text.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "The user wants to uppercase the text \"agent loop\".\nI have a tool named `uppercase` which can perform this action.\nI need to call the `uppercase` tool with the argument `text=\"agent loop\"`.\u003cchannel|\u003e",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "uppercase",
+            "input": {
+              "text": "agent loop"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "uppercase",
+          "input": {
+            "text": "agent loop"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 82,
+        "completion_tokens": 65,
+        "cached_tokens": 0,
+        "total_tokens": 147,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T09:47:52.767051545Z",
+        "message": {
+          "role": "assistant",
+          "content": "The user wants to uppercase the text \"agent loop\".\nI have a tool named `uppercase` which can perform this action.\nI need to call the `uppercase` tool with the argument `text=\"agent loop\"`.\u003cchannel|\u003e",
+          "tool_calls": [
+            {
+              "id": "call_am9xgcs8",
+              "function": {
+                "index": 0,
+                "name": "uppercase",
+                "arguments": {
+                  "text": "agent loop"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1552013459,
+        "load_duration": 1408833,
+        "prompt_eval_count": 82,
+        "prompt_eval_cached_count": 0,
+        "prompt_eval_duration": 428329000,
+        "eval_count": 65,
+        "eval_duration": 1119521000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the math.add tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Add 2 and 3."
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "math.add",
+            "input": {
+              "a": 2,
+              "b": 3
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "math.add",
+          "input": {
+            "a": 2,
+            "b": 3
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 98,
+        "completion_tokens": 196,
+        "cached_tokens": 0,
+        "total_tokens": 294,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T09:47:55.712385838Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Analyze the user's request:** The user wants to add two numbers, 2 and 3.\n\n2. **Identify the required tool:** The available tool is `math.add`, which takes two numbers, `a` and `b`, and returns their sum.\n\n3. **Determine the arguments:**\n    * `a = 2`\n    * `b = 3`\n\n4. **Formulate the tool call:** `math.add(a=2, b=3)`\n\n5. **Execute the tool call (Mental simulation or actual execution):**\n    * `math.add(2, 3)` equals 5.\n\n6. **Format the output:** The instructions require *only* the result value of the tool call.\n\n7. **Final Output Generation:** Return `5`.",
+          "tool_calls": [
+            {
+              "id": "call_6ku5a8ey",
+              "function": {
+                "index": 0,
+                "name": "math.add",
+                "arguments": {
+                  "a": 2,
+                  "b": 3
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 4498588877,
+        "load_duration": 2461833,
+        "prompt_eval_count": 98,
+        "prompt_eval_cached_count": 0,
+        "prompt_eval_duration": 293028000,
+        "eval_count": 196,
+        "eval_duration": 2648334000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the uppercase tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Uppercase the text: agent loop"
+        },
+        {
+          "role": "assistant",
+          "content": "The user wants to uppercase the text \"agent loop\".\nI have a tool named `uppercase` which can perform this action.\nI need to call the `uppercase` tool with the argument `text=\"agent loop\"`.\u003cchannel|\u003e",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "uppercase",
+              "input": {
+                "text": "agent loop"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"text\":\"AGENT LOOP\"}",
+          "name": "uppercase",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "uppercase",
+          "description": "Return the uppercase version of the provided text.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "AGENT LOOP"
+      },
+      "usage": {
+        "prompt_tokens": 164,
+        "completion_tokens": 68,
+        "cached_tokens": 0,
+        "total_tokens": 232,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T09:47:57.401722547Z",
+        "message": {
+          "role": "assistant",
+          "content": "AGENT LOOP",
+          "thinking": "The user has asked me to uppercase the text \"agent loop\".\nI have already called the `uppercase` tool in the previous turn with the input \"agent loop\".\nThe tool returned `{\"text\":\"AGENT LOOP\"}`.\nNow I need to provide the final result based on the tool's output."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 4631664794,
+        "load_duration": 1073708,
+        "prompt_eval_count": 164,
+        "prompt_eval_cached_count": 77,
+        "prompt_eval_duration": 481287000,
+        "eval_count": 68,
+        "eval_duration": 1203500000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the math.add tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Add 2 and 3."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "math.add",
+              "input": {
+                "a": 2,
+                "b": 3
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"sum\":5}",
+          "name": "math.add",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "5"
+      },
+      "usage": {
+        "prompt_tokens": 135,
+        "completion_tokens": 71,
+        "cached_tokens": 0,
+        "total_tokens": 206,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T09:47:58.524138172Z",
+        "message": {
+          "role": "assistant",
+          "content": "5",
+          "thinking": "The user wants to add 2 and 3.\nI have already called the `math.add` tool with `a=2` and `b=3`.\nThe tool returned the result: `{\"sum\":5}`.\nThe required response is only the result value.\nTherefore, I will return 5."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 2810042626,
+        "load_duration": 2010167,
+        "prompt_eval_count": 135,
+        "prompt_eval_cached_count": 93,
+        "prompt_eval_duration": 118187000,
+        "eval_count": 71,
+        "eval_duration": 1000413000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are terse."
+        },
+        {
+          "role": "user",
+          "content": "Repeat these results on one line:\nshouter=AGENT LOOP\nadder=5"
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "shouter=AGENT LOOP, adder=5"
+      },
+      "usage": {
+        "prompt_tokens": 37,
+        "completion_tokens": 10,
+        "cached_tokens": 0,
+        "total_tokens": 47,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T09:47:58.749296089Z",
+        "message": {
+          "role": "assistant",
+          "content": "shouter=AGENT LOOP, adder=5"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 224542792,
+        "load_duration": 1654083,
+        "prompt_eval_count": 37,
+        "prompt_eval_cached_count": 0,
+        "prompt_eval_duration": 92908000,
+        "eval_count": 10,
+        "eval_duration": 127363000
+      }
+    }
+  }
+]

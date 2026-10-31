@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/nvcnvn/agent-loop/core"
-	"github.com/nvcnvn/agent-loop/tool"
 )
 
 // ToolPolicy is the per-run policy applied to tool calls.
@@ -18,7 +17,7 @@ type ToolPolicy struct {
 	ApprovalRequired []string // tool names requiring approval
 }
 
-func (p ToolPolicy) Authorize(t tool.Definition) (allowed bool, requiresApproval bool, reason string) {
+func (p ToolPolicy) Authorize(t core.ToolDefinition) (allowed bool, requiresApproval bool, reason string) {
 	for _, d := range p.Denylist {
 		if d == t.Name {
 			return false, false, "tool in denylist"

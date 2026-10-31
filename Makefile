@@ -1,7 +1,8 @@
 SHELL := /bin/sh
 
 DOCKER_COMPOSE ?= docker compose -f docker-compose.test.yml
-OLLAMA_MODEL ?= gemma4:latest
+OLLAMA_MODEL ?= gemma4:e2b-it-qat
+FUZZTIME ?= 30s
 OLLAMA_TIMEOUT_SECONDS ?= 900
 AGENT_LOOP_REST_TIMEOUT ?= 900
 LOCAL_API_ADDR ?= :8080
@@ -13,10 +14,14 @@ HOST_DOCKER_OLLAMA_URL ?= http://host.docker.internal:11434
 
 .DEFAULT_GOAL := help
 
-.PHONY: help pg-up pg-down ollama-up ollama-down stack-down api-local-docker-ollama api-local-host-ollama test-local test-stack-docker-ollama test-stack-host-ollama
+.PHONY: help test fuzz record-docker-ollama record-host-ollama pg-up pg-down ollama-up ollama-down stack-down api-local-docker-ollama api-local-host-ollama test-local test-stack-docker-ollama test-stack-host-ollama
 
 help:
 	@printf '%s\n' \
+	  'test                     Unit tests, fuzz seeds and fixture-replayed scenarios; no network' \
+	  'fuzz                     Fuzz every Fuzz* target for $(FUZZTIME) each' \
+	  'record-docker-ollama     Run ./scenario live against Dockerized Ollama and rewrite its fixtures' \
+	  'record-host-ollama       Run ./scenario live against host Ollama on localhost:11434 and rewrite its fixtures' \
 	  'api-local-docker-ollama  Start local API with Postgres + Dockerized Ollama on localhost:41434' \
 	  'api-local-host-ollama    Start local API with Postgres + host Ollama on localhost:11434' \
 	  'test-local               Run REST integration tests against a local API on localhost:8080' \
@@ -26,6 +31,25 @@ help:
 	  'ollama-up                Start Dockerized Ollama and pull $(OLLAMA_MODEL)' \
 	  'stack-down               Stop and remove the Compose test stack'
 
+test:
+	go test -race -count=1 ./...
+
+fuzz:
+	@for d in $$(grep -rl --include='*_test.go' '^func Fuzz' . | xargs -n1 dirname | sort -u); do \
+	  for f in $$(grep -ho '^func Fuzz[A-Za-z0-9_]*' $$d/*_test.go | cut -c6-); do \
+	    go test -run='^$$' -fuzz="^$$f$$" -fuzztime=$(FUZZTIME) $$d || exit 1; \
+	  done; \
+	done
+
+record-docker-ollama: ollama-up
+	OLLAMA_BASE_URL='$(DOCKER_OLLAMA_URL)' OLLAMA_MODEL='$(OLLAMA_MODEL)' \
+	go test -count=1 -v ./scenario -args -record
+
+record-host-ollama:
+	ollama pull '$(OLLAMA_MODEL)'
+	OLLAMA_BASE_URL='$(HOST_OLLAMA_URL)' OLLAMA_MODEL='$(OLLAMA_MODEL)' \
+	go test -count=1 -v ./scenario -args -record
+
 pg-up:
 	$(DOCKER_COMPOSE) up -d postgres
 
@@ -34,7 +58,7 @@ pg-down:
 
 ollama-up:
 	$(DOCKER_COMPOSE) up -d ollama
-	$(DOCKER_COMPOSE) up --no-deps ollama-pull
+	$(DOCKER_COMPOSE) run --rm --no-deps ollama-pull
 
 ollama-down:
 	$(DOCKER_COMPOSE) stop ollama

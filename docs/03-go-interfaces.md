@@ -3,11 +3,11 @@
 These interfaces define the first development contracts. They intentionally separate runtime orchestration from persistence, model providers, tools, policy, and delivery.
 
 Package names are suggestions:
-- `core`: shared domain types and IDs
+- `core`: shared domain types, IDs and tool definitions
 - `runtime`: orchestration, scheduling, replay
-- `store`: persistence ports
-- `model`: model provider ports
-- `tool`: native and MCP tool ports
+- `store`: persistence ports; drivers in subpackages (`store/pg`)
+- `model`: model provider ports, scripted mock, fixture record/replay; adapters in subpackages (`model/ollama`)
+- `tool`: native and MCP tool registries and executors
 - `policy`: authorization, budgets, approvals
 - `api`: REST/SSE adapters
 
@@ -114,6 +114,19 @@ type RunInput struct {
 type RunHandle struct {
     RunID  RunID
     Status RunStatus
+}
+
+type ToolDefinition struct {
+    ID               ToolID
+    Name             string
+    Version          string
+    Description      string
+    InputSchema      json.RawMessage
+    OutputSchema     json.RawMessage
+    Idempotency      IdempotencyHint  // unknown | idempotent | conditionally_idempotent | non_idempotent
+    SideEffect       SideEffectLevel  // none | read_external | write_internal | write_external | dangerous
+    Concurrency      ConcurrencyClass // serial | parallel_read | parallel_isolated_write | exclusive | external_side_effect
+    RequiresApproval bool
 }
 ```
 
@@ -280,6 +293,18 @@ type ChatStream interface {
     Recv() (StreamEvent, error)
     Close() error
 }
+
+// Recorder wraps a live Provider and saves its successful exchanges as a
+// fixture. Replayer is a Provider that answers requests matching a recorded
+// one (ignoring IDs and model name) and returns ErrNoFixture otherwise, so
+// regression tests run on real model output without a model server.
+type Recorder struct{ Provider }
+func NewRecorder(p Provider) *Recorder
+func (r *Recorder) Save(path string) error
+
+type Replayer struct{}
+func LoadReplayer(path string) (*Replayer, error)
+func (r *Replayer) Remaining() int
 ```
 
 ## Tool Contract
@@ -295,26 +320,13 @@ import (
 )
 
 type Registry interface {
-    RegisterNative(def Definition, exec Executor) error
-    Discover(ctx context.Context, tenantID core.TenantID) ([]Definition, error)
-    Get(ctx context.Context, tenantID core.TenantID, name string, version string) (Definition, Executor, error)
+    RegisterNative(def core.ToolDefinition, exec Executor) error
+    Discover(ctx context.Context, tenantID core.TenantID) ([]core.ToolDefinition, error)
+    Get(ctx context.Context, tenantID core.TenantID, name string, version string) (core.ToolDefinition, Executor, error)
 }
 
 type Executor interface {
     Execute(ctx context.Context, call Call) (Result, error)
-}
-
-type Definition struct {
-    ID               core.ToolID
-    Name             string
-    Version          string
-    Description      string
-    InputSchema      json.RawMessage
-    OutputSchema     json.RawMessage
-    Idempotency      IdempotencyHint
-    SideEffect       SideEffectLevel
-    Concurrency      ConcurrencyClass
-    RequiresApproval bool
 }
 
 type Call struct {
@@ -335,7 +347,7 @@ type Result struct {
 
 type MCPClient interface {
     Connect(ctx context.Context, server ServerConfig) error
-    DiscoverTools(ctx context.Context) ([]Definition, error)
+    DiscoverTools(ctx context.Context) ([]core.ToolDefinition, error)
     Invoke(ctx context.Context, call Call) (Result, error)
     Close(ctx context.Context) error
 }
@@ -350,7 +362,6 @@ import (
     "context"
 
     "github.com/nvcnvn/agent-loop/core"
-    "github.com/nvcnvn/agent-loop/tool"
 )
 
 type Engine interface {
@@ -384,7 +395,7 @@ type ToolAuthorization struct {
     TenantID core.TenantID
     RunID    core.RunID
     AgentID  core.AgentID
-    Tool     tool.Definition
+    Tool     core.ToolDefinition
     Input    []byte
 }
 ```

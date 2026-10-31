@@ -1,7 +1,9 @@
-// Package model defines the model provider port and a few implementations.
+// Package model defines the model provider port, the scripted MockProvider,
+// and the fixture Recorder/Replayer.
 //
-// The runtime depends only on Provider; concrete adapters (mock, ollama, ...)
-// satisfy it. This keeps the runtime provider-agnostic per requirement §7.
+// The runtime depends only on Provider; network adapters live in
+// subpackages (model/ollama) so the runtime stays provider-agnostic per
+// requirement §7.
 package model
 
 import (
@@ -44,24 +46,24 @@ type ToolCall struct {
 
 // ChatRequest is the unified chat completion request.
 type ChatRequest struct {
-	TenantID       core.TenantID
-	RunID          core.RunID
-	StepID         core.StepID
-	Model          string
-	Messages       []Message
-	Tools          []ToolSpec
-	ToolCallMode   string // "auto" | "required" | "none"
-	ResponseSchema json.RawMessage
-	Parameters     map[string]any
-	IdempotencyKey string
+	TenantID       core.TenantID   `json:"tenant_id,omitempty"`
+	RunID          core.RunID      `json:"run_id,omitempty"`
+	StepID         core.StepID     `json:"step_id,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []Message       `json:"messages"`
+	Tools          []ToolSpec      `json:"tools,omitempty"`
+	ToolCallMode   string          `json:"tool_call_mode,omitempty"` // "auto" | "required" | "none"
+	ResponseSchema json.RawMessage `json:"response_schema,omitempty"`
+	Parameters     map[string]any  `json:"parameters,omitempty"`
+	IdempotencyKey string          `json:"idempotency_key,omitempty"`
 }
 
 // ChatResponse is the unified chat completion response.
 type ChatResponse struct {
-	Message   Message
-	ToolCalls []ToolCall
-	Usage     core.Usage
-	Raw       json.RawMessage
+	Message   Message         `json:"message"`
+	ToolCalls []ToolCall      `json:"tool_calls,omitempty"`
+	Usage     core.Usage      `json:"usage"`
+	Raw       json.RawMessage `json:"raw,omitempty"`
 }
 
 // Capabilities lets agents fail fast if a feature is unsupported.

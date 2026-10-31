@@ -160,28 +160,50 @@ func TestSSEStream(t *testing.T) {
 		t.Fatalf("content-type=%s", got)
 	}
 
-	buf := make([]byte, 4096)
-	gotTerminal := false
-	for {
-		n, err := r.Body.Read(buf)
-		if n > 0 {
-			chunk := string(buf[:n])
-			if strings.Contains(chunk, core.EvModelStarted) || strings.Contains(chunk, core.EvTaskSpawned) {
-				t.Fatalf("SSE exposed internal event: %s", chunk)
-			}
-			if strings.Contains(chunk, "run_state_changed") && strings.Contains(chunk, "succeeded") {
-				gotTerminal = true
-			}
-		}
-		if err != nil {
-			break
-		}
-		if gotTerminal {
-			break
-		}
+	stream, _ := io.ReadAll(r.Body)
+	if strings.Contains(string(stream), core.EvModelStarted) || strings.Contains(string(stream), core.EvTaskSpawned) {
+		t.Fatalf("SSE exposed internal event: %s", stream)
 	}
-	if !gotTerminal {
-		t.Fatal("did not see terminal succeeded event over SSE")
+	if !strings.Contains(string(stream), `"status":"succeeded"`) {
+		t.Fatalf("did not see terminal succeeded event over SSE: %s", stream)
+	}
+}
+
+func TestSSEStreamOfFinishedRunCloses(t *testing.T) {
+	srv, orch, s := newTestServer(t)
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	sid, err := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		TenantID:  core.DefaultTenant,
+		SessionID: sid,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name: "s", Agents: []runtime.AgentStep{{Name: "echo", Prompt: "x"}},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orch.Wait(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/runs/"+string(runID)+"/stream", nil)
+	r, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	stream, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("stream did not close after replaying a terminal run: %v", err)
+	}
+	if !strings.Contains(string(stream), `"status":"succeeded"`) {
+		t.Fatalf("history missing terminal event: %s", stream)
 	}
 }
 
@@ -416,4 +438,29 @@ func TestDebugSetupEndpoints(t *testing.T) {
 	if len(tools.Tools) != 3 || tools.Tools[0].Name == "" {
 		t.Fatalf("unexpected tools: %+v", tools.Tools)
 	}
+}
+
+func FuzzRESTBodies(f *testing.F) {
+	s := store.NewMemStore()
+	h := api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s).Handler()
+	sid, err := s.CreateSession(context.Background(), store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	if err != nil {
+		f.Fatal(err)
+	}
+	paths := []string{"/v1/sessions", "/v1/sessions/" + string(sid) + "/messages", "/v1/approvals/missing", "/v1/runs"}
+	f.Add(uint8(0), []byte(`{"title":"demo"}`))
+	f.Add(uint8(0), []byte(``))
+	f.Add(uint8(1), []byte(`{"role":"user","content":"hi"}`))
+	f.Add(uint8(2), []byte(`{"decision":"approved","payload":{"x":1}}`))
+	f.Add(uint8(2), []byte(`{"decision":1}`))
+	f.Add(uint8(3), []byte(`{"session_id":"x","workflow":{"name":"wf","stages":[{"name":"a","kind":"sequential","agents":[{"name":"missing","prompt":"p"}]}]}}`))
+	f.Add(uint8(3), []byte(`{"session_id":"x","workflow":{"stages":[]},"limits":{"MaxToolCalls":-1}}`))
+	f.Fuzz(func(t *testing.T, which uint8, body []byte) {
+		path := paths[int(which)%len(paths)]
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)))
+		if rec.Code >= 500 {
+			t.Fatalf("POST %s %q: status %d: %s", path, body, rec.Code, rec.Body)
+		}
+	})
 }

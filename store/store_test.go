@@ -61,3 +61,69 @@ func TestSessionTenantIsolation(t *testing.T) {
 		t.Fatal("expected cross-tenant read to be denied")
 	}
 }
+
+func TestSubscribeDeliversEventsAfterSeqAppendedBeforeSubscribing(t *testing.T) {
+	s := store.NewMemStore()
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if _, err := s.Append(ctx, []core.Event{{RunID: "r", Type: core.EvSystem}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ch, cancel := s.Subscribe(ctx, "r", 1)
+	defer cancel()
+	if _, err := s.Append(ctx, []core.Event{{RunID: "r", Type: core.EvSystem}}); err != nil {
+		t.Fatal(err)
+	}
+	for want := int64(2); want <= 4; want++ {
+		if ev := <-ch; ev.Sequence != want {
+			t.Fatalf("sequence=%d want %d", ev.Sequence, want)
+		}
+	}
+}
+
+func TestSubscribeDeliversInOrderUnderConcurrentAppendAndCancel(t *testing.T) {
+	s := store.NewMemStore()
+	ctx := context.Background()
+	const writers, perWriter = 8, 25
+	ch, cancel := s.Subscribe(ctx, "r", 0)
+	defer cancel()
+
+	stop := make(chan struct{})
+	var churn sync.WaitGroup
+	churn.Add(1)
+	go func() {
+		defer churn.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, c := s.Subscribe(ctx, "r", 0)
+				c()
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perWriter; i++ {
+				if _, err := s.Append(ctx, []core.Event{{RunID: "r", Type: core.EvSystem}}); err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(stop)
+	churn.Wait()
+
+	for want := int64(1); want <= writers*perWriter; want++ {
+		if ev := <-ch; ev.Sequence != want {
+			t.Fatalf("sequence=%d want %d", ev.Sequence, want)
+		}
+	}
+}

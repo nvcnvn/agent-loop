@@ -20,12 +20,13 @@ The recommended first vertical slice from
 
 | Capability | Where |
 | --- | --- |
-| Core domain types, IDs, events, limits, usage | [core/types.go](core/types.go) |
+| Core domain types, IDs, events, limits, usage, tool definitions | [core/types.go](core/types.go), [core/tool.go](core/tool.go) |
 | Event-sourced in-memory store (sessions, runs, tasks, events, approvals, artifacts) with monotonic per-run sequence allocation under concurrency | [store/store.go](store/store.go) |
 | PostgreSQL driver (pgx v5, pgxpool, embedded migration, polling Subscribe) | [store/pg/pg.go](store/pg/pg.go) |
 | Provider-agnostic model abstraction (`Provider` interface) | [model/model.go](model/model.go) |
 | Mock provider for deterministic tests | [model/mock.go](model/mock.go) |
-| Ollama provider (`/api/chat`) | [model/ollama.go](model/ollama.go) |
+| Fixture recorder and request-matching replayer for real-model regression tests | [model/fixture.go](model/fixture.go) |
+| Ollama provider (`/api/chat`) | [model/ollama/ollama.go](model/ollama/ollama.go) |
 | Native Go tool registry + builtin demo tools (`echo`, `uppercase`, `math.add`) | [tool/tool.go](tool/tool.go) |
 | Tool policy (allow / deny / approval) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost) | [policy/policy.go](policy/policy.go) |
@@ -44,11 +45,18 @@ driver-agnostic.
 
 ## Run it
 
-Default test suite (no external services, runs in CI):
+Default test suite: unit tests, fuzz seeds and end-to-end scenarios
+replayed from recorded `gemma4:e2b-it-qat` output. It needs no external
+services and runs in CI:
 
 ```sh
-go test -race -count=1 ./...
+make test   # go test -race -count=1 ./...
 ```
+
+[.claude/skills/testing/SKILL.md](.claude/skills/testing/SKILL.md) explains
+which tier a test belongs in, and how to fuzz (`make fuzz`) and re-record the
+scenario fixtures from a live model (`make record-docker-ollama` or
+`make record-host-ollama`).
 
 Programmatic workflow demo:
 
@@ -87,13 +95,6 @@ curl http://localhost:8080/v1/debug/agents
 curl http://localhost:8080/v1/debug/tools
 ```
 
-Optional Ollama integration test (kept behind a build tag so CI doesn't
-need a model server):
-
-```sh
-OLLAMA_MODEL=gemma4:latest go test -tags=ollama -count=1 ./model/...
-```
-
 PostgreSQL integration tests (behind the `pg` build tag):
 
 ```sh
@@ -118,7 +119,7 @@ Quick shortcuts are available in [Makefile](Makefile): `make api-local-docker-ol
 ```sh
 # Host ports are prefixed with 4 to avoid common local conflicts:
 # API http://localhost:48080, Postgres localhost:45432, Ollama localhost:41434
-OLLAMA_MODEL=gemma4:latest \
+OLLAMA_MODEL=gemma4:e2b-it-qat \
    docker compose -f docker-compose.test.yml up --build \
    --abort-on-container-exit --exit-code-from rest-test rest-test
 
@@ -128,7 +129,7 @@ docker compose -f docker-compose.test.yml down
 If `docker compose ps` does not show `api` immediately, check
 `docker compose -f docker-compose.test.yml ps -a`: the API intentionally
 stays in `Created` until `ollama-pull` exits successfully. Pulling
-`gemma4:latest` can download a multi-GB model layer on first run.
+`gemma4:e2b-it-qat` can download a multi-GB model layer on first run.
 
 The compose stack starts PostgreSQL 18, can talk to either the bundled
 `ollama/ollama:latest` service or an external Ollama endpoint, pulls the
@@ -138,7 +139,7 @@ executes the REST integration test with the `rest` build tag.
 Default bundled Ollama flow:
 
 ```sh
-OLLAMA_MODEL=gemma4:latest \
+OLLAMA_MODEL=gemma4:e2b-it-qat \
    docker compose -f docker-compose.test.yml up --build \
    --abort-on-container-exit --exit-code-from rest-test ollama rest-test
 ```
@@ -150,9 +151,9 @@ at `host.docker.internal`:
 
 ```sh
 ollama serve
-ollama pull gemma4:latest
+ollama pull gemma4:e2b-it-qat
 
-OLLAMA_MODEL=gemma4:latest \
+OLLAMA_MODEL=gemma4:e2b-it-qat \
 OLLAMA_HOST=http://host.docker.internal:11434 \
 OLLAMA_BASE_URL=http://host.docker.internal:11434 \
    docker compose -f docker-compose.test.yml up --build \
@@ -165,7 +166,7 @@ outside Compose:
 ```sh
 AGENT_LOOP_PG_DSN='postgres://postgres:postgres@localhost:45432/agentloop?sslmode=disable' \
 OLLAMA_BASE_URL='http://localhost:41434' \
-OLLAMA_MODEL='gemma4:latest' \
+OLLAMA_MODEL='gemma4:e2b-it-qat' \
 OLLAMA_TIMEOUT_SECONDS=900 \
 go run ./cmd/agent-loop -addr :8080
 

@@ -9,10 +9,12 @@
   in `runtime`; persistence ports in `store` with Postgres in `store/pg`; model providers in
   `model`; tools in `tool`; authorization, budgets and approvals in `policy`; REST/SSE and the web
   UI in `api`. Dependencies point inward to `core` and the ports; `runtime` never imports
-  `store/pg` or `api`, and nothing outside `model` knows a provider is Ollama.
+  `store/pg` or `api`, and only `cmd/` and `scenario/` import `model/ollama`. Tool metadata
+  (`core.ToolDefinition`) lives in `core`; `tool` holds the registry and executors.
 - The runtime is concurrency-safe and cancellation-aware: every blocking call takes a
   `context.Context` and returns when it is done. Protocol and state-machine logic goes in
   `runtime`/`policy`, never in `api`.
+- Test tiers, fixtures and the test model are described in `.claude/skills/testing/SKILL.md`.
 - Tests drive the real code through its ports and assert on stored events and results. Use the
   scripted `model.MockProvider` and `store.MemStore` rather than ad-hoc mocks. Fuzz every decoder of
   external input (model output, tool arguments, REST bodies). Each acceptance scenario in

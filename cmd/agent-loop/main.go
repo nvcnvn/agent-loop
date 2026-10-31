@@ -25,6 +25,7 @@ import (
 
 	"github.com/nvcnvn/agent-loop/api"
 	"github.com/nvcnvn/agent-loop/model"
+	"github.com/nvcnvn/agent-loop/model/ollama"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 	pgstore "github.com/nvcnvn/agent-loop/store/pg"
@@ -96,5 +97,5 @@ func openProvider() (model.Provider, string) {
 		timeout = time.Duration(seconds) * time.Second
 	}
 	log.Printf("using Ollama model %s with timeout %s", modelName, timeout)
-	return model.NewOllamaProvider(baseURL, &http.Client{Timeout: timeout}), modelName
+	return ollama.New(baseURL, &http.Client{Timeout: timeout}), modelName
 }

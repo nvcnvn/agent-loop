@@ -118,7 +118,7 @@ type runState struct {
 }
 
 type allowedTool struct {
-	def              tool.Definition
+	def              core.ToolDefinition
 	requiresApproval bool
 	approvalReason   string
 }
@@ -668,7 +668,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			exec:             exec,
 			requiresApproval: allowedTool.requiresApproval,
 			approvalReason:   allowedTool.approvalReason,
-			runParallel:      def.Concurrency == tool.ConcurrencyParallelRead || def.Concurrency == tool.ConcurrencyParallelIsolatedWrite,
+			runParallel:      def.Concurrency == core.ConcurrencyParallelRead || def.Concurrency == core.ConcurrencyParallelIsolatedWrite,
 		})
 	}
 	preflightOK = true

@@ -19,6 +19,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    pull_policy: always
     ports:
       - "41434:11434"
     environment:
@@ -33,11 +34,12 @@ services:
 
   ollama-pull:
     image: ollama/ollama:latest
+    pull_policy: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:latest}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b-it-qat}
     entrypoint:
       - /bin/sh
       - -c
@@ -53,7 +55,7 @@ services:
     environment:
       AGENT_LOOP_PG_DSN: postgres://postgres:postgres@postgres:5432/agentloop?sslmode=disable
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:latest}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b-it-qat}
       OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-900}
     ports:
       - "48080:8080"

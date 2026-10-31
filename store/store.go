@@ -504,11 +504,8 @@ func (m *MemStore) Append(_ context.Context, events []core.Event) ([]core.Event,
 		return nil, nil
 	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	out := make([]core.Event, 0, len(events))
-	subsToNotify := []struct {
-		ch chan core.Event
-		ev core.Event
-	}{}
 	for _, ev := range events {
 		if ev.ID == "" {
 			ev.ID = core.EventID(core.NewID())
@@ -530,23 +527,14 @@ func (m *MemStore) Append(_ context.Context, events []core.Event) ([]core.Event,
 		}
 		m.events = append(m.events, ev)
 		out = append(out, ev)
-		if ev.RunID != "" {
-			for _, ch := range m.subsByRun[ev.RunID] {
-				subsToNotify = append(subsToNotify, struct {
-					ch chan core.Event
-					ev core.Event
-				}{ch, ev})
+		// Sending under the lock keeps delivery in sequence order and stops
+		// cancel from closing a channel mid-send. A full channel drops the
+		// event; clients reconnect with Last-Event-ID to recover from history.
+		for _, ch := range m.subsByRun[ev.RunID] {
+			select {
+			case ch <- ev:
+			default:
 			}
-		}
-	}
-	m.mu.Unlock()
-
-	for _, n := range subsToNotify {
-		select {
-		case n.ch <- n.ev:
-		default:
-			// Slow subscriber drops events; clients should reconnect with
-			// Last-Event-ID to recover from history.
 		}
 	}
 	return out, nil
@@ -585,12 +573,21 @@ func (m *MemStore) ListSessionEvents(_ context.Context, tenant core.TenantID, se
 // Subscribe streams new events for a run. The returned cancel func detaches
 // the subscription. The channel is buffered; on overflow events are dropped
 // and the client must catch up with ListRunEvents using Last-Event-ID.
-func (m *MemStore) Subscribe(_ context.Context, run core.RunID, _ int64) (<-chan core.Event, func()) {
+func (m *MemStore) Subscribe(_ context.Context, run core.RunID, afterSeq int64) (<-chan core.Event, func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	id := m.nextSubID
 	m.nextSubID++
-	ch := make(chan core.Event, 256)
+	var backlog []core.Event
+	for _, ev := range m.events {
+		if ev.RunID == run && ev.Sequence > afterSeq {
+			backlog = append(backlog, ev)
+		}
+	}
+	ch := make(chan core.Event, len(backlog)+256)
+	for _, ev := range backlog {
+		ch <- ev
+	}
 	if m.subsByRun[run] == nil {
 		m.subsByRun[run] = map[int]chan core.Event{}
 	}

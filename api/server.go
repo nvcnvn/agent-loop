@@ -20,7 +20,9 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"sort"
@@ -146,7 +148,7 @@ func principalOf(r *http.Request) core.PrincipalID {
 
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	var req createSessionReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
@@ -400,6 +402,10 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	for _, ev := range history {
 		writeSSE(w, ev)
 		afterSeq = ev.Sequence
+		if endsRun(ev) {
+			flusher.Flush()
+			return
+		}
 	}
 	flusher.Flush()
 
@@ -424,20 +430,25 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 			writeSSE(w, ev)
 			afterSeq = ev.Sequence
 			flusher.Flush()
-			if ev.Type == core.EvRunStateChanged {
-				var p struct {
-					Status core.RunStatus `json:"status"`
-				}
-				_ = json.Unmarshal(ev.Payload, &p)
-				if p.Status.Terminal() {
-					return
-				}
+			if endsRun(ev) {
+				return
 			}
 		case <-heartbeat.C:
 			_, _ = fmt.Fprintf(w, ": heartbeat\n\n")
 			flusher.Flush()
 		}
 	}
+}
+
+func endsRun(ev core.Event) bool {
+	if ev.Type != core.EvRunStateChanged {
+		return false
+	}
+	var p struct {
+		Status core.RunStatus `json:"status"`
+	}
+	_ = json.Unmarshal(ev.Payload, &p)
+	return p.Status.Terminal()
 }
 
 func writeSSE(w http.ResponseWriter, ev core.Event) {

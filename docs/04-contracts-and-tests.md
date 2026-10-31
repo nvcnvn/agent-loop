@@ -47,7 +47,10 @@ Define a versioned event envelope:
 ```
 
 Required behavior:
-- `Last-Event-ID` resumes from the next event after the acknowledged sequence.
+- `Last-Event-ID` resumes from the next event after the acknowledged sequence, with no gap
+  between the replayed history and live events, and events arrive in sequence order.
+- The stream closes after the run's terminal `run_state_changed` event, whether it is
+  replayed from history or delivered live.
 - Public streams exclude `internal`, `hidden_reasoning`, and `audit` visibility.
 - Heartbeats do not advance run sequence.
 - Event names are backward-compatible or versioned.

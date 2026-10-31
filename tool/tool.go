@@ -1,7 +1,7 @@
-// Package tool provides the native Go tool registry and tool metadata types.
+// Package tool provides the native Go tool registry and executors.
 //
-// Tools are looked up by name. Concurrency class and side-effect level drive
-// scheduling and policy decisions in the runtime.
+// Tools are looked up by name. The core.ToolDefinition concurrency class and
+// side-effect level drive scheduling and policy decisions in the runtime.
 package tool
 
 import (
@@ -13,59 +13,13 @@ import (
 	"github.com/nvcnvn/agent-loop/core"
 )
 
-// IdempotencyHint matches the values in the schema and domain model.
-type IdempotencyHint string
-
-const (
-	IdemUnknown               IdempotencyHint = "unknown"
-	IdemIdempotent            IdempotencyHint = "idempotent"
-	IdemConditionalIdempotent IdempotencyHint = "conditionally_idempotent"
-	IdemNonIdempotent         IdempotencyHint = "non_idempotent"
-)
-
-// SideEffectLevel matches the values in the schema and domain model.
-type SideEffectLevel string
-
-const (
-	SideNone          SideEffectLevel = "none"
-	SideReadExternal  SideEffectLevel = "read_external"
-	SideWriteInternal SideEffectLevel = "write_internal"
-	SideWriteExternal SideEffectLevel = "write_external"
-	SideDangerous     SideEffectLevel = "dangerous"
-)
-
-// ConcurrencyClass matches the values in the schema and domain model.
-type ConcurrencyClass string
-
-const (
-	ConcurrencySerial                ConcurrencyClass = "serial"
-	ConcurrencyParallelRead          ConcurrencyClass = "parallel_read"
-	ConcurrencyParallelIsolatedWrite ConcurrencyClass = "parallel_isolated_write"
-	ConcurrencyExclusive             ConcurrencyClass = "exclusive"
-	ConcurrencyExternalSideEffect    ConcurrencyClass = "external_side_effect"
-)
-
-// Definition describes a tool to the model and to the runtime.
-type Definition struct {
-	ID               core.ToolID      `json:"id,omitempty"`
-	Name             string           `json:"name"`
-	Version          string           `json:"version"`
-	Description      string           `json:"description"`
-	InputSchema      json.RawMessage  `json:"input_schema"`
-	OutputSchema     json.RawMessage  `json:"output_schema"`
-	Idempotency      IdempotencyHint  `json:"idempotency"`
-	SideEffect       SideEffectLevel  `json:"side_effect"`
-	Concurrency      ConcurrencyClass `json:"concurrency"`
-	RequiresApproval bool             `json:"requires_approval"`
-}
-
 // Call is one tool invocation request handed to an Executor.
 type Call struct {
 	TenantID       core.TenantID
 	RunID          core.RunID
 	TaskID         core.TaskID
 	StepID         core.StepID
-	Tool           Definition
+	Tool           core.ToolDefinition
 	Input          json.RawMessage
 	IdempotencyKey string
 	Metadata       map[string]any
@@ -95,7 +49,7 @@ type Registry struct {
 }
 
 type registered struct {
-	def  Definition
+	def  core.ToolDefinition
 	exec Executor
 }
 
@@ -104,7 +58,7 @@ func NewRegistry() *Registry {
 }
 
 // Register adds (or replaces) a tool by name.
-func (r *Registry) Register(def Definition, exec Executor) error {
+func (r *Registry) Register(def core.ToolDefinition, exec Executor) error {
 	if def.Name == "" {
 		return fmt.Errorf("tool: name required")
 	}
@@ -118,13 +72,13 @@ func (r *Registry) Register(def Definition, exec Executor) error {
 		def.Version = "1.0.0"
 	}
 	if def.Idempotency == "" {
-		def.Idempotency = IdemUnknown
+		def.Idempotency = core.IdemUnknown
 	}
 	if def.SideEffect == "" {
-		def.SideEffect = SideNone
+		def.SideEffect = core.SideNone
 	}
 	if def.Concurrency == "" {
-		def.Concurrency = ConcurrencySerial
+		def.Concurrency = core.ConcurrencySerial
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -132,20 +86,20 @@ func (r *Registry) Register(def Definition, exec Executor) error {
 	return nil
 }
 
-func (r *Registry) Get(name string) (Definition, Executor, bool) {
+func (r *Registry) Get(name string) (core.ToolDefinition, Executor, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	t, ok := r.tools[name]
 	if !ok {
-		return Definition{}, nil, false
+		return core.ToolDefinition{}, nil, false
 	}
 	return t.def, t.exec, true
 }
 
-func (r *Registry) List() []Definition {
+func (r *Registry) List() []core.ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]Definition, 0, len(r.tools))
+	out := make([]core.ToolDefinition, 0, len(r.tools))
 	for _, t := range r.tools {
 		out = append(out, t.def)
 	}
