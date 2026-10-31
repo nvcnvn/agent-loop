@@ -749,6 +749,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 				results <- toolOut{idx: plan.idx, msg: msg, err: err}
 			}(plan)
 		} else {
+			wg.Wait()
 			msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, tenant, session, runID, taskID)
 			results <- toolOut{idx: plan.idx, msg: msg, err: err}
 		}

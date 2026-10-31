@@ -392,6 +392,62 @@ func TestToolErrorsReturnToModel(t *testing.T) {
 	}
 }
 
+// Acceptance: §Tool Calling #5 – exclusive tools do not overlap parallel ones.
+func TestExclusiveToolWaitsForEarlierParallelTools(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{
+			{ID: "1", Name: "slowread", Input: json.RawMessage(`{"n":"r1"}`)},
+			{ID: "2", Name: "slowread", Input: json.RawMessage(`{"n":"r2"}`)},
+			{ID: "3", Name: "excl", Input: json.RawMessage(`{"n":"x"}`)},
+			{ID: "4", Name: "slowread", Input: json.RawMessage(`{"n":"r3"}`)},
+		}},
+		model.MockResponse{Content: "done"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"slowread", "excl"}}})
+	sleepy := tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) {
+		time.Sleep(20 * time.Millisecond)
+		return tool.Result{Output: json.RawMessage(`{}`)}, nil
+	})
+	_ = orch.Tools.Register(core.ToolDefinition{Name: "slowread", Concurrency: core.ConcurrencyParallelRead}, sleepy)
+	_ = orch.Tools.Register(core.ToolDefinition{Name: "excl", Concurrency: core.ConcurrencyExclusive}, sleepy)
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, runID); err != nil {
+		t.Fatalf("status=%s err=%v", res.Status, err)
+	}
+
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	callOfStep := map[core.StepID]string{}
+	started, completed := map[string]int64{}, map[string]int64{}
+	for _, ev := range events {
+		switch ev.Type {
+		case core.EvToolScheduled:
+			var p struct {
+				Input struct{ N string }
+			}
+			_ = json.Unmarshal(ev.Payload, &p)
+			callOfStep[ev.StepID] = p.Input.N
+		case core.EvToolStarted:
+			started[callOfStep[ev.StepID]] = ev.Sequence
+		case core.EvToolCompleted:
+			completed[callOfStep[ev.StepID]] = ev.Sequence
+		}
+	}
+	if len(completed) != 4 {
+		t.Fatalf("completed calls=%v want 4", completed)
+	}
+	if started["x"] < completed["r1"] || started["x"] < completed["r2"] || started["r3"] < completed["x"] {
+		t.Fatalf("exclusive tool overlapped parallel tools: started=%v completed=%v", started, completed)
+	}
+}
+
 func TestToolErrorAfterCancelFailsTask(t *testing.T) {
 	prov := model.NewMockProvider(
 		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "blocks", Input: json.RawMessage(`{}`)}}},

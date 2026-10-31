@@ -189,7 +189,7 @@ The framework should support concurrent tool calls when the workflow and tool po
 Requirements:
 - [x] Allow an agent step to schedule multiple tool calls in parallel.
 - [x] Run serial tools one at a time, in call order.
-- [ ] **Blocker:** Keep exclusive and serial tools from overlapping parallel tools started earlier in the same batch.
+- [x] Keep exclusive and serial tools from overlapping parallel tools started earlier in the same batch.
 - [x] Mark each tool with concurrency characteristics such as:
   - safe for parallel read operations
   - safe for parallel isolated writes
@@ -425,6 +425,8 @@ The product vision is met when the framework can:
   approval over REST.
 - Session history is linear.
 - Tools default to `serial`; `parallel_read` and `parallel_isolated_write` tools run concurrently.
+  Within one model response, any other tool is a barrier: it starts after the parallel tools before it
+  finish, and the parallel tools after it start once it finishes.
 - Concurrent tool groups are inferred by the scheduler from each tool's concurrency class, not
   declared in the workflow.
 
