@@ -189,6 +189,7 @@ Define stable error categories:
 - budget_exceeded
 - approval_required
 - policy_denied
+- overloaded
 - provider_unavailable
 - tool_failed
 - replay_mismatch

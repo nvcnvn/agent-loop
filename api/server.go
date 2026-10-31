@@ -349,6 +349,11 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		Input:          req.Input,
 		Limits:         req.Limits,
 	})
+	if errors.Is(err, core.ErrOverloaded) {
+		w.Header().Set("Retry-After", "1")
+		writeErr(w, http.StatusServiceUnavailable, "overloaded", err.Error())
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
 		return

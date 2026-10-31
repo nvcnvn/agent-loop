@@ -205,6 +205,81 @@ func TestUsagePersistedDuringRunAndStateReleased(t *testing.T) {
 	}
 }
 
+// Acceptance: §Observability and Operations #4 – backpressure.
+func TestRunsQueueThenOverload(t *testing.T) {
+	release := make(chan struct{})
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "gated", Model: "m", Provider: gateProvider(release)}})
+	orch.MaxActiveRuns, orch.MaxQueuedRuns = 1, 1
+	ctx, cancel := waitCtx()
+	defer cancel()
+	start := func(maxRuntime time.Duration) (core.RunID, error) {
+		return orch.StartRun(ctx, runtime.StartRunInput{
+			SessionID: sid,
+			Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}}}}},
+			Limits:    core.Limits{MaxRuntime: maxRuntime},
+		})
+	}
+	first, err := start(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := start(50 * time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := start(time.Minute); !errors.Is(err, core.ErrOverloaded) {
+		t.Fatalf("third run err=%v want ErrOverloaded", err)
+	}
+	for orch.QueuedRuns() != 1 {
+		if ctx.Err() != nil {
+			t.Fatal("run never queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if run, _ := s.GetRun(ctx, core.DefaultTenant, second); run.Status != core.RunQueued {
+		t.Fatalf("queued run status=%s; its MaxRuntime must not run while it waits", run.Status)
+	}
+	close(release)
+	for _, id := range []core.RunID{first, second} {
+		if res, err := orch.Wait(ctx, core.DefaultTenant, id); err != nil {
+			t.Fatalf("run %s: status=%s err=%v", id, res.Status, err)
+		}
+	}
+	if _, err := start(time.Minute); err != nil {
+		t.Fatalf("run after the queue drained: %v", err)
+	}
+}
+
+func TestCancelQueuedRun(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "gated", Model: "m", Provider: gateProvider(release)}})
+	orch.MaxActiveRuns = 1
+	ctx, cancel := waitCtx()
+	defer cancel()
+	wf := runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}}}}}
+	if _, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: wf}); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: wf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for orch.QueuedRuns() != 1 {
+		if ctx.Err() != nil {
+			t.Fatal("run never queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := orch.Cancel(ctx, core.DefaultTenant, queued, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := orch.Wait(ctx, core.DefaultTenant, queued); res.Status != core.RunCanceled {
+		t.Fatalf("status=%s want canceled", res.Status)
+	}
+}
+
 func TestWaitOnReleasedFailedRunMatchesLiveResult(t *testing.T) {
 	prov := model.NewMockProvider(model.MockResponse{Err: errors.New("provider down")})
 	orch, _, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov}})
@@ -219,6 +294,9 @@ func TestWaitOnReleasedFailedRunMatchesLiveResult(t *testing.T) {
 	}
 	live, liveErr := orch.Wait(ctx, core.DefaultTenant, runID)
 	for orch.ActiveRuns() != 0 {
+		if ctx.Err() != nil {
+			t.Fatal("run never released")
+		}
 		time.Sleep(time.Millisecond)
 	}
 	stored, storedErr := orch.Wait(ctx, core.DefaultTenant, runID)
@@ -1072,6 +1150,22 @@ func TestIdleWaitEmitsDiagnostic(t *testing.T) {
 	}
 	if idleWaits == 0 {
 		t.Fatal("no idle_wait event")
+	}
+}
+
+// gateProvider answers "done" once its channel is closed.
+type gateProvider chan struct{}
+
+func (gateProvider) Name() string { return "gate" }
+func (gateProvider) Capabilities(context.Context, string) (model.Capabilities, error) {
+	return model.Capabilities{}, nil
+}
+func (g gateProvider) Chat(ctx context.Context, _ model.ChatRequest) (model.ChatResponse, error) {
+	select {
+	case <-ctx.Done():
+		return model.ChatResponse{}, ctx.Err()
+	case <-g:
+		return model.ChatResponse{Message: model.Message{Role: model.RoleAssistant, Content: "done"}}, nil
 	}
 }
 

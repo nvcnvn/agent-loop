@@ -318,6 +318,31 @@ func TestCancelRunRejectsOtherTenant(t *testing.T) {
 	}
 }
 
+func TestStartRunOverloaded(t *testing.T) {
+	s := store.NewMemStore()
+	gate := gatedProvider{release: make(chan struct{})}
+	defer close(gate.release)
+	orch := runtime.NewOrchestrator(s, tool.NewRegistry(), []runtime.Agent{{Name: "gated", Model: "m", Provider: gate}})
+	orch.MaxActiveRuns, orch.MaxQueuedRuns = 1, 0
+	srv := httptest.NewServer(api.NewServer(orch, s).Handler())
+	defer srv.Close()
+	sid, _ := s.CreateSession(context.Background(), store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	body := `{"session_id":"` + string(sid) + `","workflow":{"stages":[{"name":"s","agents":[{"name":"gated","prompt":"x"}]}]}}`
+	for i, want := range []int{http.StatusAccepted, http.StatusServiceUnavailable} {
+		resp, err := srv.Client().Post(srv.URL+"/v1/runs", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Fatalf("run %d status=%d want %d", i, resp.StatusCode, want)
+		}
+		if want == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") == "" {
+			t.Fatal("503 without Retry-After")
+		}
+	}
+}
+
 func TestSSEStreamOfFinishedRunCloses(t *testing.T) {
 	srv, orch, s := newTestServer(t)
 	defer srv.Close()

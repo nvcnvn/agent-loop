@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
@@ -113,13 +114,21 @@ type Orchestrator struct {
 	Log *slog.Logger
 	// ApprovalTimeout is how long a tool approval stays open; zero or less means it never expires.
 	ApprovalTimeout time.Duration
+	// MaxActiveRuns caps how many runs execute at once (zero means no cap); read at the first StartRun.
+	MaxActiveRuns int
+	// MaxQueuedRuns caps how many runs wait for a slot; read at the first StartRun.
+	MaxQueuedRuns int
 	// MaxHistoryMessages caps how many earlier session messages an agent sees; zero means all.
 	MaxHistoryMessages int
 	// IdleWarnAfter is how long a run may go without an event before it gets an idle_wait diagnostic; zero disables it.
 	IdleWarnAfter time.Duration
 
-	mu   sync.Mutex
-	runs map[core.RunID]*runState
+	mu       sync.Mutex
+	runs     map[core.RunID]*runState
+	inflight int // admitted runs, from admit until queueAndExecute returns
+	capacity int // MaxActiveRuns+MaxQueuedRuns when slots was made
+	slots    chan struct{}
+	queued   atomic.Int64
 }
 
 type runState struct {
@@ -160,6 +169,8 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		ApprovalTimeout:    15 * time.Minute,
 		IdleWarnAfter:      2 * time.Minute,
 		MaxHistoryMessages: 50,
+		MaxActiveRuns:      64,
+		MaxQueuedRuns:      256,
 		MaxLimits: core.Limits{
 			MaxDepth:      8,
 			MaxSubAgents:  64,
@@ -195,6 +206,16 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		}
 	}
 
+	if err := o.admit(); err != nil {
+		return "", err
+	}
+	started := false
+	defer func() {
+		if !started {
+			o.release()
+		}
+	}()
+
 	wfRaw, _ := json.Marshal(in.Workflow)
 	inRaw, _ := json.Marshal(in.Input)
 
@@ -213,16 +234,56 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 	}
 	o.Budget.Init(runID, in.Limits)
 
-	runCtx, cancel := context.WithTimeout(context.Background(), in.Limits.MaxRuntime)
-
+	runCtx, cancel := context.WithCancel(context.Background())
 	st := &runState{lastAt: time.Now(), tenant: in.TenantID, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
 	o.mu.Lock()
 	o.runs[runID] = st
 	o.mu.Unlock()
 
-	go o.execute(runCtx, runID, in, st)
+	started = true
+	go o.queueAndExecute(runCtx, runID, in, st)
 	return runID, nil
 }
+
+// admit reserves room for one more executing or queued run, or returns
+// core.ErrOverloaded. release gives the room back.
+func (o *Orchestrator) admit() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.slots == nil && o.MaxActiveRuns > 0 {
+		o.slots = make(chan struct{}, o.MaxActiveRuns)
+		o.capacity = o.MaxActiveRuns + o.MaxQueuedRuns
+	}
+	if o.slots != nil && o.inflight >= o.capacity {
+		return fmt.Errorf("%w: %d runs executing or queued", core.ErrOverloaded, o.capacity)
+	}
+	o.inflight++
+	return nil
+}
+
+func (o *Orchestrator) release() {
+	o.mu.Lock()
+	o.inflight--
+	o.mu.Unlock()
+}
+
+// queueAndExecute waits for a free run slot, then executes the run.
+func (o *Orchestrator) queueAndExecute(ctx context.Context, runID core.RunID, in StartRunInput, st *runState) {
+	defer o.release()
+	if o.slots != nil {
+		o.queued.Add(1)
+		select {
+		case o.slots <- struct{}{}:
+			defer func() { <-o.slots }()
+		case <-ctx.Done():
+		}
+		o.queued.Add(-1)
+	}
+	o.execute(ctx, runID, in, st)
+}
+
+// QueuedRuns returns how many runs are waiting for a slot.
+func (o *Orchestrator) QueuedRuns() int { return int(o.queued.Load()) }
 
 // Wait blocks until the tenant's run reaches a terminal state. A run this
 // orchestrator is not executing is answered from the store.
@@ -271,7 +332,7 @@ func runError(status core.RunStatus, reason string) error {
 	}
 }
 
-// ActiveRuns returns how many runs this orchestrator is executing.
+// ActiveRuns returns how many runs this orchestrator is executing or has queued.
 func (o *Orchestrator) ActiveRuns() int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -301,22 +362,30 @@ func (o *Orchestrator) Cancel(ctx context.Context, tenant core.TenantID, runID c
 // execute is the main run loop.
 func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRunInput, st *runState) {
 	defer close(st.done)
+	ctx, stopTimer := context.WithTimeout(ctx, in.Limits.MaxRuntime)
+	defer stopTimer()
 
 	startedAt := time.Now().UTC()
 	log := o.Log.With("run_id", runID, "tenant_id", in.TenantID, "session_id", in.SessionID)
 	log.InfoContext(ctx, "run started", "workflow", in.Workflow.Name)
-	o.transitionRun(ctx, runID, in.TenantID, core.RunRunning, "")
 
 	stageOutputs := map[string]string{}
 	var finalStatus core.RunStatus = core.RunSucceeded
 	var failureReason string
 
 	stages := in.Workflow.Stages
-	if history, err := o.sessionHistory(ctx, in.TenantID, in.SessionID, runID); err != nil {
-		finalStatus = core.RunFailed
-		failureReason = "session history: " + err.Error()
+	if ctx.Err() != nil {
+		finalStatus = core.RunCanceled
+		failureReason = "canceled while queued"
 		stages = nil
 	} else {
+		o.transitionRun(ctx, runID, in.TenantID, core.RunRunning, "")
+		history, err := o.sessionHistory(ctx, in.TenantID, in.SessionID, runID)
+		if err != nil {
+			finalStatus = core.RunFailed
+			failureReason = "session history: " + err.Error()
+			stages = nil
+		}
 		in.history = history
 	}
 

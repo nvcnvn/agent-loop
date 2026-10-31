@@ -212,6 +212,9 @@ var ErrBudgetExceeded = errors.New("budget exceeded")
 // ErrPolicyDenied is returned by the policy engine.
 var ErrPolicyDenied = errors.New("policy denied")
 
+// ErrOverloaded is returned when the runtime has no room to queue more work.
+var ErrOverloaded = errors.New("overloaded")
+
 // ErrNotFound is returned by stores.
 var ErrNotFound = errors.New("not found")
 

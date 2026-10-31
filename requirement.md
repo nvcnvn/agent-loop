@@ -316,7 +316,8 @@ Operational requirements:
 - [ ] **Blocker:** Job recovery after process restart (runs left `running` stay that way forever).
 - [x] Liveness endpoint (`/healthz`).
 - [x] Readiness endpoint that checks the database (`/readyz`).
-- [ ] **Blocker:** Backpressure handling (every run starts its own goroutine at once).
+- [x] Backpressure handling: at most `MaxActiveRuns` runs execute, up to `MaxQueuedRuns` more wait in
+  `queued`, and StartRun beyond that fails with `core.ErrOverloaded` (REST 503 with `Retry-After`).
 - [ ] Configurable worker pool and queueing model.
 - [x] Server timeouts (read header, read, idle) and request body size limits (`api.Server.HTTPServer`,
   `MaxBodyBytes`).
