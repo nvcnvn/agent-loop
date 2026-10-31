@@ -1,11 +1,5 @@
--- Minimal Postgres schema for the agent-loop pg driver.
---
--- This is the subset of docs/02-postgres-schema.sql that the current
--- runtime actually writes to. It is intentionally narrower than the full
--- design schema so the driver stays easy to evolve.
---
--- Apply with:
---   psql "$DATABASE_URL" -f store/pg/schema.sql
+-- Tables the current runtime writes to: the subset of docs/02-postgres-schema.sql
+-- that is implemented so far.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 

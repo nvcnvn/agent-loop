@@ -54,8 +54,8 @@ func freshStore(t *testing.T) *pg.Store {
 		t.Fatalf("pgxpool: %v", err)
 	}
 	s := pg.NewFromPool(pool)
-	if err := s.EnsureSchema(ctx); err != nil {
-		t.Fatalf("ensure schema: %v", err)
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
 		`TRUNCATE messages, run_events, event_counters, approvals, artifacts, tasks, runs, sessions RESTART IDENTITY CASCADE`,
@@ -64,6 +64,52 @@ func freshStore(t *testing.T) *pg.Store {
 	}
 	t.Cleanup(s.Close)
 	return s
+}
+
+// Covers a database created before schema_migrations existed, replicas
+// migrating at once, and a database a newer binary migrated further.
+func TestPg_MigrateConcurrentUpgrade(t *testing.T) {
+	s := freshStore(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(ctx, `DROP TABLE schema_migrations`); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 4)
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- s.Migrate(ctx)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent migrate: %v", err)
+		}
+	}
+	var applied, latest int
+	if err := pool.QueryRow(ctx, `SELECT count(*), max(version) FROM schema_migrations`).Scan(&applied, &latest); err != nil {
+		t.Fatal(err)
+	}
+	if applied != latest || latest < 1 {
+		t.Fatalf("schema_migrations has %d rows, latest version %d", applied, latest)
+	}
+
+	if _, err := pool.Exec(ctx, `INSERT INTO schema_migrations (version, name) VALUES (9999, 'future')`); err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Exec(ctx, `DELETE FROM schema_migrations WHERE version = 9999`)
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatalf("migrate against newer database: %v", err)
+	}
 }
 
 func TestPg_Ping(t *testing.T) {

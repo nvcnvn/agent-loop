@@ -169,11 +169,14 @@ Define artifact storage rules:
 
 ### 11. Migration Contract
 
-Define database migration rules before writing SQL:
-- migrations are forward-only for production
-- every migration has an idempotent test fixture
-- destructive changes require a compatibility migration first
-- enum changes are append-only in normal releases
+- Migrations are numbered files in `store/pg/migrations/` (`0001_<name>.sql`, no gaps).
+  `pg.Store.Migrate`, run at startup, applies those newer than the latest version in
+  `schema_migrations`, all in one transaction under an advisory lock, so a migration cannot use
+  statements that refuse to run in a transaction (such as `CREATE INDEX CONCURRENTLY`).
+- Migrations are forward-only; an applied file is never edited.
+- A database already migrated by a newer binary is left alone, so every migration must keep
+  working with the previous binary: destructive changes need a compatibility migration first, and
+  enum changes are append-only.
 
 ### 12. Error Taxonomy
 

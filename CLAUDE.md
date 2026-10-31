@@ -32,10 +32,10 @@
 
 ## Documents
 - `requirement.md` is what the framework must do. Under `docs/`: `01-domain-model.md` the
-  entities and state machines, `02-postgres-schema.sql` the schema (kept in step with
-  `store/pg/schema.sql`), `03-go-interfaces.md` the package contracts, `04-contracts-and-tests.md`
-  the external contracts and acceptance scenarios. `README.md` says what is implemented and how to
-  run it.
+  entities and state machines, `02-postgres-schema.sql` the schema (kept in step with the
+  migrations in `store/pg/migrations/`), `03-go-interfaces.md` the package contracts,
+  `04-contracts-and-tests.md` the external contracts and acceptance scenarios. `README.md` says
+  what is implemented and how to run it.
 - Docs and code state current facts, arranged so they are easiest to read and understand.
   Git history keeps the past; don't preserve it in the text. A reversed decision is rewritten
   as the new decision.

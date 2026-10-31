@@ -13,7 +13,6 @@ package pg
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,15 +24,6 @@ import (
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/store"
 )
-
-//go:embed schema.sql
-var schemaFS embed.FS
-
-// Schema returns the embedded migration. Callers can apply it directly.
-func Schema() string {
-	b, _ := schemaFS.ReadFile("schema.sql")
-	return string(b)
-}
 
 // PollInterval controls how often Subscribe polls for new events.
 var PollInterval = 200 * time.Millisecond
@@ -61,12 +51,6 @@ func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 // Close releases the underlying pool.
 func (s *Store) Close() { s.pool.Close() }
-
-// EnsureSchema applies schema.sql if the tables do not exist yet.
-func (s *Store) EnsureSchema(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, Schema())
-	return err
-}
 
 // ---- helpers ----
 

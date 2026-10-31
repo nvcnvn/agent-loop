@@ -74,8 +74,8 @@ func openStore() store.Store {
 	if err != nil {
 		log.Fatalf("postgres: %v", err)
 	}
-	if err := persistence.EnsureSchema(ctx); err != nil {
-		log.Fatalf("postgres schema: %v", err)
+	if err := persistence.Migrate(ctx); err != nil {
+		log.Fatalf("postgres migrate: %v", err)
 	}
 	log.Print("using PostgreSQL store")
 	return persistence

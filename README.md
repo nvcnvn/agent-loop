@@ -22,7 +22,7 @@ The recommended first vertical slice from
 | --- | --- |
 | Core domain types, IDs, events, limits, usage, tool definitions | [core/types.go](core/types.go), [core/tool.go](core/tool.go) |
 | Event-sourced in-memory store (sessions, runs, tasks, events, approvals, artifacts) with monotonic per-run sequence allocation under concurrency | [store/store.go](store/store.go) |
-| PostgreSQL driver (pgx v5, pgxpool, embedded migration, polling Subscribe) | [store/pg/pg.go](store/pg/pg.go) |
+| PostgreSQL driver (pgx v5, pgxpool, versioned embedded migrations, polling Subscribe) | [store/pg/pg.go](store/pg/pg.go) |
 | Provider-agnostic model abstraction (`Provider` interface) | [model/model.go](model/model.go) |
 | Mock provider for deterministic tests | [model/mock.go](model/mock.go) |
 | Fixture recorder and request-matching replayer for real-model regression tests | [model/fixture.go](model/fixture.go) |
@@ -107,8 +107,11 @@ AGENT_LOOP_PG_DSN='postgres://postgres:postgres@localhost:5432/agentloop?sslmode
   go test -tags=pg -race -count=1 ./store/pg/...
 ```
 
-The driver embeds [store/pg/schema.sql](store/pg/schema.sql) and applies
-it on `EnsureSchema(ctx)`. Without `AGENT_LOOP_PG_DSN` set the tests
+The driver embeds the numbered migrations in
+[store/pg/migrations/](store/pg/migrations/). `Migrate(ctx)`, which
+`cmd/agent-loop` runs at startup, applies the ones newer than the latest
+version in `schema_migrations`. A schema change is a new numbered file;
+applied files are never edited. Without `AGENT_LOOP_PG_DSN` set the tests
 skip cleanly.
 
 Docker Compose REST integration stack:

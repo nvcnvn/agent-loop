@@ -312,7 +312,7 @@ Operational requirements:
 - [ ] Configurable worker pool and queueing model.
 - [x] Server timeouts (read header, read, idle) and request body size limits (`api.Server.HTTPServer`,
   `MaxBodyBytes`).
-- [ ] **Blocker:** Versioned schema migrations (`EnsureSchema` only creates missing objects).
+- [x] Versioned schema migrations (`store/pg/migrations`, applied by `pg.Store.Migrate`).
 - [ ] **Blocker:** In-process state for finished runs is released (the run and budget maps grow without bound).
 - [ ] Run ownership by lease, so several API replicas can share one database.
 - [ ] Deployment configuration for agents, tools, policy, and limits from file or environment.
