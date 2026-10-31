@@ -133,6 +133,7 @@ running -> canceling -> canceled
 running -> failed
 running -> timed_out
 running -> succeeded
+queued | running | awaiting_approval -> running   # resumed after an interruption
 paused -> canceling
 failed -> queued        # retry as same run attempt only when replay policy allows
 failed -> superseded    # new run attempt replaces it
@@ -140,7 +141,9 @@ failed -> superseded    # new run attempt replaces it
 
 Rules:
 - `run.status` is a projection of the event stream, not the source of truth.
-- A run is resumable when its latest durable event is not terminal and all in-flight work can be reconciled.
+- A run is resumable when it is not terminal and no process is executing it. Resuming reuses the
+  outputs of its completed tasks, marks interrupted tasks failed and runs them again, and cancels
+  its open approvals.
 - Sub-agent execution should be represented as child tasks and optionally child runs when independent replay boundaries are needed.
 
 ### Task

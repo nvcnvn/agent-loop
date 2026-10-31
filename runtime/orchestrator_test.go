@@ -571,6 +571,147 @@ func TestRunMetrics(t *testing.T) {
 	}
 }
 
+// Acceptance: §Session and Run Lifecycle #4 – resume a run after process restart.
+func TestRecoverResumesInterruptedRun(t *testing.T) {
+	planner := model.NewMockProvider()
+	writer := model.NewMockProvider(model.MockResponse{Content: "final"})
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "planner", Model: "m", Provider: planner},
+		{Name: "writer", Model: "m", Provider: writer},
+	})
+	ctx, cancel := waitCtx()
+	defer cancel()
+
+	// The state a process leaves behind when it dies during the second stage.
+	wf := runtime.Workflow{Name: "wf", Stages: []runtime.Stage{
+		{Name: "plan", Agents: []runtime.AgentStep{{Name: "planner", Prompt: "plan {{input.topic}}"}}},
+		{Name: "write", Agents: []runtime.AgentStep{{Name: "writer", Prompt: "write from {{stage.plan}}"}}},
+	}}
+	wfRaw, _ := json.Marshal(wf)
+	runID, err := s.CreateRun(ctx, store.Run{
+		TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunRunning,
+		Limits:   core.Limits{MaxModelCalls: 2}.Defaults(),
+		Usage:    core.Usage{ModelCalls: 1, SubAgents: 2, PromptTokens: 7},
+		Workflow: wfRaw, Input: json.RawMessage(`{"topic":"go"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateTask(ctx, store.Task{
+		TenantID: core.DefaultTenant, RunID: runID, AgentName: "planner", Status: core.TaskCompleted,
+		Input:  json.RawMessage(`{"prompt":"plan go","stage":"plan"}`),
+		Output: json.RawMessage(`{"content":"the plan"}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	interrupted, err := s.CreateTask(ctx, store.Task{
+		TenantID: core.DefaultTenant, RunID: runID, AgentName: "writer", Status: core.TaskRunning,
+		Input: json.RawMessage(`{"prompt":"write from the plan","stage":"write"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := orch.Recover(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("recovered %d runs, err=%v", n, err)
+	}
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
+	if err != nil || res.Outputs["write"] != "final" || res.Outputs["plan"] != "the plan" {
+		t.Fatalf("result=%+v err=%v", res, err)
+	}
+	if len(planner.Calls()) != 0 {
+		t.Fatal("completed planner task ran again")
+	}
+	if got := writer.Calls()[0].Messages; got[len(got)-1].Content != "write from the plan" {
+		t.Fatalf("writer prompt=%q", got[len(got)-1].Content)
+	}
+	// The interrupted writer attempt stays counted, so the rerun makes it 3 sub-agents.
+	if res.Usage.ModelCalls != 2 || res.Usage.PromptTokens < 7 || res.Usage.SubAgents != 3 {
+		t.Fatalf("usage not carried over: %+v", res.Usage)
+	}
+	tasks, _ := s.ListRunTasks(ctx, core.DefaultTenant, runID)
+	for _, task := range tasks {
+		if task.ID == interrupted && task.Status != core.TaskFailed {
+			t.Fatalf("interrupted task status=%s want failed", task.Status)
+		}
+	}
+	if err := orch.Resume(ctx, core.DefaultTenant, runID); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("resume of finished run err=%v want ErrConflict", err)
+	}
+	events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	if err != nil || len(events) == 0 || !strings.Contains(string(events[0].Payload), `"run_resumed"`) {
+		t.Fatalf("first event is not run_resumed: %v err=%v", events, err)
+	}
+}
+
+func TestResumeParallelStageAndPendingApproval(t *testing.T) {
+	b, c := model.NewMockProvider(), model.NewMockProvider()
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "a", Model: "m", Provider: model.NewMockProvider()},
+		{Name: "b", Model: "m", Provider: b},
+		{Name: "c", Model: "m", Provider: c},
+	})
+	orch.MaxActiveRuns, orch.MaxQueuedRuns = 1, 0
+	ctx, cancel := waitCtx()
+	defer cancel()
+	wf := runtime.Workflow{Stages: []runtime.Stage{{Name: "fan", Kind: runtime.StageParallel, FailurePolicy: runtime.WaitAll, Agents: []runtime.AgentStep{
+		{Name: "a", Prompt: "x"}, {Name: "b", Prompt: "y"}, {Name: "c", Prompt: "z"},
+	}}}}
+	wfRaw, _ := json.Marshal(wf)
+	var runIDs []core.RunID
+	var approvalIDs []core.ApprovalID
+	for range 2 {
+		// Interrupted mid-stage: all three reserved, a finished, b running, c never started.
+		runID, err := s.CreateRun(ctx, store.Run{
+			TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunAwaitingApproval,
+			Limits: core.Limits{MaxSubAgents: 4}.Defaults(), Usage: core.Usage{SubAgents: 3},
+			Workflow: wfRaw,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runIDs = append(runIDs, runID)
+		for _, task := range []store.Task{
+			{AgentName: "a", Status: core.TaskCompleted, Input: json.RawMessage(`{"prompt":"x","stage":"fan"}`), Output: json.RawMessage(`{"content":"A"}`)},
+			{AgentName: "b", Status: core.TaskRunning, Input: json.RawMessage(`{"prompt":"y","stage":"fan"}`)},
+		} {
+			task.TenantID, task.RunID = core.DefaultTenant, runID
+			if _, err := s.CreateTask(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+		}
+		approvalID, err := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: runID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		approvalIDs = append(approvalIDs, approvalID)
+		b.Push(model.MockResponse{Content: "B"})
+		c.Push(model.MockResponse{Content: "C"})
+	}
+
+	// Both are recovered although only one slot exists and the queue holds none.
+	if n, err := orch.Recover(ctx); err != nil || n != 2 {
+		t.Fatalf("recovered %d err=%v", n, err)
+	}
+	for _, runID := range runIDs {
+		res, err := orch.Wait(ctx, core.DefaultTenant, runID)
+		if err != nil || res.Outputs["fan"] != "a=A\nb=B\nc=C" {
+			t.Fatalf("result=%+v err=%v", res, err)
+		}
+		// a and b ran before; b and c run now. MaxSubAgents 4 is enough only if
+		// c's earlier reservation is not counted twice.
+		if res.Usage.SubAgents != 4 {
+			t.Fatalf("sub-agents=%d want 4", res.Usage.SubAgents)
+		}
+	}
+	for _, id := range approvalIDs {
+		if a, err := s.GetApproval(ctx, core.DefaultTenant, id); err != nil || a.Status != "canceled" {
+			t.Fatalf("stale approval=%+v err=%v want canceled", a, err)
+		}
+	}
+}
+
 // Acceptance: §Session and Run Lifecycle #2 – idempotency.
 func TestIdempotentStartRun(t *testing.T) {
 	prov := model.NewMockProvider(

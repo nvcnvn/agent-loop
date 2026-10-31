@@ -336,6 +336,30 @@ func TestCancelRunRejectsOtherTenant(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("cancel of a finished run status=%d want 409", resp.StatusCode)
 	}
+
+	for path, want := range map[string]int{
+		"/v1/runs/" + string(runID) + "/resume": http.StatusConflict,
+		"/v1/runs/missing/resume":               http.StatusNotFound,
+	} {
+		resp, err = srv.Client().Post(srv.URL+path, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Fatalf("POST %s status=%d want %d", path, resp.StatusCode, want)
+		}
+	}
+	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/v1/runs/"+string(runID)+"/resume", nil)
+	req.Header.Set("X-Tenant-ID", "00000000-0000-0000-0000-0000000000bb")
+	resp, err = srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-tenant resume status=%d want 404", resp.StatusCode)
+	}
 }
 
 func TestStartRunOverloaded(t *testing.T) {

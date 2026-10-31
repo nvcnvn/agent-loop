@@ -209,7 +209,8 @@ Each error should include:
 1. Create a session, post a human message, start a run, receive ordered SSE events, and finish successfully.
 2. Start a run with an idempotency key twice and verify only one run is created.
 3. Cancel a running run and verify in-flight model/tool calls receive cancellation.
-4. Resume a run after process restart and continue from the latest durable event.
+4. Resume a run after process restart: completed agent tasks are reused, the interrupted task runs
+   again, its usage carries over, and its open approvals are canceled.
 5. Agents see the session's earlier human messages (always as user turns) and earlier runs' answers
    (as assistant turns) between their instructions and the stage prompt.
 

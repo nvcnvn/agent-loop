@@ -55,6 +55,11 @@ func main() {
 		Tools:        []string{"echo", "uppercase", "math.add"},
 	}
 	orch := runtime.NewOrchestrator(persistence, reg, []runtime.Agent{agent})
+	if n, err := orch.Recover(context.Background()); err != nil {
+		slog.Error("recover runs", "resumed", n, "err", err)
+	} else if n > 0 {
+		slog.Info("resumed unfinished runs", "count", n)
+	}
 
 	srv := api.NewServer(orch, persistence)
 	srv.Debug = *debug

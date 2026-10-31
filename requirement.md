@@ -138,7 +138,7 @@ Requirements:
 ### 5.4 Resumability and Replay
 
 The framework must:
-- [ ] **Blocker:** Resume interrupted runs.
+- [x] Resume interrupted runs (`Orchestrator.Resume`, `POST /v1/runs/{rid}/resume`).
 - [ ] Retry failed steps safely.
 - [x] Replay a run for debugging by rebuilding its terminal state from stored events.
 - [x] Store the workflow, input, limits, tool inputs and outputs, and model output for each run.
@@ -237,7 +237,7 @@ Expose HTTP APIs for:
 - [x] Create session.
 - [x] Post human message.
 - [x] Start run.
-- [ ] Resume run.
+- [x] Resume run.
 - [x] List runs and events.
 - [ ] List and download artifacts.
 - [x] Approve or reject gated actions.
@@ -316,7 +316,8 @@ Requirements:
 
 Operational requirements:
 - [ ] **Blocker:** Graceful shutdown: stop accepting work, drain or checkpoint in-flight runs.
-- [ ] **Blocker:** Job recovery after process restart (runs left `running` stay that way forever).
+- [x] Job recovery after process restart: `cmd/agent-loop` calls `Orchestrator.Recover`, which resumes
+  every unfinished run. It assumes one process executes runs (see run ownership by lease below).
 - [x] Liveness endpoint (`/healthz`).
 - [x] Readiness endpoint that checks the database (`/readyz`).
 - [x] Backpressure handling: at most `MaxActiveRuns` runs execute, up to `MaxQueuedRuns` more wait in
@@ -438,10 +439,12 @@ The product vision is met when the framework can:
 - Concurrent tool groups are inferred by the scheduler from each tool's concurrency class, not
   declared in the workflow.
 
+- Resuming a run reuses the outputs of its completed agent tasks and reruns an interrupted task from
+  its start, so steps need no stored records. The interrupted attempt stays in the run's usage, and
+  the resumed run gets a fresh `MaxRuntime`.
+
 Still open:
 - What is the storage strategy for large artifacts? (Today they are stored inline in PostgreSQL.)
-- What does resuming a run after a restart replay: the whole interrupted task, or from the last
-  completed step? This decides whether steps need stored records.
 
 ## 18. First Implementation Milestones
 

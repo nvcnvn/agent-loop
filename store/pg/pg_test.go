@@ -277,6 +277,52 @@ func TestPg_UpdateRunStatusAndUsage(t *testing.T) {
 	}
 }
 
+func TestPg_ListUnfinishedRuns(t *testing.T) {
+	s := freshStore(t)
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	want := map[core.RunID]bool{}
+	for _, status := range []core.RunStatus{core.RunQueued, core.RunRunning, core.RunAwaitingApproval, core.RunSucceeded, core.RunFailed, core.RunCanceled, core.RunTimedOut} {
+		id, err := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: status})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want[id] = !status.Terminal()
+	}
+	runs, err := s.ListUnfinishedRuns(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 3 {
+		t.Fatalf("got %d unfinished runs want 3", len(runs))
+	}
+	for _, r := range runs {
+		if !want[r.ID] {
+			t.Fatalf("finished run %s (%s) listed", r.ID, r.Status)
+		}
+	}
+}
+
+func TestPg_CancelRunApprovals(t *testing.T) {
+	s := freshStore(t)
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	rid, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunAwaitingApproval})
+	open, _ := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: rid})
+	done, _ := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: rid})
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, done, "approved", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CancelRunApprovals(ctx, core.DefaultTenant, rid); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[core.ApprovalID]string{open: "canceled", done: "approved"} {
+		if a, err := s.GetApproval(ctx, core.DefaultTenant, id); err != nil || a.Status != want {
+			t.Fatalf("approval %s=%+v err=%v want %s", id, a, err, want)
+		}
+	}
+}
+
 func TestPg_ExpiredApprovalCannotBeApproved(t *testing.T) {
 	s := freshStore(t)
 	ctx := context.Background()

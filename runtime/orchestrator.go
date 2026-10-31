@@ -89,6 +89,7 @@ type StartRunInput struct {
 	Metadata       map[string]any
 
 	history []model.Message
+	reuse   *completedTasks
 }
 
 // Result is the terminal state returned by Wait.
@@ -247,16 +248,214 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		return "", err
 	}
 	o.Budget.Init(runID, in.Limits)
-
-	runCtx, cancel := context.WithCancel(context.Background())
-	st := &runState{lastAt: time.Now(), tenant: in.TenantID, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
-	o.mu.Lock()
-	o.runs[runID] = st
-	o.mu.Unlock()
-
+	if err := o.launch(runID, in); err != nil {
+		return "", err
+	}
 	started = true
-	go o.queueAndExecute(runCtx, runID, in, st)
 	return runID, nil
+}
+
+// launch starts the goroutine that queues and executes an admitted run.
+func (o *Orchestrator) launch(runID core.RunID, in StartRunInput) error {
+	runCtx, st, err := o.claim(runID, in.TenantID)
+	if err != nil {
+		return err
+	}
+	go o.queueAndExecute(runCtx, runID, in, st)
+	return nil
+}
+
+// claim registers the run as executing in this process, or returns
+// core.ErrConflict if it already is.
+func (o *Orchestrator) claim(runID core.RunID, tenant core.TenantID) (context.Context, *runState, error) {
+	runCtx, cancel := context.WithCancel(context.Background())
+	st := &runState{lastAt: time.Now(), tenant: tenant, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if _, running := o.runs[runID]; running {
+		cancel()
+		return nil, nil, fmt.Errorf("run %s is already executing: %w", runID, core.ErrConflict)
+	}
+	o.runs[runID] = st
+	return runCtx, st, nil
+}
+
+// unclaim undoes a claim whose run never started.
+func (o *Orchestrator) unclaim(runID core.RunID, st *runState) {
+	st.cancel()
+	o.mu.Lock()
+	delete(o.runs, runID)
+	o.mu.Unlock()
+	close(st.done)
+}
+
+// Resume continues the tenant's run that is not finished and not executing
+// in this process, for example after a restart. Agent tasks that completed
+// are reused; a task that was interrupted runs again from its start.
+func (o *Orchestrator) Resume(ctx context.Context, tenant core.TenantID, runID core.RunID) error {
+	return o.resume(ctx, tenant, runID, false)
+}
+
+// Recover resumes every unfinished run in the store and returns how many it
+// resumed. Recovered runs bypass MaxQueuedRuns so none is left behind. It
+// assumes this process is the only one executing runs.
+func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
+	runs, err := o.Store.ListUnfinishedRuns(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var errs []error
+	resumed := 0
+	for _, run := range runs {
+		if err := o.resume(ctx, run.TenantID, run.ID, true); err != nil {
+			errs = append(errs, fmt.Errorf("run %s: %w", run.ID, err))
+			continue
+		}
+		resumed++
+	}
+	return resumed, errors.Join(errs...)
+}
+
+func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID core.RunID, force bool) error {
+	runCtx, st, err := o.claim(runID, tenant)
+	if err != nil {
+		return err
+	}
+	started := false
+	defer func() {
+		if !started {
+			o.unclaim(runID, st)
+		}
+	}()
+	// Read only after claiming, so a run that just finished here is seen as terminal.
+	run, err := o.Store.GetRun(ctx, tenant, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status.Terminal() {
+		return fmt.Errorf("run %s already %s: %w", run.ID, run.Status, core.ErrConflict)
+	}
+	in := StartRunInput{TenantID: run.TenantID, SessionID: run.SessionID, Limits: run.Limits}
+	if err := json.Unmarshal(run.Workflow, &in.Workflow); err != nil {
+		return fmt.Errorf("stored workflow: %w", err)
+	}
+	if len(run.Input) > 0 {
+		if err := json.Unmarshal(run.Input, &in.Input); err != nil {
+			return fmt.Errorf("stored input: %w", err)
+		}
+	}
+	reuse, attempts, err := o.reconcileTasks(ctx, run)
+	if err != nil {
+		return err
+	}
+	in.reuse = reuse
+	if err := o.Approvals.CancelRunApprovals(ctx, run.TenantID, run.ID); err != nil {
+		return err
+	}
+	if force {
+		o.mu.Lock()
+		o.inflight++
+		o.mu.Unlock()
+	} else if err := o.admit(); err != nil {
+		return err
+	}
+	usage := run.Usage
+	// A parallel stage reserves all its agents up front, so the stored count
+	// can include agents that never started; tasks are what actually ran.
+	usage.SubAgents = int64(attempts)
+	o.Budget.Init(run.ID, run.Limits)
+	_ = o.Budget.Commit(run.ID, usage) // over budget already: the next reservation fails the run
+	o.emit(ctx, core.Event{
+		TenantID:   run.TenantID,
+		SessionID:  run.SessionID,
+		RunID:      run.ID,
+		Type:       core.EvSystem,
+		Visibility: core.VisibilityInternal,
+		Payload:    mustJSON(map[string]any{"event": "run_resumed", "from_status": run.Status, "reused_tasks": reuse.count()}),
+	})
+	started = true
+	go o.queueAndExecute(runCtx, run.ID, in, st)
+	return nil
+}
+
+// reconcileTasks collects the outputs of the run's completed tasks, marks
+// tasks that were still running as failed, and returns how many tasks the
+// run has created.
+func (o *Orchestrator) reconcileTasks(ctx context.Context, run store.Run) (*completedTasks, int, error) {
+	tasks, err := o.Store.ListRunTasks(ctx, run.TenantID, run.ID)
+	if err != nil {
+		return nil, 0, err
+	}
+	c := &completedTasks{outputs: map[string][]string{}}
+	for _, t := range tasks {
+		switch t.Status {
+		case core.TaskCompleted:
+			var in struct{ Prompt, Stage string }
+			var out struct{ Content string }
+			if json.Unmarshal(t.Input, &in) != nil || json.Unmarshal(t.Output, &out) != nil {
+				continue
+			}
+			key := taskKey(in.Stage, t.AgentName, in.Prompt)
+			c.outputs[key] = append(c.outputs[key], out.Content)
+		case core.TaskPending, core.TaskRunning:
+			t.Status, t.Error = core.TaskFailed, "interrupted"
+			if err := o.Store.UpdateTask(ctx, t); err != nil {
+				return nil, 0, err
+			}
+		}
+	}
+	return c, len(tasks), nil
+}
+
+// completedTasks holds reusable task outputs keyed by stage, agent and prompt.
+type completedTasks struct {
+	mu      sync.Mutex
+	outputs map[string][]string
+}
+
+func taskKey(stage, agent, prompt string) string { return stage + "\x00" + agent + "\x00" + prompt }
+
+func (c *completedTasks) take(stage, agent, prompt string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := taskKey(stage, agent, prompt)
+	outs := c.outputs[key]
+	if len(outs) == 0 {
+		return "", false
+	}
+	c.outputs[key] = outs[1:]
+	return outs[0], true
+}
+
+// toRun returns how many of the stage's agent steps have no reusable output.
+func (c *completedTasks) toRun(stage string, steps []AgentStep, input, prior map[string]string) int {
+	if c == nil {
+		return len(steps)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	used := map[string]int{}
+	n := 0
+	for _, step := range steps {
+		key := taskKey(stage, step.Name, renderTemplate(step.Prompt, input, prior))
+		if used[key] < len(c.outputs[key]) {
+			used[key]++
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+func (c *completedTasks) count() int {
+	n := 0
+	for _, outs := range c.outputs {
+		n += len(outs)
+	}
+	return n
 }
 
 // admit reserves room for one more executing or queued run, or returns
@@ -351,6 +550,9 @@ func (o *Orchestrator) Wait(ctx context.Context, tenant core.TenantID, runID cor
 	case <-ctx.Done():
 		return Result{}, ctx.Err()
 	case <-st.done:
+		if st.result == nil {
+			return o.storedResult(ctx, tenant, runID)
+		}
 		return *st.result, runError(st.result.Status, st.result.FailureReason)
 	}
 }
@@ -474,7 +676,7 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	}
 
 	usage := o.Budget.Snapshot(runID)
-	usage.Runtime = time.Since(startedAt)
+	usage.Runtime += time.Since(startedAt)
 
 	stopIdleWatch()
 
@@ -557,7 +759,7 @@ func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, i
 			return "", fmt.Errorf("unknown agent: %s", ag.Name)
 		}
 	}
-	if err := o.Budget.Reserve(runID, core.Usage{SubAgents: int64(len(stage.Agents))}); err != nil {
+	if err := o.Budget.Reserve(runID, core.Usage{SubAgents: int64(in.reuse.toRun(stage.Name, stage.Agents, in.Input, prior))}); err != nil {
 		return "", err
 	}
 
@@ -657,6 +859,10 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 	if !ok {
 		return "", fmt.Errorf("unknown agent: %s", step.Name)
 	}
+	prompt := renderTemplate(step.Prompt, in.Input, prior)
+	if out, ok := in.reuse.take(stageName, agent.Name, prompt); ok {
+		return out, nil
+	}
 	reserved := false
 	if reserveBudget {
 		if err := o.Budget.ReserveSubAgent(runID); err != nil {
@@ -664,8 +870,6 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 		}
 		reserved = true
 	}
-
-	prompt := renderTemplate(step.Prompt, in.Input, prior)
 
 	taskID, err := o.Store.CreateTask(ctx, store.Task{
 		TenantID:  in.TenantID,

@@ -11,6 +11,7 @@
 //	GET    /v1/runs/{rid}/events?after=<seq>
 //	GET    /v1/runs/{rid}/stream     (SSE; honours Last-Event-ID)
 //	POST   /v1/runs/{rid}/cancel
+//	POST   /v1/runs/{rid}/resume
 //	POST   /v1/approvals/{aid}
 //	GET    /healthz                  (liveness)
 //	GET    /readyz                   (readiness: the store answers a ping)
@@ -100,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{rid}/events", s.listEvents)
 	mux.HandleFunc("GET /v1/runs/{rid}/stream", s.streamEvents)
 	mux.HandleFunc("POST /v1/runs/{rid}/cancel", s.cancelRun)
+	mux.HandleFunc("POST /v1/runs/{rid}/resume", s.resumeRun)
 	mux.HandleFunc("POST /v1/approvals/{aid}", s.resolveApproval)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -416,6 +418,23 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+func (s *Server) resumeRun(w http.ResponseWriter, r *http.Request) {
+	rid := core.RunID(r.PathValue("rid"))
+	switch err := s.Orch.Resume(r.Context(), tenantOf(r), rid); {
+	case errors.Is(err, core.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, core.ErrConflict):
+		writeErr(w, http.StatusConflict, "conflict", err.Error())
+	case errors.Is(err, core.ErrOverloaded):
+		w.Header().Set("Retry-After", "1")
+		writeErr(w, http.StatusServiceUnavailable, "overloaded", err.Error())
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+	default:
+		w.WriteHeader(http.StatusAccepted)
+	}
 }
 
 func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {

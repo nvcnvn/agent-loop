@@ -139,6 +139,8 @@ type RunStore interface {
 	UpdateRunStatus(ctx context.Context, tenant core.TenantID, id core.RunID, status core.RunStatus, reason string) error
 	UpdateRunUsage(ctx context.Context, tenant core.TenantID, id core.RunID, usage core.Usage) error
 	ListRuns(ctx context.Context, tenant core.TenantID, sessionID core.SessionID) ([]Run, error)
+	// ListUnfinishedRuns returns every tenant's runs that are not in a terminal status.
+	ListUnfinishedRuns(ctx context.Context) ([]Run, error)
 	FindByIdempotency(ctx context.Context, tenant core.TenantID, key string) (Run, error)
 }
 
@@ -156,6 +158,8 @@ type ApprovalStore interface {
 	GetApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID) (Approval, error)
 	ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, resolution json.RawMessage) error
 	WaitForApproval(ctx context.Context, id core.ApprovalID) (Approval, error)
+	// CancelRunApprovals resolves the run's open approvals as "canceled".
+	CancelRunApprovals(ctx context.Context, tenant core.TenantID, run core.RunID) error
 }
 
 // ArtifactStore stores produced artifacts.
@@ -376,6 +380,19 @@ func (m *MemStore) ListRuns(_ context.Context, tenant core.TenantID, sessionID c
 	return out, nil
 }
 
+func (m *MemStore) ListUnfinishedRuns(context.Context) ([]Run, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []Run{}
+	for _, r := range m.runs {
+		if !r.Status.Terminal() {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].QueuedAt.Before(out[j].QueuedAt) })
+	return out, nil
+}
+
 func (m *MemStore) FindByIdempotency(_ context.Context, tenant core.TenantID, key string) (Run, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -476,6 +493,19 @@ func (m *MemStore) ResolveApproval(_ context.Context, tenant core.TenantID, id c
 	e.approval.Resolution = resolution
 	e.approval.ResolvedAt = time.Now().UTC()
 	close(e.done)
+	return nil
+}
+
+func (m *MemStore) CancelRunApprovals(_ context.Context, tenant core.TenantID, run core.RunID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.approvals {
+		if e.approval.TenantID == tenant && e.approval.RunID == run && e.approval.Status == "requested" {
+			e.approval.Status = "canceled"
+			e.approval.ResolvedAt = time.Now().UTC()
+			close(e.done)
+		}
+	}
 	return nil
 }
 

@@ -317,12 +317,19 @@ func (s *Store) UpdateRunUsage(ctx context.Context, tenant core.TenantID, id cor
 }
 
 func (s *Store) ListRuns(ctx context.Context, tenant core.TenantID, sessionID core.SessionID) ([]store.Run, error) {
+	return s.queryRuns(ctx, `WHERE tenant_id=$1 AND session_id=$2`, string(tenant), string(sessionID))
+}
+
+func (s *Store) ListUnfinishedRuns(ctx context.Context) ([]store.Run, error) {
+	return s.queryRuns(ctx, `WHERE status NOT IN ('succeeded', 'failed', 'canceled', 'timed_out')`)
+}
+
+func (s *Store) queryRuns(ctx context.Context, where string, args ...any) ([]store.Run, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT run_id, tenant_id, session_id, parent_run_id, status, limits, usage_totals,
 		       failure_reason, idempotency_key, workflow, input, output,
 		       queued_at, started_at, ended_at
-		FROM runs WHERE tenant_id=$1 AND session_id=$2 ORDER BY queued_at`,
-		string(tenant), string(sessionID))
+		FROM runs `+where+` ORDER BY queued_at`, args...)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -554,6 +561,13 @@ func (s *Store) ResolveApproval(ctx context.Context, tenant core.TenantID, id co
 		return core.ErrConflict
 	}
 	return nil
+}
+
+func (s *Store) CancelRunApprovals(ctx context.Context, tenant core.TenantID, run core.RunID) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE approvals SET status='canceled', resolved_at=now()
+		WHERE tenant_id=$1 AND run_id=$2 AND status='requested'`, string(tenant), string(run))
+	return mapErr(err)
 }
 
 // WaitForApproval polls until the approval resolves or ctx is canceled.
