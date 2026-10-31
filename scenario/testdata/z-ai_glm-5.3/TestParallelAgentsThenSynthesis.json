@@ -1,0 +1,473 @@
+[
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the uppercase tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Uppercase the text: agent loop"
+        }
+      ],
+      "tools": [
+        {
+          "name": "uppercase",
+          "description": "Return the uppercase version of the provided text.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The user wants me to uppercase the text \"agent loop\". I'll call the uppercase tool with this text, then reply with only the result value.",
+        "tool_calls": [
+          {
+            "id": "call_8fa8d4d785b2d153",
+            "name": "uppercase",
+            "input": {
+              "text": "agent loop"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_8fa8d4d785b2d153",
+          "name": "uppercase",
+          "input": {
+            "text": "agent loop"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 181,
+        "completion_tokens": 42,
+        "cached_tokens": 0,
+        "total_tokens": 223,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "839223ddd1413ab4",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_8fa8d4d785b2d153",
+                  "type": "function",
+                  "function": {
+                    "name": "uppercase",
+                    "arguments": "{\"text\": \"agent loop\"}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "The user wants me to uppercase the text \"agent loop\". I'll call the uppercase tool with this text, then reply with only the result value."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455522,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 181,
+          "completion_tokens": 42,
+          "total_tokens": 223
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the math.add tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Add 2 and 3."
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The user wants me to add 2 and 3. I have a math_add tool available. The instructions say to always call the math.add tool exactly once, then reply with only its result value.\n\nSo I should call math_add with a=2 and b=3, then reply with only the result value (which should be 5).",
+        "tool_calls": [
+          {
+            "id": "call_ac76948edc8e5ecb",
+            "name": "math.add",
+            "input": {
+              "a": 2,
+              "b": 3
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_ac76948edc8e5ecb",
+          "name": "math.add",
+          "input": {
+            "a": 2,
+            "b": 3
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 192,
+        "completion_tokens": 88,
+        "cached_tokens": 128,
+        "total_tokens": 280,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "9e7447306a381793",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_ac76948edc8e5ecb",
+                  "type": "function",
+                  "function": {
+                    "name": "math_add",
+                    "arguments": "{\"a\": 2, \"b\": 3}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "The user wants me to add 2 and 3. I have a math_add tool available. The instructions say to always call the math.add tool exactly once, then reply with only its result value.\n\nSo I should call math_add with a=2 and b=3, then reply with only the result value (which should be 5)."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455522,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 192,
+          "completion_tokens": 88,
+          "total_tokens": 280,
+          "prompt_tokens_details": {
+            "audio_tokens": null,
+            "cached_tokens": 128
+          }
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the math.add tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Add 2 and 3."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants me to add 2 and 3. I have a math_add tool available. The instructions say to always call the math.add tool exactly once, then reply with only its result value.\n\nSo I should call math_add with a=2 and b=3, then reply with only the result value (which should be 5).",
+          "tool_calls": [
+            {
+              "id": "call_ac76948edc8e5ecb",
+              "name": "math.add",
+              "input": {
+                "a": 2,
+                "b": 3
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"sum\":5}",
+          "name": "math.add",
+          "tool_call_id": "call_ac76948edc8e5ecb"
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "5"
+      },
+      "usage": {
+        "prompt_tokens": 219,
+        "completion_tokens": 3,
+        "cached_tokens": 0,
+        "total_tokens": 222,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "998026461b8bd018",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "5",
+              "role": "assistant",
+              "reasoning_content": null
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455524,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 219,
+          "completion_tokens": 3,
+          "total_tokens": 222
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the uppercase tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Uppercase the text: agent loop"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants me to uppercase the text \"agent loop\". I'll call the uppercase tool with this text, then reply with only the result value.",
+          "tool_calls": [
+            {
+              "id": "call_8fa8d4d785b2d153",
+              "name": "uppercase",
+              "input": {
+                "text": "agent loop"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"text\":\"AGENT LOOP\"}",
+          "name": "uppercase",
+          "tool_call_id": "call_8fa8d4d785b2d153"
+        }
+      ],
+      "tools": [
+        {
+          "name": "uppercase",
+          "description": "Return the uppercase version of the provided text.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "AGENT LOOP"
+      },
+      "usage": {
+        "prompt_tokens": 203,
+        "completion_tokens": 4,
+        "cached_tokens": 128,
+        "total_tokens": 207,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "93d61d0ac3749e71",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "AGENT LOOP",
+              "role": "assistant",
+              "reasoning_content": null
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455524,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 203,
+          "completion_tokens": 4,
+          "total_tokens": 207,
+          "prompt_tokens_details": {
+            "audio_tokens": null,
+            "cached_tokens": 128
+          }
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are terse."
+        },
+        {
+          "role": "user",
+          "content": "Repeat these results on one line:\nshouter=AGENT LOOP\nadder=5"
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "shouter=AGENT LOOP adder=5",
+        "thinking": "The user wants me to repeat these results on one line. Let me look at what they've provided:\n\nshouter=AGENT LOOP\nadder=5\n\nThey want this on one line. So I should format it as:\nshouter=AGENT LOOP adder=5\n\nThat seems like the most straightforward interpretation. Just combine them onto a single line."
+      },
+      "usage": {
+        "prompt_tokens": 33,
+        "completion_tokens": 82,
+        "cached_tokens": 0,
+        "total_tokens": 115,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "a99a74ddf5d71dc5",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "shouter=AGENT LOOP adder=5",
+              "role": "assistant",
+              "reasoning_content": "The user wants me to repeat these results on one line. Let me look at what they've provided:\n\nshouter=AGENT LOOP\nadder=5\n\nThey want this on one line. So I should format it as:\nshouter=AGENT LOOP adder=5\n\nThat seems like the most straightforward interpretation. Just combine them onto a single line."
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455525,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 33,
+          "completion_tokens": 82,
+          "total_tokens": 115
+        }
+      }
+    }
+  }
+]

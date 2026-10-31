@@ -27,7 +27,7 @@ func TestEncodeRequest(t *testing.T) {
 		},
 		Tools:          []model.ToolSpec{{Name: "math.add", Description: "sum", InputSchema: json.RawMessage(`{"type":"object"}`)}},
 		ResponseSchema: json.RawMessage(`{"type":"object"}`),
-		Parameters:     map[string]any{"temperature": 0},
+		Parameters:     map[string]any{"temperature": 0, "max_tokens": 5},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestEncodeRequest(t *testing.T) {
 		`{"role":"tool","content":"{\"sum\":1}","tool_name":"math.add","tool_call_id":"call_0"}],` +
 		`"stream":false,` +
 		`"tools":[{"function":{"description":"sum","name":"math.add","parameters":{"type":"object"}},"type":"function"}],` +
-		`"options":{"temperature":0},"format":{"type":"object"}}`
+		`"options":{"num_predict":5,"temperature":0},"format":{"type":"object"}}`
 	if string(buf) != want {
 		t.Fatalf("got  %s\nwant %s", buf, want)
 	}

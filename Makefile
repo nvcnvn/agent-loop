@@ -14,7 +14,7 @@ HOST_DOCKER_OLLAMA_URL ?= http://host.docker.internal:11434
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test fuzz record-docker-ollama record-host-ollama pg-up pg-down ollama-up ollama-down stack-down api-local-docker-ollama api-local-host-ollama test-local test-stack-docker-ollama test-stack-host-ollama
+.PHONY: help test fuzz record-docker-ollama record-host-ollama record-openai pg-up pg-down ollama-up ollama-down stack-down api-local-docker-ollama api-local-host-ollama test-local test-stack-docker-ollama test-stack-host-ollama
 
 help:
 	@printf '%s\n' \
@@ -22,6 +22,7 @@ help:
 	  'fuzz                     Fuzz every Fuzz* target for $(FUZZTIME) each' \
 	  'record-docker-ollama     Run ./scenario live against Dockerized Ollama and rewrite its fixtures' \
 	  'record-host-ollama       Run ./scenario live against host Ollama on localhost:11434 and rewrite the fixtures of OLLAMA_MODEL' \
+	  'record-openai            Run ./scenario live against LLM_BASE_URL/LLM_MODEL from .env (paid) and rewrite its fixtures' \
 	  'api-local-docker-ollama  Start local API with Postgres + Dockerized Ollama on localhost:41434' \
 	  'api-local-host-ollama    Start local API with Postgres + host Ollama on localhost:11434' \
 	  'test-local               Run REST integration tests against a local API on localhost:8080' \
@@ -48,6 +49,10 @@ record-docker-ollama: ollama-up
 record-host-ollama:
 	ollama pull '$(OLLAMA_MODEL)'
 	OLLAMA_BASE_URL='$(HOST_OLLAMA_URL)' OLLAMA_MODEL='$(OLLAMA_MODEL)' \
+	go test -count=1 -v ./scenario -args -record
+
+record-openai:
+	set -a && . ./.env && set +a && \
 	go test -count=1 -v ./scenario -args -record
 
 pg-up:

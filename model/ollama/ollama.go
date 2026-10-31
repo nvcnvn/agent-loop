@@ -91,7 +91,7 @@ func (p *Provider) post(ctx context.Context, path string, body []byte, out any) 
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ollama: %s: status %d: %s", path, resp.StatusCode, string(raw))
+		return model.NewStatusError("ollama "+path, resp, raw)
 	}
 	if r, ok := out.(*json.RawMessage); ok {
 		*r = raw
@@ -166,11 +166,21 @@ func encodeRequest(req model.ChatRequest) ([]byte, error) {
 		})
 	}
 
+	var options map[string]any
+	for k, v := range req.Parameters {
+		if options == nil {
+			options = map[string]any{}
+		}
+		if k == "max_tokens" {
+			k = "num_predict"
+		}
+		options[k] = v
+	}
 	return json.Marshal(chatRequest{
 		Model:    req.Model,
 		Messages: msgs,
 		Tools:    tools,
-		Options:  req.Parameters,
+		Options:  options,
 		Format:   req.ResponseSchema,
 	})
 }

@@ -18,24 +18,34 @@ import (
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
 	"github.com/nvcnvn/agent-loop/model/ollama"
+	"github.com/nvcnvn/agent-loop/model/openai"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 	"github.com/nvcnvn/agent-loop/tool"
 )
 
-var record = flag.Bool("record", false, "record the scenarios of OLLAMA_MODEL against live Ollama (OLLAMA_BASE_URL) and rewrite its fixtures")
+var record = flag.Bool("record", false, "record the scenarios of OLLAMA_MODEL against live Ollama (OLLAMA_BASE_URL), or of LLM_MODEL against an OpenAI-compatible endpoint (LLM_BASE_URL, LLM_API_KEY), and rewrite its fixtures")
 
 // testModel is a model with recorded fixtures in testdata/<slug>/. Every
 // scenario runs once per model; vision scenarios only for vision models.
 type testModel struct {
 	name   string
 	vision bool
+	openai bool // served over an OpenAI-compatible API instead of Ollama
 }
 
 var models = []testModel{
 	{name: "gemma4:e2b-it-qat", vision: true},
 	{name: "qwen3-vl:2b", vision: true},
 	{name: "ministral-3:3b", vision: true},
+	{name: "z-ai/glm-5.3", openai: true},
+}
+
+func (m testModel) live() bool {
+	if m.openai {
+		return *record && os.Getenv("LLM_MODEL") == m.name
+	}
+	return *record && os.Getenv("OLLAMA_MODEL") == m.name
 }
 
 func slug(name string) string { return strings.NewReplacer(":", "_", "/", "_").Replace(name) }
@@ -43,27 +53,31 @@ func slug(name string) string { return strings.NewReplacer(":", "_", "/", "_").R
 // forEachModel runs scenario as a subtest per model. With -record, the
 // subtest of OLLAMA_MODEL talks to the live model; the others replay.
 func forEachModel(t *testing.T, needsVision bool, scenario func(t *testing.T, prov model.Provider, name string)) {
-	live := os.Getenv("OLLAMA_MODEL")
-	if *record && !slices.ContainsFunc(models, func(m testModel) bool { return m.name == live }) {
-		t.Fatalf("-record needs OLLAMA_MODEL set to one of the models in scenario_test.go, not %q", live)
+	if *record && !slices.ContainsFunc(models, testModel.live) {
+		t.Fatalf("-record needs OLLAMA_MODEL or LLM_MODEL set to one of the models in scenario_test.go")
 	}
 	for _, m := range models {
 		if needsVision && !m.vision {
 			continue
 		}
 		t.Run(slug(m.name), func(t *testing.T) {
-			scenario(t, provider(t, m.name, *record && m.name == live), m.name)
+			scenario(t, provider(t, m), m.name)
 		})
 	}
 }
 
-func provider(t *testing.T, name string, live bool) model.Provider {
+func provider(t *testing.T, m testModel) model.Provider {
 	t.Helper()
+	name := m.name
 	path := filepath.Join("testdata", slug(name), strings.Split(t.Name(), "/")[0]+".json")
-	if !live {
+	if !m.live() {
 		rep, err := model.LoadReplayer(path)
 		if err != nil {
-			t.Fatalf("%v (record it: make record-host-ollama OLLAMA_MODEL=%s)", err, name)
+			hint := "make record-host-ollama OLLAMA_MODEL=" + name
+			if m.openai {
+				hint = "make record-openai LLM_MODEL=" + name
+			}
+			t.Fatalf("%v (record it: %s)", err, hint)
 		}
 		t.Cleanup(func() {
 			if n := rep.Remaining(); n > 0 && !t.Failed() {
@@ -72,7 +86,11 @@ func provider(t *testing.T, name string, live bool) model.Provider {
 		})
 		return rep
 	}
-	rec := model.NewRecorder(ollama.New(os.Getenv("OLLAMA_BASE_URL"), &http.Client{Timeout: 10 * time.Minute}))
+	var live model.Provider = ollama.New(os.Getenv("OLLAMA_BASE_URL"), &http.Client{Timeout: 10 * time.Minute})
+	if m.openai {
+		live = model.WithRetry(openai.New(os.Getenv("LLM_BASE_URL"), os.Getenv("LLM_API_KEY")))
+	}
+	rec := model.NewRecorder(live)
 	t.Cleanup(func() {
 		if t.Failed() {
 			t.Logf("not saving %s: scenario failed against the live model", path)

@@ -1,0 +1,203 @@
+[
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a team assistant. Look facts up in the team's notes with notes.search before answering."
+        },
+        {
+          "role": "user",
+          "content": "When and where is the Q3 offsite? Answer in one sentence."
+        }
+      ],
+      "tools": [
+        {
+          "name": "notes.search",
+          "description": "Search the team's notes.",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "description": "words to look for",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The user is asking about a Q3 offsite - when and where. I should search the team's notes for this information. Let me search for relevant terms.",
+        "tool_calls": [
+          {
+            "id": "call_8ae4d46a56ca7f3e",
+            "name": "notes.search",
+            "input": {
+              "query": "Q3 offsite"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_8ae4d46a56ca7f3e",
+          "name": "notes.search",
+          "input": {
+            "query": "Q3 offsite"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 204,
+        "completion_tokens": 61,
+        "cached_tokens": 0,
+        "total_tokens": 265,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "911273507dc3e1b1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_8ae4d46a56ca7f3e",
+                  "type": "function",
+                  "function": {
+                    "name": "notes_search",
+                    "arguments": "{\"query\": \"Q3 offsite\"}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "The user is asking about a Q3 offsite - when and where. I should search the team's notes for this information. Let me search for relevant terms."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455506,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 204,
+          "completion_tokens": 61,
+          "total_tokens": 265
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a team assistant. Look facts up in the team's notes with notes.search before answering."
+        },
+        {
+          "role": "user",
+          "content": "When and where is the Q3 offsite? Answer in one sentence."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user is asking about a Q3 offsite - when and where. I should search the team's notes for this information. Let me search for relevant terms.",
+          "tool_calls": [
+            {
+              "id": "call_8ae4d46a56ca7f3e",
+              "name": "notes.search",
+              "input": {
+                "query": "Q3 offsite"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"notes\":[{\"body\":\"The Q3 offsite is on 14 November in Lisbon. Flights are booked by the travel team.\",\"title\":\"Q3 offsite\"}]}",
+          "name": "notes.search",
+          "tool_call_id": "call_8ae4d46a56ca7f3e"
+        }
+      ],
+      "tools": [
+        {
+          "name": "notes.search",
+          "description": "Search the team's notes.",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "description": "words to look for",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "The Q3 offsite is on 14 November in Lisbon, with flights booked by the travel team."
+      },
+      "usage": {
+        "prompt_tokens": 258,
+        "completion_tokens": 23,
+        "cached_tokens": 0,
+        "total_tokens": 281,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "b85e69a19c22f95a",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "The Q3 offsite is on 14 November in Lisbon, with flights booked by the travel team.",
+              "role": "assistant",
+              "reasoning_content": null
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455511,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 258,
+          "completion_tokens": 23,
+          "total_tokens": 281
+        }
+      }
+    }
+  }
+]

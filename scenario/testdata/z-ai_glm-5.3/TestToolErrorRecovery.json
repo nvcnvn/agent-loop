@@ -1,0 +1,347 @@
+[
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer stock questions with the inventory.stock tool. If a tool returns an error, read it, fix the input and call the tool again."
+        },
+        {
+          "role": "user",
+          "content": "How many units of item 7731 do we have in stock? Pass the item number to the tool as given."
+        }
+      ],
+      "tools": [
+        {
+          "name": "inventory.stock",
+          "description": "Units in stock for a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The user wants to know the stock for item 7731. They said to pass the item number as given, so I'll pass \"7731\" as the SKU.",
+        "tool_calls": [
+          {
+            "id": "call_955859ca5b6c5cde",
+            "name": "inventory.stock",
+            "input": {
+              "sku": "7731"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_955859ca5b6c5cde",
+          "name": "inventory.stock",
+          "input": {
+            "sku": "7731"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 208,
+        "completion_tokens": 51,
+        "cached_tokens": 0,
+        "total_tokens": 259,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "81047a9d4ab7063e",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_955859ca5b6c5cde",
+                  "type": "function",
+                  "function": {
+                    "name": "inventory_stock",
+                    "arguments": "{\"sku\": \"7731\"}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "The user wants to know the stock for item 7731. They said to pass the item number as given, so I'll pass \"7731\" as the SKU."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455393,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 208,
+          "completion_tokens": 51,
+          "total_tokens": 259
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer stock questions with the inventory.stock tool. If a tool returns an error, read it, fix the input and call the tool again."
+        },
+        {
+          "role": "user",
+          "content": "How many units of item 7731 do we have in stock? Pass the item number to the tool as given."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants to know the stock for item 7731. They said to pass the item number as given, so I'll pass \"7731\" as the SKU.",
+          "tool_calls": [
+            {
+              "id": "call_955859ca5b6c5cde",
+              "name": "inventory.stock",
+              "input": {
+                "sku": "7731"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"error\":\"unknown sku \\\"7731\\\": SKUs look like SKU-7731\"}",
+          "name": "inventory.stock",
+          "tool_call_id": "call_955859ca5b6c5cde"
+        }
+      ],
+      "tools": [
+        {
+          "name": "inventory.stock",
+          "description": "Units in stock for a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The error says the SKU needs to look like \"SKU-7731\". The user said \"Pass the item number to the tool as given\" but the tool returned an error, so I should fix the input and call it again with the proper format SKU-7731.",
+        "tool_calls": [
+          {
+            "id": "call_8440574b4e0ea879",
+            "name": "inventory.stock",
+            "input": {
+              "sku": "SKU-7731"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_8440574b4e0ea879",
+          "name": "inventory.stock",
+          "input": {
+            "sku": "SKU-7731"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 246,
+        "completion_tokens": 73,
+        "cached_tokens": 0,
+        "total_tokens": 319,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "892fc14d9892c7de",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_8440574b4e0ea879",
+                  "type": "function",
+                  "function": {
+                    "name": "inventory_stock",
+                    "arguments": "{\"sku\": \"SKU-7731\"}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "The error says the SKU needs to look like \"SKU-7731\". The user said \"Pass the item number to the tool as given\" but the tool returned an error, so I should fix the input and call it again with the proper format SKU-7731."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455394,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 246,
+          "completion_tokens": 73,
+          "total_tokens": 319
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer stock questions with the inventory.stock tool. If a tool returns an error, read it, fix the input and call the tool again."
+        },
+        {
+          "role": "user",
+          "content": "How many units of item 7731 do we have in stock? Pass the item number to the tool as given."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants to know the stock for item 7731. They said to pass the item number as given, so I'll pass \"7731\" as the SKU.",
+          "tool_calls": [
+            {
+              "id": "call_955859ca5b6c5cde",
+              "name": "inventory.stock",
+              "input": {
+                "sku": "7731"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"error\":\"unknown sku \\\"7731\\\": SKUs look like SKU-7731\"}",
+          "name": "inventory.stock",
+          "tool_call_id": "call_955859ca5b6c5cde"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The error says the SKU needs to look like \"SKU-7731\". The user said \"Pass the item number to the tool as given\" but the tool returned an error, so I should fix the input and call it again with the proper format SKU-7731.",
+          "tool_calls": [
+            {
+              "id": "call_8440574b4e0ea879",
+              "name": "inventory.stock",
+              "input": {
+                "sku": "SKU-7731"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"in_stock\":42,\"sku\":\"SKU-7731\"}",
+          "name": "inventory.stock",
+          "tool_call_id": "call_8440574b4e0ea879"
+        }
+      ],
+      "tools": [
+        {
+          "name": "inventory.stock",
+          "description": "Units in stock for a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "We have **42 units** of item SKU-7731 in stock.",
+        "thinking": "The user asked how many units of item 7731 are in stock. The tool first errored with just \"7731\" because SKUs need the \"SKU-\" prefix. I fixed it and got the answer: 42 units in stock."
+      },
+      "usage": {
+        "prompt_tokens": 280,
+        "completion_tokens": 70,
+        "cached_tokens": 192,
+        "total_tokens": 350,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "ac02dc40987b97c5",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "We have **42 units** of item SKU-7731 in stock.",
+              "role": "assistant",
+              "reasoning_content": "The user asked how many units of item 7731 are in stock. The tool first errored with just \"7731\" because SKUs need the \"SKU-\" prefix. I fixed it and got the answer: 42 units in stock."
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455399,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 280,
+          "completion_tokens": 70,
+          "total_tokens": 350,
+          "prompt_tokens_details": {
+            "audio_tokens": null,
+            "cached_tokens": 192
+          }
+        }
+      }
+    }
+  }
+]

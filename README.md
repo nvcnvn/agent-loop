@@ -27,6 +27,8 @@ The recommended first vertical slice from
 | Mock provider for deterministic tests | [model/mock.go](model/mock.go) |
 | Fixture recorder and request-matching replayer for real-model regression tests | [model/fixture.go](model/fixture.go) |
 | Ollama provider (`/api/chat`) | [model/ollama/ollama.go](model/ollama/ollama.go) |
+| OpenAI-compatible provider (`/chat/completions`; GLM, OpenAI, vLLM): tool-name mapping, reasoning, cached tokens, cost from configured prices | [model/openai/openai.go](model/openai/openai.go) |
+| Retry with jittered backoff and `Retry-After` for transient provider errors | [model/retry.go](model/retry.go) |
 | Native Go tool registry + builtin demo tools (`echo`, `uppercase`, `math.add`) | [tool/tool.go](tool/tool.go) |
 | Tool policy (allow / deny / approval) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost) | [policy/policy.go](policy/policy.go) |
@@ -49,8 +51,8 @@ driver-agnostic.
 ## Run it
 
 Default test suite: unit tests, fuzz seeds and end-to-end scenarios
-replayed from output recorded on `gemma4:e2b-it-qat`, `qwen3-vl:2b` and
-`ministral-3:3b`, including image input. It needs no external
+replayed from output recorded on `gemma4:e2b-it-qat`, `qwen3-vl:2b`,
+`ministral-3:3b` and `z-ai/glm-5.3`, including image input. It needs no external
 services and runs in CI:
 
 ```sh
@@ -59,8 +61,8 @@ make test   # go test -race -count=1 ./...
 
 [.claude/skills/testing/SKILL.md](.claude/skills/testing/SKILL.md) explains
 which tier a test belongs in, and how to fuzz (`make fuzz`) and re-record the
-scenario fixtures from a live model (`make record-docker-ollama` or
-`make record-host-ollama`).
+scenario fixtures from a live model (`make record-docker-ollama`,
+`make record-host-ollama`, or `make record-openai` for a hosted API).
 
 Programmatic workflow demo:
 
@@ -209,6 +211,9 @@ OLLAMA_BASE_URL='http://localhost:41434' \
 OLLAMA_MODEL='gemma4:e2b-it-qat' \
 OLLAMA_TIMEOUT_SECONDS=900 \
 go run ./cmd/agent-loop -addr :8080 -debug -trust-identity-headers
+
+# or a hosted OpenAI-compatible API instead of Ollama (cp .env.example .env and fill it in):
+set -a && . ./.env && set +a && go run ./cmd/agent-loop -debug -trust-identity-headers
 
 AGENT_LOOP_REST_URL='http://localhost:8080' \
 AGENT_LOOP_REST_TIMEOUT=900 \

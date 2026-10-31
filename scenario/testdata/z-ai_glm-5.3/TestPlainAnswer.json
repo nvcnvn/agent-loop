@@ -1,0 +1,60 @@
+[
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are terse."
+        },
+        {
+          "role": "user",
+          "content": "Repeat this word and nothing else: pong"
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "pong",
+        "thinking": "The user wants me to repeat the word \"pong\" and nothing else."
+      },
+      "usage": {
+        "prompt_tokens": 25,
+        "completion_tokens": 18,
+        "cached_tokens": 0,
+        "total_tokens": 43,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "b39c9cd8386a77c4",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "pong",
+              "role": "assistant",
+              "reasoning_content": "The user wants me to repeat the word \"pong\" and nothing else."
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455516,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 25,
+          "completion_tokens": 18,
+          "total_tokens": 43
+        }
+      }
+    }
+  }
+]

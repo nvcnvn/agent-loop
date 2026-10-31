@@ -1,6 +1,6 @@
 // Command agent-loop runs the agent-loop runtime over HTTP. By default it uses
-// the in-memory store and mock model provider; environment variables can switch
-// local testing to PostgreSQL and Ollama.
+// the in-memory store and mock model provider; environment variables switch to
+// PostgreSQL, Ollama, or an OpenAI-compatible endpoint (LLM_BASE_URL, LLM_MODEL).
 //
 // Usage:
 //
@@ -36,6 +36,7 @@ import (
 	"github.com/nvcnvn/agent-loop/api"
 	"github.com/nvcnvn/agent-loop/model"
 	"github.com/nvcnvn/agent-loop/model/ollama"
+	"github.com/nvcnvn/agent-loop/model/openai"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 	pgstore "github.com/nvcnvn/agent-loop/store/pg"
@@ -222,6 +223,16 @@ func openStore() store.Store {
 }
 
 func openProvider() (model.Provider, string) {
+	if name := os.Getenv("LLM_MODEL"); name != "" && os.Getenv("LLM_BASE_URL") != "" {
+		p := openai.New(os.Getenv("LLM_BASE_URL"), os.Getenv("LLM_API_KEY"))
+		if raw := os.Getenv("LLM_PRICE"); raw != "" {
+			if _, err := fmt.Sscanf(raw, "%g,%g,%g", &p.Price.Input, &p.Price.CachedInput, &p.Price.Output); err != nil {
+				fatal("invalid LLM_PRICE, want input,cached_input,output per million tokens", err)
+			}
+		}
+		slog.Info("using OpenAI-compatible endpoint", "model", name, "base_url", p.BaseURL)
+		return model.WithRetry(p), name
+	}
 	modelName := os.Getenv("OLLAMA_MODEL")
 	if modelName == "" {
 		return model.NewMockProvider(model.MockResponse{Content: "Hello from agent-loop!"}), "mock"
@@ -239,5 +250,5 @@ func openProvider() (model.Provider, string) {
 		timeout = time.Duration(seconds) * time.Second
 	}
 	slog.Info("using Ollama", "model", modelName, "timeout", timeout)
-	return ollama.New(baseURL, &http.Client{Timeout: timeout}), modelName
+	return model.WithRetry(ollama.New(baseURL, &http.Client{Timeout: timeout})), modelName
 }

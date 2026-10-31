@@ -1,0 +1,210 @@
+[
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always use the math.add tool for arithmetic. After the tool result, answer with only the number."
+        },
+        {
+          "role": "user",
+          "content": "What is 19 + 23?"
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The user wants to know 19 + 23. I should use the math_add tool.",
+        "tool_calls": [
+          {
+            "id": "call_a42e02bd9db36a13",
+            "name": "math.add",
+            "input": {
+              "a": 19,
+              "b": 23
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_a42e02bd9db36a13",
+          "name": "math.add",
+          "input": {
+            "a": 19,
+            "b": 23
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 196,
+        "completion_tokens": 37,
+        "cached_tokens": 0,
+        "total_tokens": 233,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "8d7fd283d8d43acc",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_a42e02bd9db36a13",
+                  "type": "function",
+                  "function": {
+                    "name": "math_add",
+                    "arguments": "{\"a\": 19, \"b\": 23}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "The user wants to know 19 + 23. I should use the math_add tool."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455518,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 196,
+          "completion_tokens": 37,
+          "total_tokens": 233
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always use the math.add tool for arithmetic. After the tool result, answer with only the number."
+        },
+        {
+          "role": "user",
+          "content": "What is 19 + 23?"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants to know 19 + 23. I should use the math_add tool.",
+          "tool_calls": [
+            {
+              "id": "call_a42e02bd9db36a13",
+              "name": "math.add",
+              "input": {
+                "a": 19,
+                "b": 23
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"sum\":42}",
+          "name": "math.add",
+          "tool_call_id": "call_a42e02bd9db36a13"
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "42"
+      },
+      "usage": {
+        "prompt_tokens": 223,
+        "completion_tokens": 3,
+        "cached_tokens": 0,
+        "total_tokens": 226,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "8c96cbc685027812",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "42",
+              "role": "assistant",
+              "reasoning_content": null
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455520,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 223,
+          "completion_tokens": 3,
+          "total_tokens": 226
+        }
+      }
+    }
+  }
+]

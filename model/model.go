@@ -66,8 +66,10 @@ type ChatRequest struct {
 	Tools          []ToolSpec      `json:"tools,omitempty"`
 	ToolCallMode   string          `json:"tool_call_mode,omitempty"` // "auto" | "required" | "none"
 	ResponseSchema json.RawMessage `json:"response_schema,omitempty"`
-	Parameters     map[string]any  `json:"parameters,omitempty"`
-	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+	// Parameters uses canonical names (temperature, top_p, max_tokens, seed,
+	// stop) that each provider maps to its own; Ollama passes others through.
+	Parameters     map[string]any `json:"parameters,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 }
 
 // ChatResponse is the unified chat completion response.

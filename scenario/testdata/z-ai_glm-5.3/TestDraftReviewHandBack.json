@@ -1,0 +1,522 @@
+[
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You write short, polite replies to customers. Reply with only the text of the reply."
+        },
+        {
+          "role": "user",
+          "content": "Write a reply of at most three sentences to a customer whose monitor delivery is late.\nReviewer feedback on your previous draft, if any: "
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "We sincerely apologize for the delay in delivering your monitor. We're actively working with the carrier to resolve this and will send you updated tracking information as soon as possible. Thank you for your patience, and please don't hesitate to reach out if you have any questions.",
+        "thinking": "The task: write a short, polite reply to a customer whose monitor delivery is late. At most three sentences. Only the text of the reply.\n\nNo reviewer feedback provided, so just write the reply fresh.\n\nLet me draft:\n\n\"Dear Customer, We sincerely apologize for the delay in delivering your monitor. We are working to resolve this as quickly as possible and will send you an updated tracking information shortly. Thank you for your patience and understanding.\"\n\nThat's three sentences. Good. Keep it polite and short."
+      },
+      "usage": {
+        "prompt_tokens": 59,
+        "completion_tokens": 157,
+        "cached_tokens": 0,
+        "total_tokens": 216,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "bfe192895feffd10",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "We sincerely apologize for the delay in delivering your monitor. We're actively working with the carrier to resolve this and will send you updated tracking information as soon as possible. Thank you for your patience, and please don't hesitate to reach out if you have any questions.",
+              "role": "assistant",
+              "reasoning_content": "The task: write a short, polite reply to a customer whose monitor delivery is late. At most three sentences. Only the text of the reply.\n\nNo reviewer feedback provided, so just write the reply fresh.\n\nLet me draft:\n\n\"Dear Customer, We sincerely apologize for the delay in delivering your monitor. We are working to resolve this as quickly as possible and will send you an updated tracking information shortly. Thank you for your patience and understanding.\"\n\nThat's three sentences. Good. Keep it polite and short."
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455412,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 59,
+          "completion_tokens": 157,
+          "total_tokens": 216
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Call style.check once with the draft text exactly as given. If the result has ok true, reply with exactly APPROVED. Otherwise reply with REJECTED: followed by the problems it lists."
+        },
+        {
+          "role": "user",
+          "content": "Check this draft:\n\nWe sincerely apologize for the delay in delivering your monitor. We're actively working with the carrier to resolve this and will send you updated tracking information as soon as possible. Thank you for your patience, and please don't hesitate to reach out if you have any questions."
+        }
+      ],
+      "tools": [
+        {
+          "name": "style.check",
+          "description": "Check a customer reply against the support style guide.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The user wants me to check a draft against the support style guide. I need to call style_check once with the draft text exactly as given.",
+        "tool_calls": [
+          {
+            "id": "call_b635da137cb03bb7",
+            "name": "style.check",
+            "input": {
+              "text": "We sincerely apologize for the delay in delivering your monitor. We're actively working with the carrier to resolve this and will send you updated tracking information as soon as possible. Thank you for your patience, and please don't hesitate to reach out if you have any questions."
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_b635da137cb03bb7",
+          "name": "style.check",
+          "input": {
+            "text": "We sincerely apologize for the delay in delivering your monitor. We're actively working with the carrier to resolve this and will send you updated tracking information as soon as possible. Thank you for your patience, and please don't hesitate to reach out if you have any questions."
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 253,
+        "completion_tokens": 93,
+        "cached_tokens": 0,
+        "total_tokens": 346,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "a5658056587e10fe",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_b635da137cb03bb7",
+                  "type": "function",
+                  "function": {
+                    "name": "style_check",
+                    "arguments": "{\"text\": \"We sincerely apologize for the delay in delivering your monitor. We're actively working with the carrier to resolve this and will send you updated tracking information as soon as possible. Thank you for your patience, and please don't hesitate to reach out if you have any questions.\"}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "The user wants me to check a draft against the support style guide. I need to call style_check once with the draft text exactly as given."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455426,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 253,
+          "completion_tokens": 93,
+          "total_tokens": 346
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Call style.check once with the draft text exactly as given. If the result has ok true, reply with exactly APPROVED. Otherwise reply with REJECTED: followed by the problems it lists."
+        },
+        {
+          "role": "user",
+          "content": "Check this draft:\n\nWe sincerely apologize for the delay in delivering your monitor. We're actively working with the carrier to resolve this and will send you updated tracking information as soon as possible. Thank you for your patience, and please don't hesitate to reach out if you have any questions."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants me to check a draft against the support style guide. I need to call style_check once with the draft text exactly as given.",
+          "tool_calls": [
+            {
+              "id": "call_b635da137cb03bb7",
+              "name": "style.check",
+              "input": {
+                "text": "We sincerely apologize for the delay in delivering your monitor. We're actively working with the carrier to resolve this and will send you updated tracking information as soon as possible. Thank you for your patience, and please don't hesitate to reach out if you have any questions."
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"ok\":false,\"problems\":[\"it must mention the ticket number T-1042\"]}",
+          "name": "style.check",
+          "tool_call_id": "call_b635da137cb03bb7"
+        }
+      ],
+      "tools": [
+        {
+          "name": "style.check",
+          "description": "Check a customer reply against the support style guide.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "REJECTED: it must mention the ticket number T-1042",
+        "thinking": "The style check returned ok: false with a problem: it must mention the ticket number T-1042. So I reply with REJECTED: followed by the problems it lists."
+      },
+      "usage": {
+        "prompt_tokens": 339,
+        "completion_tokens": 51,
+        "cached_tokens": 192,
+        "total_tokens": 390,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "8ece8676fb5ed387",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "REJECTED: it must mention the ticket number T-1042",
+              "role": "assistant",
+              "reasoning_content": "The style check returned ok: false with a problem: it must mention the ticket number T-1042. So I reply with REJECTED: followed by the problems it lists."
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455432,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 339,
+          "completion_tokens": 51,
+          "total_tokens": 390,
+          "prompt_tokens_details": {
+            "audio_tokens": null,
+            "cached_tokens": 192
+          }
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You write short, polite replies to customers. Reply with only the text of the reply."
+        },
+        {
+          "role": "user",
+          "content": "Write a reply of at most three sentences to a customer whose monitor delivery is late.\nReviewer feedback on your previous draft, if any: REJECTED: it must mention the ticket number T-1042"
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships.",
+        "thinking": "The task: write a short, polite reply to a customer whose monitor delivery is late. Max three sentences. Must mention ticket number T-1042.\n\nLet me draft:\n\n\"Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042 and our team is working to resolve it as quickly as possible. Thank you for your patience, and we will update you as soon as your order ships.\"\n\nThat's three sentences, mentions T-1042, polite, short."
+      },
+      "usage": {
+        "prompt_tokens": 71,
+        "completion_tokens": 169,
+        "cached_tokens": 0,
+        "total_tokens": 240,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "8c463b6678ba32cc",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships.",
+              "role": "assistant",
+              "reasoning_content": "The task: write a short, polite reply to a customer whose monitor delivery is late. Max three sentences. Must mention ticket number T-1042.\n\nLet me draft:\n\n\"Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042 and our team is working to resolve it as quickly as possible. Thank you for your patience, and we will update you as soon as your order ships.\"\n\nThat's three sentences, mentions T-1042, polite, short."
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455435,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 71,
+          "completion_tokens": 169,
+          "total_tokens": 240
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Call style.check once with the draft text exactly as given. If the result has ok true, reply with exactly APPROVED. Otherwise reply with REJECTED: followed by the problems it lists."
+        },
+        {
+          "role": "user",
+          "content": "Check this draft:\n\nDear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships."
+        }
+      ],
+      "tools": [
+        {
+          "name": "style.check",
+          "description": "Check a customer reply against the support style guide.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The user wants me to check a draft against the support style guide. I should call style_check once with the draft text exactly as given.\n\nThe draft text is:\n\"Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships.\"\n\nLet me call the style_check function with this exact text.",
+        "tool_calls": [
+          {
+            "id": "call_989dcdedc9f33730",
+            "name": "style.check",
+            "input": {
+              "text": "Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships."
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_989dcdedc9f33730",
+          "name": "style.check",
+          "input": {
+            "text": "Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships."
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 259,
+        "completion_tokens": 175,
+        "cached_tokens": 192,
+        "total_tokens": 434,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "bf23cc1ab7e9dfb8",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_989dcdedc9f33730",
+                  "type": "function",
+                  "function": {
+                    "name": "style_check",
+                    "arguments": "{\"text\": \"Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships.\"}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "The user wants me to check a draft against the support style guide. I should call style_check once with the draft text exactly as given.\n\nThe draft text is:\n\"Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships.\"\n\nLet me call the style_check function with this exact text."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455439,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 259,
+          "completion_tokens": 175,
+          "total_tokens": 434,
+          "prompt_tokens_details": {
+            "audio_tokens": null,
+            "cached_tokens": 192
+          }
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Call style.check once with the draft text exactly as given. If the result has ok true, reply with exactly APPROVED. Otherwise reply with REJECTED: followed by the problems it lists."
+        },
+        {
+          "role": "user",
+          "content": "Check this draft:\n\nDear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants me to check a draft against the support style guide. I should call style_check once with the draft text exactly as given.\n\nThe draft text is:\n\"Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships.\"\n\nLet me call the style_check function with this exact text.",
+          "tool_calls": [
+            {
+              "id": "call_989dcdedc9f33730",
+              "name": "style.check",
+              "input": {
+                "text": "Dear Customer, we sincerely apologize for the delay in delivering your monitor. We have logged this issue under ticket number T-1042, and our team is working to expedite your order as quickly as possible. Thank you for your patience, and we will update you as soon as it ships."
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"ok\":true,\"problems\":[]}",
+          "name": "style.check",
+          "tool_call_id": "call_989dcdedc9f33730"
+        }
+      ],
+      "tools": [
+        {
+          "name": "style.check",
+          "description": "Check a customer reply against the support style guide.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "APPROVED",
+        "thinking": "The check returned ok true, so I reply with exactly APPROVED."
+      },
+      "usage": {
+        "prompt_tokens": 341,
+        "completion_tokens": 19,
+        "cached_tokens": 0,
+        "total_tokens": 360,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "b14f8fa81bd95962",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "APPROVED",
+              "role": "assistant",
+              "reasoning_content": "The check returned ok true, so I reply with exactly APPROVED."
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455443,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 341,
+          "completion_tokens": 19,
+          "total_tokens": 360
+        }
+      }
+    }
+  }
+]

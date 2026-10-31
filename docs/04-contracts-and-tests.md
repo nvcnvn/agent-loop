@@ -194,22 +194,32 @@ MCP servers are listed under `mcp_servers` in the `-config` file (§4):
 
 ### 6. Model Provider Contract
 
-A provider reports per model what it supports (`model.Capabilities`). The Ollama adapter reads it
-from `/api/show` once per model: `tools` sets tool calling, `vision` image input, `embedding`
-embeddings. Before its first model call, a task whose prompt has images or whose agent has tools
-checks them, and fails with `model.ErrUnsupported` (and is not retried) when the model lacks either.
+Two adapters implement `model.Provider`:
+- `model/ollama` calls `/api/chat` and reads what each model supports from `/api/show` once per
+  model: `tools` sets tool calling, `vision` image input, `embedding` embeddings.
+- `model/openai` calls an OpenAI-compatible `/chat/completions` (GLM, OpenAI, vLLM, Ollama's `/v1`).
+  The protocol has no capability discovery, so `Provider.Caps` states what the endpoint supports.
+
+Before its first model call, a task whose prompt has images or whose agent has tools checks the
+capabilities, and fails with `model.ErrUnsupported` (and is not retried) when the model lacks either.
 
 Messages carry images, and the model's reasoning as `thinking`, which the runtime stores only in the
-model call's `hidden_payload` and sends back with the conversation.
+model call's `hidden_payload`. The Ollama adapter sends it back with the conversation; the OpenAI
+adapter reads it from `reasoning_content` or from a leading `<think>…</think>` and does not send it back.
 
-Normalized errors are still to be defined:
-- transient provider failure
-- rate limited
-- context length exceeded
-- unsupported capability
-- malformed tool call
-- safety refusal
-- provider authentication failure
+`ChatRequest.Parameters` uses canonical names (`temperature`, `top_p`, `max_tokens`, `seed`, `stop`)
+that each adapter maps to its own (`max_tokens` is Ollama's `num_predict`). Tool names are sent to
+OpenAI-compatible servers with every character outside `[a-zA-Z0-9_-]` replaced by `_`, as OpenAI
+requires, and mapped back in the response.
+
+Errors: a non-2xx response is a `model.StatusError` carrying the status and `Retry-After`.
+`model.WithRetry` retries transient failures (408, 429, 5xx, network errors and client timeouts) up to
+4 tries with jittered exponential backoff from 500ms to 20s, honouring `Retry-After`, and stops when
+the caller's context ends. `cmd/agent-loop` wraps every provider in it.
+
+Usage reports prompt, completion and cached tokens. The OpenAI adapter prices them with
+`Provider.Price` (cost units per million input, cached input and output tokens), which fills
+`Usage.CostUnits` for the cost budget.
 
 ### 7. Replay Contract
 

@@ -16,7 +16,7 @@ or the `-record` flag.
 | Logic-dense code: state machines, budgets, policy, loop detection, scheduling, replay, registries | Unit | `<pkg>/*_test.go` | `model.MockProvider`, `store.MemStore`, `httptest` |
 | A decoder of external input: model output, tool arguments, REST bodies | Fuzz | `Fuzz*` next to the unit tests | seed corpus with real and hostile samples |
 | How agents behave on real model output: prompts, tool-call loop, multi-stage workflows | Scenario | `scenario/` | `model.Replayer` over `scenario/testdata/<Test>.json` |
-| Adapter wire format or a model upgrade | Record | `make record-docker-ollama` | live Ollama, rewrites the fixtures |
+| Adapter wire format or a model upgrade | Record | `make record-docker-ollama`, `make record-openai` | live Ollama or hosted API, rewrites the fixtures |
 | Postgres store | Integration | `store/pg`, `-tags=pg` | `make pg-up`, `AGENT_LOOP_PG_DSN` |
 | Full REST/SSE stack | Integration | `api`, `-tags=rest` | `make test-stack-docker-ollama` |
 
@@ -27,8 +27,8 @@ Rules:
   input as an `f.Add` seed so it runs on every `go test`.
 - Each acceptance scenario in `docs/04-contracts-and-tests.md` that a change
   implements gets a test in the same change.
-- Only `cmd/` and `scenario/` may import `model/ollama`. Everything else uses
-  `model.Provider`.
+- Only `cmd/` and `scenario/` may import `model/ollama` and `model/openai`.
+  Everything else uses `model.Provider`.
 
 ## Commands
 
@@ -37,6 +37,7 @@ make test                  # unit + fuzz seeds + replayed scenarios, offline, -r
 make fuzz FUZZTIME=1m      # fuzz every Fuzz* target in turn
 make record-docker-ollama  # start Dockerized Ollama, pull the model, record scenarios
 make record-host-ollama    # same against host Ollama (Metal on macOS, much faster)
+make record-openai         # record the LLM_MODEL scenarios against LLM_BASE_URL from .env (paid)
 make pg-up && AGENT_LOOP_PG_DSN=postgres://postgres:postgres@localhost:45432/agentloop?sslmode=disable go test -tags=pg ./store/pg
 make test-stack-docker-ollama   # REST suite against API + Postgres + Ollama in Compose
 ```
@@ -53,8 +54,14 @@ of them:
 | `gemma4:e2b-it-qat` | ~4.3 GB | vision, audio, tools, thinking; miscounts shapes in most tries, so re-run the image scenarios when recording it |
 | `qwen3-vl:2b` | ~1.9 GB | vision, tools, thinking |
 | `ministral-3:3b` | ~3 GB | vision, tools |
+| `z-ai/glm-5.3` | hosted (GreenNode, OpenAI-compatible) | tools, thinking; text only. A strong model, so its fixtures show what a correct run looks like. Recording all scenarios costs a few cents |
 
-Exact tags are pinned so fixtures are reproducible. Record one model at a
+Hosted models are marked `openai` in `models` and recorded with
+`make record-openai`, which loads `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`
+from `.env` (see `.env.example`); narrow it with
+`set -a && . ./.env && set +a && go test -run 'TestXxx/z-ai' ./scenario -args -record`.
+
+Exact tags are pinned so fixtures are reproducible. Record one Ollama model at a
 time and start host Ollama with a small context and a single loaded model:
 `OLLAMA_CONTEXT_LENGTH=8192 OLLAMA_MAX_LOADED_MODELS=1 ollama serve`. Ollama
 reserves memory for the model's whole context, so at its default 256K context

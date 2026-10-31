@@ -50,7 +50,7 @@ The framework must:
 - [x] Enforce the recursion depth limit (`MaxDepth`).
 - [x] Allow per-run limits that override the defaults.
 - [x] Cap per-run limits at server-side maximums (`Orchestrator.MaxLimits`) so a client cannot raise them without bound.
-  Cost is not capped by default because no provider reports it yet.
+  Cost is not capped by default; the OpenAI-compatible adapter reports it only when given prices.
 
 The framework should define a clear execution model:
 - `session`: long-lived collaboration container.
@@ -228,13 +228,13 @@ Requirements:
   a task that needs images or tools its model lacks fails before the model is called.
 - [x] Image input for vision models (named run input images shown with an agent step's prompt).
 - [x] Model reasoning (`thinking`) kept as hidden reasoning and passed back in the conversation.
-- [ ] Model-specific parameter mapping.
-- [ ] Retry and backoff.
+- [x] Model-specific parameter mapping (canonical `Parameters` names each adapter translates).
+- [x] Retry and backoff (`model.WithRetry`).
 - [x] Token accounting for prompt, completion, and total usage.
-- [ ] Token accounting for cached tokens and cost.
+- [x] Token accounting for cached tokens and cost (cost from configured per-token prices).
 
-Future providers may include hosted APIs, but the first production implementation only needs one production-ready adapter.
-- [ ] A production-ready adapter (Ollama today is non-streaming, with no retry).
+Adapters: Ollama, and any OpenAI-compatible hosted API (tested on GLM 5.3).
+- [ ] A production-ready adapter (both are non-streaming).
 
 ## 8. API and Protocols
 
@@ -293,7 +293,7 @@ Track and enforce:
 - [x] Token budget.
 - [x] Time budget.
 - [x] Cost budget, when the provider reports cost.
-- [ ] Cost reported by providers (none do today).
+- [x] Cost reported by providers (the OpenAI-compatible adapter, from `LLM_PRICE`).
 - [x] Tool-call budget.
 - [x] Sub-agent budget.
 - [x] Budget usage persisted on the run (`usage_totals`) after every model call and tool reservation, and

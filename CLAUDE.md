@@ -9,7 +9,7 @@
   in `runtime`; persistence ports in `store` with Postgres in `store/pg`; model providers in
   `model`; tools in `tool` with MCP servers in `tool/mcp`; authorization, budgets and approvals in `policy`; REST/SSE and the web
   UI in `api`. Dependencies point inward to `core` and the ports; `runtime` never imports
-  `store/pg` or `api`, only `cmd/` and `scenario/` import `model/ollama`, and only `cmd/` and `scenario/` import `tool/mcp`. Tool metadata
+  `store/pg` or `api`, only `cmd/` and `scenario/` import `model/ollama` and `model/openai`, and only `cmd/` and `scenario/` import `tool/mcp`. Tool metadata
   (`core.ToolDefinition`) lives in `core`; `tool` holds the registry and executors.
 - The runtime is concurrency-safe and cancellation-aware: every blocking call takes a
   `context.Context` and returns when it is done. Protocol and state-machine logic goes in

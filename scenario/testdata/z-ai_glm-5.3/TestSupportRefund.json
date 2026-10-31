@@ -1,0 +1,655 @@
+[
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "I'll look up the customer first.",
+        "thinking": "The customer wants a refund for a late monitor order. Let me first find the customer by email, then list their orders, then refund the late monitor order.\n\nI need to do these sequentially since each depends on the previous result. First, find the customer.",
+        "tool_calls": [
+          {
+            "id": "call_a40ffd9e71357adc",
+            "name": "crm.find_customer",
+            "input": {
+              "email": "ada@example.com"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_a40ffd9e71357adc",
+          "name": "crm.find_customer",
+          "input": {
+            "email": "ada@example.com"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 395,
+        "completion_tokens": 75,
+        "cached_tokens": 128,
+        "total_tokens": 470,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "b1f62b7d06bdf747",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "I'll look up the customer first.",
+              "tool_calls": [
+                {
+                  "id": "call_a40ffd9e71357adc",
+                  "type": "function",
+                  "function": {
+                    "name": "crm_find_customer",
+                    "arguments": "{\"email\": \"ada@example.com\"}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "The customer wants a refund for a late monitor order. Let me first find the customer by email, then list their orders, then refund the late monitor order.\n\nI need to do these sequentially since each depends on the previous result. First, find the customer."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455347,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 395,
+          "completion_tokens": 75,
+          "total_tokens": 470,
+          "prompt_tokens_details": {
+            "audio_tokens": null,
+            "cached_tokens": 128
+          }
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        },
+        {
+          "role": "assistant",
+          "content": "I'll look up the customer first.",
+          "thinking": "The customer wants a refund for a late monitor order. Let me first find the customer by email, then list their orders, then refund the late monitor order.\n\nI need to do these sequentially since each depends on the previous result. First, find the customer.",
+          "tool_calls": [
+            {
+              "id": "call_a40ffd9e71357adc",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_a40ffd9e71357adc"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "Found the customer, Ada Lovelace, C-17. Now list their orders.",
+        "tool_calls": [
+          {
+            "id": "call_a6a11ab0b8240be9",
+            "name": "orders.list",
+            "input": {
+              "customer_id": "C-17"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_a6a11ab0b8240be9",
+          "name": "orders.list",
+          "input": {
+            "customer_id": "C-17"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 437,
+        "completion_tokens": 33,
+        "cached_tokens": 0,
+        "total_tokens": 470,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "a63cce3fb7ea2b62",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_a6a11ab0b8240be9",
+                  "type": "function",
+                  "function": {
+                    "name": "orders_list",
+                    "arguments": "{\"customer_id\": \"C-17\"}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": "Found the customer, Ada Lovelace, C-17. Now list their orders."
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455364,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 437,
+          "completion_tokens": 33,
+          "total_tokens": 470
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        },
+        {
+          "role": "assistant",
+          "content": "I'll look up the customer first.",
+          "thinking": "The customer wants a refund for a late monitor order. Let me first find the customer by email, then list their orders, then refund the late monitor order.\n\nI need to do these sequentially since each depends on the previous result. First, find the customer.",
+          "tool_calls": [
+            {
+              "id": "call_a40ffd9e71357adc",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_a40ffd9e71357adc"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "Found the customer, Ada Lovelace, C-17. Now list their orders.",
+          "tool_calls": [
+            {
+              "id": "call_a6a11ab0b8240be9",
+              "name": "orders.list",
+              "input": {
+                "customer_id": "C-17"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"orders\":[{\"order_id\":\"O-301\",\"item\":\"keyboard\",\"status\":\"delivered\",\"total\":89},{\"order_id\":\"O-302\",\"item\":\"monitor\",\"status\":\"late\",\"total\":240,\"days_late\":9}]}",
+          "name": "orders.list",
+          "tool_call_id": "call_a6a11ab0b8240be9"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_ac2a57a1a0c2a094",
+            "name": "orders.refund",
+            "input": {
+              "order_id": "O-302",
+              "reason": "Order is 9 days late; customer requested full refund for the late monitor."
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_ac2a57a1a0c2a094",
+          "name": "orders.refund",
+          "input": {
+            "order_id": "O-302",
+            "reason": "Order is 9 days late; customer requested full refund for the late monitor."
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 506,
+        "completion_tokens": 38,
+        "cached_tokens": 384,
+        "total_tokens": 544,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "a640994f63f1aa4b",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_ac2a57a1a0c2a094",
+                  "type": "function",
+                  "function": {
+                    "name": "orders_refund",
+                    "arguments": "{\"order_id\": \"O-302\", \"reason\": \"Order is 9 days late; customer requested full refund for the late monitor.\"}"
+                  }
+                }
+              ],
+              "role": "assistant",
+              "reasoning_content": null
+            },
+            "finish_reason": "tool_calls",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455366,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 506,
+          "completion_tokens": 38,
+          "total_tokens": 544,
+          "prompt_tokens_details": {
+            "audio_tokens": null,
+            "cached_tokens": 384
+          }
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "z-ai/glm-5.3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        },
+        {
+          "role": "assistant",
+          "content": "I'll look up the customer first.",
+          "thinking": "The customer wants a refund for a late monitor order. Let me first find the customer by email, then list their orders, then refund the late monitor order.\n\nI need to do these sequentially since each depends on the previous result. First, find the customer.",
+          "tool_calls": [
+            {
+              "id": "call_a40ffd9e71357adc",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_a40ffd9e71357adc"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "Found the customer, Ada Lovelace, C-17. Now list their orders.",
+          "tool_calls": [
+            {
+              "id": "call_a6a11ab0b8240be9",
+              "name": "orders.list",
+              "input": {
+                "customer_id": "C-17"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"orders\":[{\"order_id\":\"O-301\",\"item\":\"keyboard\",\"status\":\"delivered\",\"total\":89},{\"order_id\":\"O-302\",\"item\":\"monitor\",\"status\":\"late\",\"total\":240,\"days_late\":9}]}",
+          "name": "orders.list",
+          "tool_call_id": "call_a6a11ab0b8240be9"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_ac2a57a1a0c2a094",
+              "name": "orders.refund",
+              "input": {
+                "order_id": "O-302",
+                "reason": "Order is 9 days late; customer requested full refund for the late monitor."
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"amount\":240,\"order_id\":\"O-302\",\"refund_id\":\"R-9001\"}",
+          "name": "orders.refund",
+          "tool_call_id": "call_ac2a57a1a0c2a094"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Dear Ada, we apologize for the delay with your monitor — your full refund of $240 for order O-302 has been processed under refund ID R-9001.",
+        "thinking": "The refund was approved and processed. Refund ID is R-9001. Finish with one sentence for the customer including the refund ID."
+      },
+      "usage": {
+        "prompt_tokens": 569,
+        "completion_tokens": 65,
+        "cached_tokens": 512,
+        "total_tokens": 634,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "id": "906d9ffb4e08ab7f",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "Dear Ada, we apologize for the delay with your monitor — your full refund of $240 for order O-302 has been processed under refund ID R-9001.",
+              "role": "assistant",
+              "reasoning_content": "The refund was approved and processed. Refund ID is R-9001. Finish with one sentence for the customer including the refund ID."
+            },
+            "finish_reason": "stop",
+            "logprobs": null
+          }
+        ],
+        "created": 1793455380,
+        "model": "zai-org/GLM-5.3",
+        "service_tier": null,
+        "system_fingerprint": null,
+        "object": "chat.completion",
+        "usage": {
+          "prompt_tokens": 569,
+          "completion_tokens": 65,
+          "total_tokens": 634,
+          "prompt_tokens_details": {
+            "audio_tokens": null,
+            "cached_tokens": 512
+          }
+        }
+      }
+    }
+  }
+]

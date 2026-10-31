@@ -6,7 +6,7 @@ Package names are suggestions:
 - `core`: shared domain types, IDs and tool definitions
 - `runtime`: orchestration, scheduling, replay
 - `store`: persistence ports; drivers in subpackages (`store/pg`)
-- `model`: model provider ports, scripted mock, fixture record/replay; adapters in subpackages (`model/ollama`)
+- `model`: model provider ports, scripted mock, fixture record/replay; retry wrapper; adapters in subpackages (`model/ollama`, `model/openai`)
 - `tool`: native and MCP tool registries and executors
 - `policy`: authorization, budgets, approvals
 - `api`: REST/SSE adapters
