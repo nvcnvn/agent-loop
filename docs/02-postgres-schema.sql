@@ -24,8 +24,6 @@ CREATE TYPE concurrency_class AS ENUM ('serial', 'parallel_read', 'parallel_isol
 CREATE TYPE invocation_status AS ENUM ('scheduled', 'running', 'succeeded', 'failed', 'retry_scheduled', 'timed_out', 'canceled');
 CREATE TYPE approval_status AS ENUM ('requested', 'approved', 'rejected', 'expired', 'canceled');
 CREATE TYPE artifact_kind AS ENUM ('file', 'json', 'report', 'code_patch', 'test_result', 'model_transcript');
-CREATE TYPE memory_scope_type AS ENUM ('tenant', 'project', 'session', 'workflow', 'agent');
-CREATE TYPE memory_status AS ENUM ('active', 'superseded', 'deleted');
 CREATE TYPE budget_dimension AS ENUM ('prompt_tokens', 'completion_tokens', 'cached_tokens', 'total_tokens', 'cost_units', 'runtime_ms', 'model_calls', 'tool_calls', 'subagents', 'concurrency_slots');
 CREATE TYPE budget_ledger_kind AS ENUM ('reserve', 'commit', 'release', 'adjust');
 
@@ -396,25 +394,24 @@ CREATE TABLE artifacts (
 
 CREATE INDEX artifacts_run_idx ON artifacts (run_id, created_at);
 
-CREATE TABLE memory_items (
-    memory_id uuid PRIMARY KEY DEFAULT uuidv7(),
-    tenant_id uuid NOT NULL REFERENCES tenants(tenant_id),
-    scope_type memory_scope_type NOT NULL,
-    scope_id uuid,
-    status memory_status NOT NULL DEFAULT 'active',
+-- The vector column has no fixed dimension so any embedding model fits; searches compare
+-- only vectors from the same embed_model, so there is no ANN index yet.
+CREATE TABLE memories (
+    memory_id uuid PRIMARY KEY,
+    tenant_id uuid NOT NULL,
+    scope text NOT NULL CHECK (scope IN ('tenant', 'workflow', 'session')),
+    session_id uuid,
+    workflow text,
     content text NOT NULL,
-    content_hash text NOT NULL,
-    embedding vector(1536),
-    provenance jsonb NOT NULL DEFAULT '{}'::jsonb,
-    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-    created_from_event_id uuid REFERENCES run_events(event_id),
+    embedding vector NOT NULL,
+    embed_model text NOT NULL,
+    source jsonb NOT NULL DEFAULT '{}'::jsonb, -- run_id, session_id, task_id, step_id
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, scope_type, scope_id, content_hash)
+    CHECK (scope <> 'session' OR session_id IS NOT NULL),
+    CHECK (scope <> 'workflow' OR workflow IS NOT NULL)
 );
 
-CREATE INDEX memory_items_scope_idx ON memory_items (tenant_id, scope_type, scope_id, status, created_at DESC);
-CREATE INDEX memory_items_embedding_idx ON memory_items USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX memories_lookup_idx ON memories (tenant_id, embed_model, scope);
 
 CREATE TABLE budget_ledger (
     budget_ledger_id uuid PRIMARY KEY DEFAULT uuidv7(),

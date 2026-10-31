@@ -7,7 +7,7 @@
   `make test-stack-docker-ollama`). Run the ones covering the packages you changed.
 - Layout: binaries in `cmd/`; shared domain types in `core`; orchestration, scheduling and replay
   in `runtime`; persistence ports in `store` with Postgres in `store/pg`; model providers in
-  `model`; tools in `tool` with MCP servers in `tool/mcp`; authorization, budgets and approvals in `policy`; REST/SSE and the web
+  `model`; tools in `tool` with MCP servers in `tool/mcp` and the memory tools in `tool/memory`; authorization, budgets and approvals in `policy`; REST/SSE and the web
   UI in `api`. Dependencies point inward to `core` and the ports; `runtime` never imports
   `store/pg` or `api`, only `cmd/` and `scenario/` import `model/ollama` and `model/openai`, and only `cmd/` and `scenario/` import `tool/mcp`. Tool metadata
   (`core.ToolDefinition`) lives in `core`; `tool` holds the registry and executors.

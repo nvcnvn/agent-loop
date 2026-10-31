@@ -22,7 +22,7 @@ The recommended first vertical slice from
 | --- | --- |
 | Core domain types, IDs, events, limits, usage, tool definitions | [core/types.go](core/types.go), [core/tool.go](core/tool.go) |
 | Event-sourced in-memory store (sessions, runs, tasks, events, approvals, artifacts) with monotonic per-run sequence allocation under concurrency | [store/store.go](store/store.go) |
-| PostgreSQL driver (pgx v5, pgxpool, versioned embedded migrations, polling Subscribe) | [store/pg/pg.go](store/pg/pg.go) |
+| PostgreSQL driver (pgx v5, pgxpool, versioned embedded migrations, polling Subscribe); needs the pgvector extension (`pgvector/pgvector:pg18`) | [store/pg/pg.go](store/pg/pg.go) |
 | Provider-agnostic model abstraction (`Provider` interface) | [model/model.go](model/model.go) |
 | Mock provider for deterministic tests | [model/mock.go](model/mock.go) |
 | Fixture recorder and request-matching replayer for real-model regression tests | [model/fixture.go](model/fixture.go) |
@@ -37,6 +37,7 @@ The recommended first vertical slice from
 | Loop / stall detector; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Workflows as stage graphs (`depends_on`) with hand-backs to earlier stages, stop conditions, retries, stage/agent/tool timeouts, stage approval gates, and JSON Schema for input and stage outputs; agents delegating to child agents at runtime (`delegate` tool, depth-limited); agents and named workflow templates loaded from a JSON config | [runtime/workflow.go](runtime/workflow.go), [runtime/config.go](runtime/config.go) |
 | Orchestrator with session history passed to every agent, sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`), parallel tool calls for read-safe tools, resuming interrupted runs (also on startup), run queueing with backpressure, concurrency limits per tenant/workflow/agent/tool, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
+| Long-term memory: `memory.save` / `memory.search` tools over embeddings (Ollama or OpenAI-compatible), scoped by session, workflow or tenant, with provenance; pgvector in Postgres | [tool/memory/memory.go](tool/memory/memory.go), [store/memory.go](store/memory.go), [store/pg/memory.go](store/pg/memory.go) |
 | Session history compaction: summaries of older messages by a configured agent, at the start of a run | [runtime/compaction.go](runtime/compaction.go) |
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
 | Re-execution of a finished run from its recorded model requests/responses and tool results (`POST /v1/runs/{rid}/reexecute`) | [runtime/reexecute.go](runtime/reexecute.go) |
@@ -47,7 +48,7 @@ The recommended first vertical slice from
 | HTTP server example: JSON logs (`log/slog`) to stdout, resumes unfinished runs at startup, graceful shutdown on SIGINT/SIGTERM (`-shutdown-timeout`) | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
 | Programmatic example: planner -> parallel researchers -> synthesizer + replay | [cmd/example-workflow/main.go](cmd/example-workflow/main.go) |
 
-pgvector memory is still doc-only. Both the in-memory store and the PostgreSQL driver implement
+Both the in-memory store and the PostgreSQL driver implement
 the aggregate `store.Store` interface, so `runtime` and `api` are
 driver-agnostic.
 
@@ -142,7 +143,7 @@ PostgreSQL integration tests (behind the `pg` build tag):
 ```sh
 docker run -d --rm --name agentloop-pg \
   -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=agentloop \
-  -p 5432:5432 postgres:18-alpine
+  -p 5432:5432 pgvector/pgvector:pg18
 
 AGENT_LOOP_PG_DSN='postgres://postgres:postgres@localhost:5432/agentloop?sslmode=disable' \
   go test -tags=pg -race -count=1 ./store/pg/...
@@ -215,7 +216,8 @@ OLLAMA_MODEL='gemma4:e2b-it-qat' \
 OLLAMA_TIMEOUT_SECONDS=900 \
 go run ./cmd/agent-loop -addr :8080 -debug -trust-identity-headers
 
-# or a hosted OpenAI-compatible API instead of Ollama (cp .env.example .env and fill it in):
+# or a hosted OpenAI-compatible API instead of Ollama (cp .env.example .env and fill it in;
+# OLLAMA_EMBED_MODEL or LLM_EMBED_MODEL there also enables the memory.save/memory.search tools):
 set -a && . ./.env && set +a && go run ./cmd/agent-loop -debug -trust-identity-headers
 
 AGENT_LOOP_REST_URL='http://localhost:8080' \

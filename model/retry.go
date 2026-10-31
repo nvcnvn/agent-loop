@@ -84,6 +84,18 @@ func (r *Retry) ChatStream(ctx context.Context, req ChatRequest, onDelta func(De
 	})
 }
 
+// Embed retries the wrapped provider's Embed.
+func (r *Retry) Embed(ctx context.Context, model string, texts []string) ([][]float32, error) {
+	e, ok := r.Provider.(Embedder)
+	if !ok {
+		return nil, fmt.Errorf("%s embeddings: %w", r.Name(), ErrUnsupported)
+	}
+	return retry(ctx, r, func() ([][]float32, bool, error) {
+		v, err := e.Embed(ctx, model, texts)
+		return v, true, err
+	})
+}
+
 func retry[T any](ctx context.Context, r *Retry, call func() (T, bool, error)) (T, error) {
 	backoff := r.Base
 	for attempt := 1; ; attempt++ {

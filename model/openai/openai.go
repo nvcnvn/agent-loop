@@ -87,6 +87,37 @@ func answerInReasoning(resp *model.ChatResponse, req model.ChatRequest) {
 	}
 }
 
+// Embed calls /embeddings.
+func (p *Provider) Embed(ctx context.Context, name string, texts []string) ([][]float32, error) {
+	body, _ := json.Marshal(map[string]any{"model": name, "input": texts})
+	raw, err := p.post(ctx, "/embeddings", body)
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		Data []struct {
+			Index     int       `json:"index"`
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return nil, fmt.Errorf("openai: embed: %w", err)
+	}
+	out := make([][]float32, len(texts))
+	for _, d := range r.Data {
+		if d.Index < 0 || d.Index >= len(out) {
+			return nil, fmt.Errorf("openai: embed: index %d out of range", d.Index)
+		}
+		out[d.Index] = d.Embedding
+	}
+	for i, v := range out {
+		if v == nil {
+			return nil, fmt.Errorf("openai: embed: no vector for text %d", i)
+		}
+	}
+	return out, nil
+}
+
 // ChatStream streams the reply over server-sent events.
 func (p *Provider) ChatStream(ctx context.Context, req model.ChatRequest, onDelta func(model.Delta)) (model.ChatResponse, error) {
 	body, err := p.encodeRequest(req)

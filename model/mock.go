@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"math"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/nvcnvn/agent-loop/core"
 )
@@ -94,4 +97,29 @@ func (m *MockProvider) ChatStream(ctx context.Context, req ChatRequest, onDelta 
 		}
 	}
 	return resp, nil
+}
+
+// Embed returns deterministic bag-of-words vectors: texts sharing words get
+// similar vectors, so retrieval tests rank by real overlap.
+func (m *MockProvider) Embed(_ context.Context, _ string, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i, text := range texts {
+		v := make([]float32, 64)
+		for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+			h := fnv.New32a()
+			_, _ = h.Write([]byte(w))
+			v[h.Sum32()%64]++
+		}
+		var norm float64
+		for _, x := range v {
+			norm += float64(x * x)
+		}
+		if norm > 0 {
+			for j := range v {
+				v[j] /= float32(math.Sqrt(norm))
+			}
+		}
+		out[i] = v
+	}
+	return out, nil
 }

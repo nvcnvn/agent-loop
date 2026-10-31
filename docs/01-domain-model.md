@@ -365,22 +365,21 @@ Rules:
 
 ### Memory
 
-`memory_item` is long-term retrievable state, separate from transient session history.
+A `memory` is long-term retrievable state, separate from session messages: a statement an agent
+saved, its embedding and the embedding model, and where it came from.
 
-Important fields:
-- `memory_id`
-- `tenant_id`
-- `scope_type`: `tenant`, `project`, `session`, `workflow`, `agent`
-- `scope_id`
-- `content`
-- `embedding`
-- `provenance`
-- `write_policy`
-- `status`
+Fields:
+- `memory_id`, `tenant_id`, `content`, `embedding`, `embed_model`, `created_at`
+- `scope`: who can retrieve it. `tenant` (every run of the tenant), `workflow` (runs of the same
+  workflow, by name) or `session` (runs in the same session, the default)
+- `source`: provenance, the run, session, task and step that saved it
 
 Rules:
-- Memory writes require policy. Not every message becomes memory.
-- Retrieved memories must include provenance in model input metadata.
+- Nothing becomes memory on its own. An agent writes one only by calling `memory.save`, which it
+  has only when granted, and only at the deployment's write scope (`MEMORY_WRITE_SCOPE`).
+- `memory.search` returns the tenant's memories visible from the run's session and workflow,
+  nearest first by cosine similarity among those made with the same embedding model, each with its
+  scope, source and time.
 
 ### Budget and Limit Ledger
 

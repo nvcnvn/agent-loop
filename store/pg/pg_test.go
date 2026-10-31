@@ -33,6 +33,7 @@ import (
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 	"github.com/nvcnvn/agent-loop/store/pg"
+	"github.com/nvcnvn/agent-loop/store/storetest"
 	"github.com/nvcnvn/agent-loop/tool"
 )
 
@@ -59,7 +60,7 @@ func freshStore(t *testing.T) *pg.Store {
 		t.Fatalf("migrate: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`TRUNCATE messages, run_events, event_counters, approvals, artifacts, tasks, runs, sessions RESTART IDENTITY CASCADE`,
+		`TRUNCATE memories, messages, run_events, event_counters, approvals, artifacts, tasks, runs, sessions RESTART IDENTITY CASCADE`,
 	); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -211,6 +212,10 @@ func TestPg_TenantIsolation(t *testing.T) {
 	if _, err := s.GetSession(ctx, t2, sid); err == nil {
 		t.Fatal("expected cross-tenant read denied")
 	}
+}
+
+func TestPg_Memories(t *testing.T) {
+	storetest.Memories(t, freshStore(t), core.SessionID(core.NewID()), core.SessionID(core.NewID()))
 }
 
 func TestPg_ApprovalResolveRoundtrip(t *testing.T) {

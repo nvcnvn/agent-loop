@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -42,6 +43,7 @@ import (
 	pgstore "github.com/nvcnvn/agent-loop/store/pg"
 	"github.com/nvcnvn/agent-loop/tool"
 	"github.com/nvcnvn/agent-loop/tool/mcp"
+	"github.com/nvcnvn/agent-loop/tool/memory"
 )
 
 func main() {
@@ -61,6 +63,7 @@ func main() {
 		fatal("register tools", err)
 	}
 
+	registerMemory(reg, persistence)
 	prov, modelName := openProvider()
 	cfg := fileConfig{Config: runtime.Config{Agents: []runtime.Agent{{
 		Name:         "echo",
@@ -223,6 +226,30 @@ func openStore() store.Store {
 	}
 	slog.Info("using PostgreSQL store")
 	return persistence
+}
+
+// registerMemory adds the memory tools when an embedding model is configured:
+// LLM_EMBED_MODEL on the OpenAI-compatible endpoint, or OLLAMA_EMBED_MODEL on
+// Ollama. MEMORY_WRITE_SCOPE (session, workflow or tenant) is where agents save.
+func registerMemory(reg *tool.Registry, s store.Store) {
+	t := memory.Tools{Store: s, WriteScope: store.MemoryScope(os.Getenv("MEMORY_WRITE_SCOPE"))}
+	switch {
+	case os.Getenv("LLM_EMBED_MODEL") != "":
+		t.Model, t.Embedder = os.Getenv("LLM_EMBED_MODEL"), model.WithRetry(openai.New(os.Getenv("LLM_BASE_URL"), os.Getenv("LLM_API_KEY")))
+	case os.Getenv("OLLAMA_EMBED_MODEL") != "":
+		t.Model, t.Embedder = os.Getenv("OLLAMA_EMBED_MODEL"), model.WithRetry(ollama.New(cmp.Or(os.Getenv("OLLAMA_BASE_URL"), os.Getenv("OLLAMA_URL")), nil))
+	default:
+		return
+	}
+	switch t.WriteScope {
+	case "", store.MemorySession, store.MemoryWorkflow, store.MemoryTenant:
+	default:
+		fatal("MEMORY_WRITE_SCOPE", fmt.Errorf("%q is not session, workflow or tenant", t.WriteScope))
+	}
+	if err := t.Register(reg); err != nil {
+		fatal("register memory tools", err)
+	}
+	slog.Info("memory tools enabled", "embed_model", t.Model, "write_scope", cmp.Or(t.WriteScope, store.MemorySession))
 }
 
 func openProvider() (model.Provider, string) {

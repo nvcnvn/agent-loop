@@ -98,6 +98,11 @@ type Provider interface {
 	Chat(ctx context.Context, req ChatRequest) (ChatResponse, error)
 }
 
+// Embedder turns texts into vectors for retrieval, one per text in order.
+type Embedder interface {
+	Embed(ctx context.Context, model string, texts []string) ([][]float32, error)
+}
+
 // Delta is a fragment of a reply as the model generates it.
 type Delta struct {
 	Content  string

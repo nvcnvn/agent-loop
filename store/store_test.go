@@ -10,6 +10,7 @@ import (
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/store"
+	"github.com/nvcnvn/agent-loop/store/storetest"
 )
 
 func TestEventSequenceIsMonotonicUnderConcurrency(t *testing.T) {
@@ -171,4 +172,8 @@ func TestUpdateTaskChangesOnlyStatusOutputAndError(t *testing.T) {
 	if got.Status != core.TaskFailed || got.Error != "boom" || got.ParentTaskID != "parent" || got.Depth != 2 || got.Attempt != 3 || string(got.Input) != `{"prompt":"p"}` {
 		t.Fatalf("task=%+v", got)
 	}
+}
+
+func TestMemStoreMemories(t *testing.T) {
+	storetest.Memories(t, store.NewMemStore(), core.SessionID(core.NewID()), core.SessionID(core.NewID()))
 }

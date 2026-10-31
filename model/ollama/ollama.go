@@ -75,6 +75,21 @@ func (p *Provider) Chat(ctx context.Context, req model.ChatRequest) (model.ChatR
 	return decodeResponse(raw)
 }
 
+// Embed calls /api/embed.
+func (p *Provider) Embed(ctx context.Context, name string, texts []string) ([][]float32, error) {
+	body, _ := json.Marshal(map[string]any{"model": name, "input": texts})
+	var out struct {
+		Embeddings [][]float32 `json:"embeddings"`
+	}
+	if err := p.post(ctx, "/api/embed", body, &out); err != nil {
+		return nil, err
+	}
+	if len(out.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("ollama: embed: %d vectors for %d texts", len(out.Embeddings), len(texts))
+	}
+	return out.Embeddings, nil
+}
+
 // ChatStream streams the reply as Ollama's newline-delimited JSON chunks.
 func (p *Provider) ChatStream(ctx context.Context, req model.ChatRequest, onDelta func(model.Delta)) (model.ChatResponse, error) {
 	buf, err := encodeRequest(req)

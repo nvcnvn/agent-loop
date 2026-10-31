@@ -182,6 +182,7 @@ type Store interface {
 	TaskStore
 	ApprovalStore
 	ArtifactStore
+	MemoryStore
 }
 
 // MemStore aggregates an in-memory implementation of every store interface.
@@ -195,6 +196,7 @@ type MemStore struct {
 	messages  map[core.SessionID][]MessageProjection
 	approvals map[core.ApprovalID]*approvalEntry
 	artifacts map[string]Artifact
+	memories  []Memory
 
 	events     []core.Event
 	runSeq     map[core.RunID]int64

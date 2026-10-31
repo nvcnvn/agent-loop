@@ -238,9 +238,12 @@ type ArtifactStore interface {
     ListRunArtifacts(ctx context.Context, tenantID core.TenantID, runID core.RunID) ([]ArtifactRef, error)
 }
 
+// MemoryStore keeps long-term memory. SearchMemories returns the tenant's memories made with
+// query.EmbedModel that are tenant-scoped or scoped to query.SessionID or query.Workflow,
+// nearest first by cosine similarity (MemoryHit.Score). storetest.Memories is the conformance check.
 type MemoryStore interface {
-    WriteMemory(ctx context.Context, item MemoryItem) error
-    SearchMemory(ctx context.Context, query MemoryQuery) ([]MemoryMatch, error)
+    PutMemory(ctx context.Context, m Memory) (string, error)
+    SearchMemories(ctx context.Context, query MemoryQuery) ([]MemoryHit, error)
 }
 
 // Store is what runtime and api take; /readyz calls Ping.
@@ -252,6 +255,7 @@ type Store interface {
     TaskStore
     ApprovalStore
     ArtifactStore
+    MemoryStore
 }
 ```
 
@@ -283,6 +287,12 @@ type Streamer interface {
 type Delta struct {
     Content  string
     Thinking string
+}
+
+// Embedder turns texts into vectors; both adapters, Retry and MockProvider
+// (deterministic bag-of-words vectors) implement it.
+type Embedder interface {
+    Embed(ctx context.Context, model string, texts []string) ([][]float32, error)
 }
 
 // StatusError is a non-2xx provider response. WithRetry wraps a Provider and

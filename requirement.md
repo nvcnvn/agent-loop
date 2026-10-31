@@ -227,7 +227,7 @@ Start with Ollama, but the API must be provider-agnostic.
 Requirements:
 - [x] Unified interface for chat completion and tool calling.
 - [x] Streaming (both adapters; reply deltas reach SSE clients that ask with `?deltas=1`).
-- [ ] Embeddings.
+- [x] Embeddings (`model.Embedder`: Ollama `/api/embed`, OpenAI-compatible `/embeddings`).
 - [x] Structured output used by the runtime (a stage's `output_schema` is sent as `ResponseSchema`).
 - [x] Provider capability detection: the Ollama adapter asks the server what each model supports, and
   a task that needs images or tools its model lacks fails before the model is called.
@@ -369,11 +369,15 @@ Requirements:
 Since PostgreSQL and pgvector are part of the stack, define memory behavior explicitly.
 
 Requirements:
-- [ ] Store long-term memory separate from transient conversation state.
-- [ ] Support embeddings for retrieval over prior sessions, documents, and artifacts.
-- [ ] Scope retrieval by tenant, project, session, or workflow.
-- [ ] Allow memory write policies so not every message becomes permanent memory.
-- [ ] Track provenance for retrieved memories.
+- [x] Store long-term memory separate from transient conversation state (`memories`, pgvector).
+- [x] Support embeddings for retrieval over prior sessions (agents save and search with the
+  `memory.save` and `memory.search` tools).
+- [ ] Ingest documents and artifacts into memory.
+- [x] Scope retrieval by tenant, session, or workflow.
+- [ ] Scope retrieval by project (there is no project entity yet).
+- [x] Allow memory write policies so not every message becomes permanent memory (only agents granted
+  `memory.save` write, at the deployment's `MEMORY_WRITE_SCOPE`).
+- [x] Track provenance for retrieved memories (run, session, task and step, returned with each hit).
 
 ## 13. Artifacts and Outputs
 

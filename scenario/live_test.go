@@ -1,6 +1,7 @@
 package scenario_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,8 +11,11 @@ import (
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
+	"github.com/nvcnvn/agent-loop/model/ollama"
 	"github.com/nvcnvn/agent-loop/model/openai"
 	"github.com/nvcnvn/agent-loop/runtime"
+	"github.com/nvcnvn/agent-loop/store"
+	"github.com/nvcnvn/agent-loop/tool/memory"
 )
 
 // liveProvider returns the .env endpoint, skipping unless paid tests are allowed.
@@ -96,4 +100,59 @@ func TestLiveLongSessionCompaction(t *testing.T) {
 
 	answer, events = ask("And my dog's name?")
 	check(answer, events, false, "Pixel")
+}
+
+// TestLiveMemoryAcrossSessions has a hosted model save customer facts in one
+// session and recall them in another, which shares no history, through the
+// memory tools over Ollama embeddings (OLLAMA_EMBED_MODEL at OLLAMA_BASE_URL).
+func TestLiveMemoryAcrossSessions(t *testing.T) {
+	prov, name := liveProvider(t)
+	embedModel := os.Getenv("OLLAMA_EMBED_MODEL")
+	if embedModel == "" {
+		t.Skip("set OLLAMA_EMBED_MODEL (and OLLAMA_BASE_URL) for embeddings")
+	}
+	w := newWorld(t, runtime.Agent{
+		Name: "assistant", Model: name, Provider: prov, MaxToolLoops: 6,
+		Tools: []string{memory.SaveTool, memory.SearchTool},
+		Instructions: "You are a support assistant with long-term memory. Save each lasting customer fact " +
+			"(name, pets, allergies, preferences) with memory.save, one fact per call. Before answering a " +
+			"question about the customer, call memory.search. Answer in one short line.",
+	})
+	w.timeout = 5 * time.Minute
+	tools := memory.Tools{Store: w.store, Embedder: ollama.New(os.Getenv("OLLAMA_BASE_URL"), nil), Model: embedModel, WriteScope: store.MemoryTenant}
+	if err := tools.Register(w.reg); err != nil {
+		t.Fatal(err)
+	}
+	ask := func(prompt string) (string, []toolCall) {
+		res, events := w.run(runtime.StartRunInput{Workflow: runtime.Workflow{Name: "support", Stages: []runtime.Stage{
+			{Name: "reply", Agents: []runtime.AgentStep{{Name: "assistant", Prompt: prompt}}},
+		}}})
+		return res.Outputs["reply"], toolCalls(t, events)
+	}
+
+	_, calls := ask("Customer: Hi, I'm Linh. My dog Pixel chewed the router cable, and I'm allergic to peanuts.")
+	saves := 0
+	for _, c := range calls {
+		if c.Tool == memory.SaveTool && c.Error == "" {
+			saves++
+		}
+	}
+	if saves == 0 {
+		t.Fatalf("nothing saved: %+v", calls)
+	}
+
+	sid, err := w.store.CreateSession(context.Background(), store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.sid = sid
+	answer, calls := ask("Customer Linh is back. What is her dog called, and what is she allergic to?")
+	searched := false
+	for _, c := range calls {
+		searched = searched || c.Tool == memory.SearchTool && strings.Contains(c.Output, "Pixel")
+	}
+	if !searched || !strings.Contains(answer, "Pixel") || !strings.Contains(strings.ToLower(answer), "peanut") {
+		t.Fatalf("answer=%q calls=%+v", answer, calls)
+	}
+	t.Logf("saved %d memories; answer=%q", saves, answer)
 }

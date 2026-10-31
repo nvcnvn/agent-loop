@@ -410,10 +410,14 @@ Each error should include:
 
 ### Memory and Retrieval
 
-1. Write memory only when memory policy allows it.
-2. Retrieve memories scoped by tenant, project, session, and workflow.
-3. Include memory provenance in model input metadata.
-4. Verify a denied memory write creates no permanent memory item.
+1. Write memory only through `memory.save`, at the configured scope
+   (`TestWriteScopeLimitsWhoFindsAMemory`).
+2. Retrieve memories scoped by tenant, session, and workflow, nearest first, on every store
+   (`storetest.Memories`, run by `TestMemStoreMemories` and `TestPg_Memories`).
+3. Return memory provenance with each hit (`TestSaveThenSearchAcrossSessions`).
+4. Verify a rejected memory write creates no memory (`TestSaveRejectsEmptyAndOversizedMemories`).
+5. A hosted model saves facts in one session and recalls them in another
+   (`TestLiveMemoryAcrossSessions`, paid).
 
 ### Observability and Operations
 
