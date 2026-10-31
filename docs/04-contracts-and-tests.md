@@ -272,7 +272,7 @@ Each error should include:
 
 1. Block a dangerous tool call until approval.
 2. Approve asynchronously and resume the run.
-3. Reject approval and transition the run to a terminal rejected/failed state.
+3. Reject approval; the agent receives the rejection as the tool result and the run continues.
 4. Expire approval and verify timeout handling.
 
 ### Memory and Retrieval

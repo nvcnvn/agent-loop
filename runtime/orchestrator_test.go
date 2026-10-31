@@ -507,34 +507,7 @@ func TestApprovalRequiredToolWaitsForResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var approvalID core.ApprovalID
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, ev := range events {
-			if ev.Type != core.EvApprovalReq {
-				continue
-			}
-			var payload struct {
-				ApprovalID core.ApprovalID `json:"approval_id"`
-			}
-			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-				t.Fatal(err)
-			}
-			approvalID = payload.ApprovalID
-			break
-		}
-		if approvalID != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if approvalID == "" {
-		t.Fatal("approval request was not emitted")
-	}
+	approvalID := awaitApprovalRequest(t, s, runID)
 	run, err := s.GetRun(ctx, core.DefaultTenant, runID)
 	if err != nil {
 		t.Fatal(err)
@@ -568,6 +541,84 @@ func TestApprovalRequiredToolWaitsForResolution(t *testing.T) {
 	}
 	if !foundResolution {
 		t.Fatal("approval resolution event was not emitted")
+	}
+}
+
+func awaitApprovalRequest(t *testing.T, s store.Store, runID core.RunID) core.ApprovalID {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range events {
+			if ev.Type != core.EvApprovalReq {
+				continue
+			}
+			var payload struct {
+				ApprovalID core.ApprovalID `json:"approval_id"`
+			}
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			return payload.ApprovalID
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("approval request was not emitted")
+	return ""
+}
+
+// Acceptance: §Human Approval #3 – a rejection goes back to the agent.
+func TestRejectedApprovalReturnsToAgent(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "echo", Input: json.RawMessage(`{"text":"x"}`)}}},
+		model.MockResponse{Content: "ok, skipped"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"echo"}}})
+	orch.Policy.ApprovalRequired = []string{"echo"}
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalID := awaitApprovalRequest(t, s, runID)
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "rejected", nil); err != nil {
+		t.Fatal(err)
+	}
+	res, err := orch.Wait(ctx, runID)
+	if err != nil || res.Outputs["s"] != "ok, skipped" {
+		t.Fatalf("status=%s err=%v reason=%s", res.Status, err, res.FailureReason)
+	}
+	msgs := prov.Calls()[1].Messages
+	if last := msgs[len(msgs)-1]; last.Role != model.RoleTool || !strings.Contains(last.Content, "rejected") {
+		t.Fatalf("agent did not get the rejection: %+v", last)
+	}
+	events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var statuses []string
+	for _, ev := range events {
+		if ev.Type == core.EvToolStarted {
+			t.Fatal("rejected tool was executed")
+		}
+		if ev.Type == core.EvRunStateChanged {
+			var p struct{ Status string }
+			if err := json.Unmarshal(ev.Payload, &p); err != nil {
+				t.Fatal(err)
+			}
+			statuses = append(statuses, p.Status)
+		}
+	}
+	if got := strings.Join(statuses, ","); got != "running,awaiting_approval,running,succeeded" {
+		t.Fatalf("run states=%s", got)
 	}
 }
 

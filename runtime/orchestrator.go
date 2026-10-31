@@ -728,10 +728,14 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 		})
 	}
 
-	for _, plan := range plans {
-		if plan.requiresApproval {
-			if err := o.awaitToolApproval(gctx, tenant, session, runID, taskID, plan.call, plan.approvalReason); err != nil {
+	for i := range plans {
+		if plans[i].requiresApproval {
+			status, err := o.awaitToolApproval(gctx, tenant, session, runID, taskID, plans[i].call, plans[i].approvalReason)
+			if err != nil {
 				return nil, err
+			}
+			if status != "approved" {
+				plans[i].refused = fmt.Errorf("call to tool %s was not approved (%s)", plans[i].call.Tool.Name, status)
 			}
 		}
 	}
@@ -773,7 +777,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 	return out, nil
 }
 
-func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, reason string) error {
+func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, reason string) (string, error) {
 	if reason == "" {
 		reason = "tool requires approval"
 	}
@@ -788,7 +792,7 @@ func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.Tenant
 		}),
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	o.transitionRun(ctx, runID, tenant, core.RunAwaitingApproval, reason)
 	o.emit(ctx, core.Event{
@@ -808,7 +812,7 @@ func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.Tenant
 
 	approval, err := o.Approvals.WaitForApproval(ctx, approvalID)
 	if err != nil {
-		return fmt.Errorf("approval %s: %w", approvalID, err)
+		return "", fmt.Errorf("approval %s: %w", approvalID, err)
 	}
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
@@ -824,11 +828,8 @@ func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.Tenant
 			"status":      approval.Status,
 		}),
 	})
-	if approval.Status != "approved" {
-		return fmt.Errorf("%w: tool %s %s", core.ErrApprovalRequired, call.Tool.Name, approval.Status)
-	}
 	o.transitionRun(ctx, runID, tenant, core.RunRunning, "")
-	return nil
+	return approval.Status, nil
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call tool.Call, tc model.ToolCall, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (model.Message, error) {

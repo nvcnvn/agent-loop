@@ -127,13 +127,12 @@ Run state:
 ```text
 queued -> running -> succeeded
 queued -> canceled
-running -> awaiting_approval -> running
+running -> awaiting_approval -> running   # approved or rejected; a rejection goes back to the agent
 running -> paused -> running
 running -> canceling -> canceled
 running -> failed
 running -> timed_out
 running -> succeeded
-awaiting_approval -> rejected
 awaiting_approval -> expired
 paused -> canceling
 failed -> queued        # retry as same run attempt only when replay policy allows

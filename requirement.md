@@ -294,7 +294,7 @@ Support approval checkpoints for:
 - [ ] High-cost actions.
 - [ ] Final answer publication in selected workflows.
 - [ ] **Blocker:** Approval expiry.
-- [ ] **Blocker:** A rejection returned to the agent as a result instead of failing the run.
+- [x] A rejection returned to the agent as a tool result instead of failing the run.
 
 ## 10. Observability and Operations
 

@@ -212,9 +212,6 @@ var ErrBudgetExceeded = errors.New("budget exceeded")
 // ErrPolicyDenied is returned by the policy engine.
 var ErrPolicyDenied = errors.New("policy denied")
 
-// ErrApprovalRequired is returned when a step needs human approval.
-var ErrApprovalRequired = errors.New("approval required")
-
 // ErrNotFound is returned by stores.
 var ErrNotFound = errors.New("not found")
 
