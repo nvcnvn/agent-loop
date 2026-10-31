@@ -32,22 +32,25 @@ The recommended first vertical slice from
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost) | [policy/policy.go](policy/policy.go) |
 | Prometheus metrics at `/metrics` (runs, model calls, tokens, cost, tools, queue depth, HTTP latency) | [observe/metrics.go](observe/metrics.go) |
 | Loop / stall detector; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
+| Workflows as stage graphs (`depends_on`) with hand-backs to earlier stages, stop conditions, retries, stage/agent/tool timeouts, stage approval gates, and JSON Schema for input and stage outputs; agents delegating to child agents at runtime (`delegate` tool, depth-limited); agents and named workflow templates loaded from a JSON config | [runtime/workflow.go](runtime/workflow.go), [runtime/config.go](runtime/config.go) |
 | Orchestrator with session history passed to every agent, sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`), parallel tool calls for read-safe tools, resuming interrupted runs (also on startup), run queueing with backpressure, concurrency limits per tenant/workflow/agent/tool, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
 | Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
+| MCP tools: servers over stdio or streamable HTTP, tools discovered and translated at startup, auth headers from the environment, reconnects, retries of idempotent calls, a circuit breaker | [tool/mcp/mcp.go](tool/mcp/mcp.go) |
+| OpenTelemetry traces of runs, stages, tasks (including delegated ones), model calls, tool calls and approval waits | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | HTTP server example: JSON logs (`log/slog`) to stdout, resumes unfinished runs at startup, graceful shutdown on SIGINT/SIGTERM (`-shutdown-timeout`) | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
 | Programmatic example: planner -> parallel researchers -> synthesizer + replay | [cmd/example-workflow/main.go](cmd/example-workflow/main.go) |
 
-The MCP client, snapshot/compaction, and pgvector memory are still
-doc-only. Both the in-memory store and the PostgreSQL driver implement
+Snapshot/compaction and pgvector memory are still doc-only. Both the in-memory store and the PostgreSQL driver implement
 the aggregate `store.Store` interface, so `runtime` and `api` are
 driver-agnostic.
 
 ## Run it
 
 Default test suite: unit tests, fuzz seeds and end-to-end scenarios
-replayed from recorded `gemma4:e2b-it-qat` output. It needs no external
+replayed from output recorded on `gemma4:e2b-it-qat`, `qwen3-vl:2b` and
+`ministral-3:3b`, including image input. It needs no external
 services and runs in CI:
 
 ```sh
@@ -78,6 +81,28 @@ curl -X POST http://localhost:8080/v1/runs \
   -d '{"session_id":"<id>","workflow":{"name":"wf","stages":[{"name":"reply","kind":"sequential","agents":[{"name":"echo","prompt":"Say hi"}]}]}}'
 # subscribe to events
 curl -N http://localhost:8080/v1/runs/<run_id>/stream
+```
+
+Without `-config` the server has one `echo` agent. `-config agents.json` replaces it with the agents,
+named workflow templates and MCP servers in that file, and a run can then start a template by name:
+
+```sh
+curl -X POST http://localhost:8080/v1/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"<id>","template":"research","input":{"question":"Why is the sky blue?"}}'
+```
+
+The workflow and config formats are in
+[docs/04-contracts-and-tests.md](docs/04-contracts-and-tests.md) §3 to §5. A failed or timed-out run
+can be resumed with `POST /v1/runs/<run_id>/resume`.
+
+To export traces, point the server at an OTLP/HTTP collector, for example a local Jaeger:
+
+```sh
+docker run -d --rm -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:2.10.0
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 OTEL_SERVICE_NAME=agent-loop \
+  go run ./cmd/agent-loop -trust-identity-headers
+# traces at http://localhost:16686
 ```
 
 The server refuses to start until you choose how `/v1` requests are

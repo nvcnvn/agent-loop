@@ -1,0 +1,58 @@
+[
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are terse."
+        },
+        {
+          "role": "user",
+          "content": "What color are the circles in this image? Answer with one word.",
+          "images": [
+            {
+              "mime_type": "image/png",
+              "data": "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"
+            }
+          ]
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Red",
+        "thinking": "Thinking Process:\n\n1.  **Analyze the Request:** The user wants to know the color of the circles in the provided image. The answer must be \"terse\" (meaning brief/concise) and provided as \"one word.\"\n2.  **Analyze the Image:** The image contains a square-ish pattern with circles and squares.\n    *   There are two large circles.\n    *   They are red.\n    *   There are four smaller squares/rectangles.\n    *   The colors are red and blue.\n3.  **Identify the Target:** The question asks for the color of the circles.\n4.  **Determine the Answer:** The circles are red.\n5.  **Format the Output:** The requirement is \"one word.\"\n6.  **Final Answer Selection:** Red."
+      },
+      "usage": {
+        "prompt_tokens": 76,
+        "completion_tokens": 179,
+        "cached_tokens": 0,
+        "total_tokens": 255,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:38:43.176534Z",
+        "message": {
+          "role": "assistant",
+          "content": "Red",
+          "thinking": "Thinking Process:\n\n1.  **Analyze the Request:** The user wants to know the color of the circles in the provided image. The answer must be \"terse\" (meaning brief/concise) and provided as \"one word.\"\n2.  **Analyze the Image:** The image contains a square-ish pattern with circles and squares.\n    *   There are two large circles.\n    *   They are red.\n    *   There are four smaller squares/rectangles.\n    *   The colors are red and blue.\n3.  **Identify the Target:** The question asks for the color of the circles.\n4.  **Determine the Answer:** The circles are red.\n5.  **Format the Output:** The requirement is \"one word.\"\n6.  **Final Answer Selection:** Red."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 3119161167,
+        "load_duration": 5197125,
+        "prompt_eval_count": 76,
+        "prompt_eval_duration": 216284000,
+        "eval_count": 179,
+        "eval_duration": 2893806000
+      }
+    }
+  }
+]

@@ -9,6 +9,7 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/nvcnvn/agent-loop/core"
 )
@@ -25,10 +26,21 @@ const (
 type Message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`
+	Thinking   string     `json:"thinking,omitempty"` // the model's reasoning, kept out of public events
 	Name       string     `json:"name,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Images     []Image    `json:"images,omitempty"`
 }
+
+// Image is an image a message shows the model.
+type Image struct {
+	MimeType string `json:"mime_type"`
+	Data     []byte `json:"data"`
+}
+
+// ErrUnsupported is returned when a model lacks a capability a request needs.
+var ErrUnsupported = errors.New("unsupported by the model")
 
 // ToolSpec is the schema-shaped tool description we advertise to providers.
 type ToolSpec struct {
@@ -73,6 +85,7 @@ type Capabilities struct {
 	ParallelToolCalls bool
 	StructuredOutput  bool
 	Embeddings        bool
+	Vision            bool
 	TokenAccounting   bool
 }
 

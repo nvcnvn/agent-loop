@@ -1,0 +1,760 @@
+[
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You classify incoming email for a shop's support team."
+        },
+        {
+          "role": "user",
+          "content": "Classify this email as spam or support:\n\nCONGRATULATIONS!!! You won a free cruise. Click here to claim your prize now!"
+        }
+      ],
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "spam",
+              "support"
+            ]
+          }
+        },
+        "required": [
+          "category"
+        ]
+      }
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "{\"category\": \"spam\"}",
+        "thinking": "*   **Analyze the Request:** The user wants me to classify a specific email as \"spam\" or \"support\".\n*   **Analyze the Email Content:** \"CONGRATULATIONS!!! You won a free cruise. Click here to claim your prize now!\"\n*   **Evaluate against Classification Criteria:**\n    *   **Support:** Emails seeking assistance, questions, complaints, or inquiries about products/services related to the shop.\n    *   **Spam:** Unsolicited commercial email (often suspicious, offers prizes, urgent language, generic appeals).\n*   **Apply Criteria:** The email is an unsolicited offer of a prize (\"free cruise\") and uses high-pressure, click-bait language (\"CONGRATULATIONS!!!\", \"Click here to claim your prize now!\"). This is a classic characteristic of spam or phishing. It is not a legitimate inquiry or support request for a shop.\n*   **Conclusion:** Classify as spam."
+      },
+      "usage": {
+        "prompt_tokens": 262,
+        "completion_tokens": 7,
+        "cached_tokens": 0,
+        "total_tokens": 269,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:51.30408Z",
+        "message": {
+          "role": "assistant",
+          "content": "{\"category\": \"spam\"}",
+          "thinking": "*   **Analyze the Request:** The user wants me to classify a specific email as \"spam\" or \"support\".\n*   **Analyze the Email Content:** \"CONGRATULATIONS!!! You won a free cruise. Click here to claim your prize now!\"\n*   **Evaluate against Classification Criteria:**\n    *   **Support:** Emails seeking assistance, questions, complaints, or inquiries about products/services related to the shop.\n    *   **Spam:** Unsolicited commercial email (often suspicious, offers prizes, urgent language, generic appeals).\n*   **Apply Criteria:** The email is an unsolicited offer of a prize (\"free cruise\") and uses high-pressure, click-bait language (\"CONGRATULATIONS!!!\", \"Click here to claim your prize now!\"). This is a classic characteristic of spam or phishing. It is not a legitimate inquiry or support request for a shop.\n*   **Conclusion:** Classify as spam."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 3211144000,
+        "load_duration": 6202583,
+        "prompt_eval_count": 262,
+        "prompt_eval_duration": 224323000,
+        "eval_count": 7,
+        "eval_duration": 101817000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You classify incoming email for a shop's support team."
+        },
+        {
+          "role": "assistant",
+          "content": "{\"category\": \"spam\"}"
+        },
+        {
+          "role": "user",
+          "content": "Classify this email as spam or support:\n\nHello, my monitor order is late. Can I get a refund? - Ada"
+        }
+      ],
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "spam",
+              "support"
+            ]
+          }
+        },
+        "required": [
+          "category"
+        ]
+      }
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "{\"category\": \"support\"}",
+        "thinking": "Thinking Process:\n1.  **Analyze the Request:** The user wants me to classify an email for a shop's support team as either \"spam\" or \"support\".\n2.  **Analyze the Email Content:** \"Hello, my monitor order is late. Can I get a refund? - Ada\"\n3.  **Determine the Email's Purpose:**\n    *   It references a specific transaction/order (\"monitor order\").\n    *   It expresses a specific problem (\"order is late\").\n    *   It makes a specific request (\"Can I get a refund?\").\n4.  **Relate Purpose to Classification Categories:**\n    *   *Spam:* Unsolicited junk, phishing, scams, promotional material that isn't related to a specific interaction. (This email is direct and specific.)\n    *   *Support:* Customer inquiries, technical issues, order status requests, billing questions, complaints about service/products. (This email fits the definition perfectly.)\n5.  **Conclusion:** The email is a customer query about a late order and a refund request. It belongs in the support queue.\n6.  **Final Output Generation.** (Select \"support\")"
+      },
+      "usage": {
+        "prompt_tokens": 323,
+        "completion_tokens": 7,
+        "cached_tokens": 0,
+        "total_tokens": 330,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:54.523288Z",
+        "message": {
+          "role": "assistant",
+          "content": "{\"category\": \"support\"}",
+          "thinking": "Thinking Process:\n1.  **Analyze the Request:** The user wants me to classify an email for a shop's support team as either \"spam\" or \"support\".\n2.  **Analyze the Email Content:** \"Hello, my monitor order is late. Can I get a refund? - Ada\"\n3.  **Determine the Email's Purpose:**\n    *   It references a specific transaction/order (\"monitor order\").\n    *   It expresses a specific problem (\"order is late\").\n    *   It makes a specific request (\"Can I get a refund?\").\n4.  **Relate Purpose to Classification Categories:**\n    *   *Spam:* Unsolicited junk, phishing, scams, promotional material that isn't related to a specific interaction. (This email is direct and specific.)\n    *   *Support:* Customer inquiries, technical issues, order status requests, billing questions, complaints about service/products. (This email fits the definition perfectly.)\n5.  **Conclusion:** The email is a customer query about a late order and a refund request. It belongs in the support queue.\n6.  **Final Output Generation.** (Select \"support\")"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 3218707792,
+        "load_duration": 4670375,
+        "prompt_eval_count": 323,
+        "prompt_eval_duration": 260810000,
+        "eval_count": 7,
+        "eval_duration": 69536000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Search the knowledge base with kb.search and reply with the fact that answers the question."
+        },
+        {
+          "role": "assistant",
+          "content": "{\"category\": \"spam\"}"
+        },
+        {
+          "role": "user",
+          "content": "What is the policy that applies to this email?\n\nHello, my monitor order is late. Can I get a refund? - Ada"
+        }
+      ],
+      "tools": [
+        {
+          "name": "kb.search",
+          "description": "Search the help-center knowledge base. Returns the best matching article.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "1.  **Analyze the user's request:** The user wants to know the policy that applies to the provided email: \"Hello, my monitor order is late. Can I get a refund? - Ada\".\n\n2.  **Examine the input:** The input is a short email expressing dissatisfaction about a late order and requesting a refund.\n\n3.  **Determine the goal:** I need to find the relevant policy regarding late orders and refunds. This requires accessing a knowledge base or policy document.\n\n4.  **Identify the available tool:** I have a `kb.search` tool.\n\n5.  **Formulate a search query:** The query should relate to the content of the email (late orders, refunds). Good queries would be:\n    *   \"policy on late monitor order\"\n    *   \"refund policy for late deliveries\"\n    *   \"shipping delay policy\"\n\n6.  **Execute the tool (simulated):** I will call `kb.search` with a relevant query.\n\n7.  **Analyze the tool output (Self-Correction/Refinement):** Since I don't have real-time knowledge of the specific \"knowledge base,\" I have to simulate the process. *If the user provided a context (like a list of policies), I would use it. Since they haven't, I must assume I need to search.*\n\n8.  **Simulated Tool Call:**\n    *   *If I call `kb.search(query=\"refund policy for late orders\")`*\n\n9.  **Final Response Generation:** (Assuming the search returns a relevant policy snippet, I would synthesize the answer. If the search returns nothing, I would state that.)\n\n**(Self-Correction during drafting):** The prompt *only* gives me the email and asks for the policy. I don't have the knowledge base context. Therefore, I *must* use the tool to search for that policy.\n\n10. **Constraint Check:** The instruction is to \"Search the knowledge base with `kb.search` and reply with the fact that answers the question.\"\n\n11. **Construct the final tool call.** (This matches the actual output structure.)",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "kb.search",
+            "input": {
+              "query": "policy on late monitor order refund"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "kb.search",
+          "input": {
+            "query": "policy on late monitor order refund"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 123,
+        "completion_tokens": 480,
+        "cached_tokens": 0,
+        "total_tokens": 603,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:38:01.724719Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1.  **Analyze the user's request:** The user wants to know the policy that applies to the provided email: \"Hello, my monitor order is late. Can I get a refund? - Ada\".\n\n2.  **Examine the input:** The input is a short email expressing dissatisfaction about a late order and requesting a refund.\n\n3.  **Determine the goal:** I need to find the relevant policy regarding late orders and refunds. This requires accessing a knowledge base or policy document.\n\n4.  **Identify the available tool:** I have a `kb.search` tool.\n\n5.  **Formulate a search query:** The query should relate to the content of the email (late orders, refunds). Good queries would be:\n    *   \"policy on late monitor order\"\n    *   \"refund policy for late deliveries\"\n    *   \"shipping delay policy\"\n\n6.  **Execute the tool (simulated):** I will call `kb.search` with a relevant query.\n\n7.  **Analyze the tool output (Self-Correction/Refinement):** Since I don't have real-time knowledge of the specific \"knowledge base,\" I have to simulate the process. *If the user provided a context (like a list of policies), I would use it. Since they haven't, I must assume I need to search.*\n\n8.  **Simulated Tool Call:**\n    *   *If I call `kb.search(query=\"refund policy for late orders\")`*\n\n9.  **Final Response Generation:** (Assuming the search returns a relevant policy snippet, I would synthesize the answer. If the search returns nothing, I would state that.)\n\n**(Self-Correction during drafting):** The prompt *only* gives me the email and asks for the policy. I don't have the knowledge base context. Therefore, I *must* use the tool to search for that policy.\n\n10. **Constraint Check:** The instruction is to \"Search the knowledge base with `kb.search` and reply with the fact that answers the question.\"\n\n11. **Construct the final tool call.** (This matches the actual output structure.)",
+          "tool_calls": [
+            {
+              "id": "call_wqxnyt16",
+              "function": {
+                "index": 0,
+                "name": "kb.search",
+                "arguments": {
+                  "query": "policy on late monitor order refund"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 7187309209,
+        "load_duration": 6879500,
+        "prompt_eval_count": 123,
+        "prompt_eval_duration": 125244000,
+        "eval_count": 480,
+        "eval_duration": 7052378000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "assistant",
+          "content": "{\"category\": \"spam\"}"
+        },
+        {
+          "role": "user",
+          "content": "Find the customer ada@example.com, list their orders, and reply with the IDs of the late ones."
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "1. **Analyze the Request:** The user wants to find a customer with email `ada@example.com`, list their orders, and then reply with the IDs of the *late* ones.\n\n2. **Identify Necessary Tools:**\n    * To find a customer by email: `crm.find_customer(email)`\n    * To list orders by customer ID: `orders.list(customer_id)`\n\n3. **Step 1: Find the customer.**\n    * Call `crm.find_customer` with the provided email.\n    * `crm.find_customer(email=\"ada@example.com\")`\n\n4. **Evaluate the Result (Simulated):**\n    * The previous turn showed `{\"category\": \"spam\"}`.\n    * *Self-Correction/Observation:* This result is likely from a *previous* tool call that was not explicitly requested in this turn, or it's the system's state. The current request is to perform the multi-step task. I must proceed with the plan.\n\n5. **Step 2: List the customer's orders (after getting the customer ID).**\n    * This step depends on the output of Step 1.\n\n6. **Step 3: Identify late orders and extract IDs.**\n    * This step depends on the output of Step 2.\n\n7. **Determine the immediate next action:** The first required action is to find the customer. I must call the tool.\n\n8. **Constraint Check:** I must call one tool at a time and wait for the result. I cannot perform the whole task at once.\n\n9. **Construct the Tool Call:**\n    * `crm.find_customer(email=\"ada@example.com\")`",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "crm.find_customer",
+            "input": {
+              "email": "ada@example.com"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "crm.find_customer",
+          "input": {
+            "email": "ada@example.com"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 223,
+        "completion_tokens": 394,
+        "cached_tokens": 0,
+        "total_tokens": 617,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:38:07.795707Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Analyze the Request:** The user wants to find a customer with email `ada@example.com`, list their orders, and then reply with the IDs of the *late* ones.\n\n2. **Identify Necessary Tools:**\n    * To find a customer by email: `crm.find_customer(email)`\n    * To list orders by customer ID: `orders.list(customer_id)`\n\n3. **Step 1: Find the customer.**\n    * Call `crm.find_customer` with the provided email.\n    * `crm.find_customer(email=\"ada@example.com\")`\n\n4. **Evaluate the Result (Simulated):**\n    * The previous turn showed `{\"category\": \"spam\"}`.\n    * *Self-Correction/Observation:* This result is likely from a *previous* tool call that was not explicitly requested in this turn, or it's the system's state. The current request is to perform the multi-step task. I must proceed with the plan.\n\n5. **Step 2: List the customer's orders (after getting the customer ID).**\n    * This step depends on the output of Step 1.\n\n6. **Step 3: Identify late orders and extract IDs.**\n    * This step depends on the output of Step 2.\n\n7. **Determine the immediate next action:** The first required action is to find the customer. I must call the tool.\n\n8. **Constraint Check:** I must call one tool at a time and wait for the result. I cannot perform the whole task at once.\n\n9. **Construct the Tool Call:**\n    * `crm.find_customer(email=\"ada@example.com\")`",
+          "tool_calls": [
+            {
+              "id": "call_rhy6cbla",
+              "function": {
+                "index": 0,
+                "name": "crm.find_customer",
+                "arguments": {
+                  "email": "ada@example.com"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 13257853625,
+        "load_duration": 6760041,
+        "prompt_eval_count": 223,
+        "prompt_eval_duration": 234591000,
+        "eval_count": 394,
+        "eval_duration": 5834120000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Search the knowledge base with kb.search and reply with the fact that answers the question."
+        },
+        {
+          "role": "assistant",
+          "content": "{\"category\": \"spam\"}"
+        },
+        {
+          "role": "user",
+          "content": "What is the policy that applies to this email?\n\nHello, my monitor order is late. Can I get a refund? - Ada"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1.  **Analyze the user's request:** The user wants to know the policy that applies to the provided email: \"Hello, my monitor order is late. Can I get a refund? - Ada\".\n\n2.  **Examine the input:** The input is a short email expressing dissatisfaction about a late order and requesting a refund.\n\n3.  **Determine the goal:** I need to find the relevant policy regarding late orders and refunds. This requires accessing a knowledge base or policy document.\n\n4.  **Identify the available tool:** I have a `kb.search` tool.\n\n5.  **Formulate a search query:** The query should relate to the content of the email (late orders, refunds). Good queries would be:\n    *   \"policy on late monitor order\"\n    *   \"refund policy for late deliveries\"\n    *   \"shipping delay policy\"\n\n6.  **Execute the tool (simulated):** I will call `kb.search` with a relevant query.\n\n7.  **Analyze the tool output (Self-Correction/Refinement):** Since I don't have real-time knowledge of the specific \"knowledge base,\" I have to simulate the process. *If the user provided a context (like a list of policies), I would use it. Since they haven't, I must assume I need to search.*\n\n8.  **Simulated Tool Call:**\n    *   *If I call `kb.search(query=\"refund policy for late orders\")`*\n\n9.  **Final Response Generation:** (Assuming the search returns a relevant policy snippet, I would synthesize the answer. If the search returns nothing, I would state that.)\n\n**(Self-Correction during drafting):** The prompt *only* gives me the email and asks for the policy. I don't have the knowledge base context. Therefore, I *must* use the tool to search for that policy.\n\n10. **Constraint Check:** The instruction is to \"Search the knowledge base with `kb.search` and reply with the fact that answers the question.\"\n\n11. **Construct the final tool call.** (This matches the actual output structure.)",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "kb.search",
+              "input": {
+                "query": "policy on late monitor order refund"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"text\":\"Items can be returned within 30 days of delivery for a full refund. Late orders can be refunded at once.\",\"title\":\"Returns and refunds\"}",
+          "name": "kb.search",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "kb.search",
+          "description": "Search the help-center knowledge base. Returns the best matching article.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Items can be returned within 30 days of delivery for a full refund. Late orders can be refunded at once.",
+        "thinking": "The user asked for the policy that applies to the email: \"Hello, my monitor order is late. Can I get a refund? - Ada\".\nI used the `kb.search` tool with the query \"policy on late monitor order refund\".\nThe search returned a relevant snippet: \"Items can be returned within 30 days of delivery for a full refund. Late orders can be refunded at once.\"\nThis directly answers the policy question by providing the relevant refund policy."
+      },
+      "usage": {
+        "prompt_tokens": 653,
+        "completion_tokens": 124,
+        "cached_tokens": 0,
+        "total_tokens": 777,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:38:09.793729Z",
+        "message": {
+          "role": "assistant",
+          "content": "Items can be returned within 30 days of delivery for a full refund. Late orders can be refunded at once.",
+          "thinking": "The user asked for the policy that applies to the email: \"Hello, my monitor order is late. Can I get a refund? - Ada\".\nI used the `kb.search` tool with the query \"policy on late monitor order refund\".\nThe search returned a relevant snippet: \"Items can be returned within 30 days of delivery for a full refund. Late orders can be refunded at once.\"\nThis directly answers the policy question by providing the relevant refund policy."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 8068660875,
+        "load_duration": 6993250,
+        "prompt_eval_count": 653,
+        "prompt_eval_duration": 441824000,
+        "eval_count": 124,
+        "eval_duration": 1552650000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "assistant",
+          "content": "{\"category\": \"spam\"}"
+        },
+        {
+          "role": "user",
+          "content": "Find the customer ada@example.com, list their orders, and reply with the IDs of the late ones."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Analyze the Request:** The user wants to find a customer with email `ada@example.com`, list their orders, and then reply with the IDs of the *late* ones.\n\n2. **Identify Necessary Tools:**\n    * To find a customer by email: `crm.find_customer(email)`\n    * To list orders by customer ID: `orders.list(customer_id)`\n\n3. **Step 1: Find the customer.**\n    * Call `crm.find_customer` with the provided email.\n    * `crm.find_customer(email=\"ada@example.com\")`\n\n4. **Evaluate the Result (Simulated):**\n    * The previous turn showed `{\"category\": \"spam\"}`.\n    * *Self-Correction/Observation:* This result is likely from a *previous* tool call that was not explicitly requested in this turn, or it's the system's state. The current request is to perform the multi-step task. I must proceed with the plan.\n\n5. **Step 2: List the customer's orders (after getting the customer ID).**\n    * This step depends on the output of Step 1.\n\n6. **Step 3: Identify late orders and extract IDs.**\n    * This step depends on the output of Step 2.\n\n7. **Determine the immediate next action:** The first required action is to find the customer. I must call the tool.\n\n8. **Constraint Check:** I must call one tool at a time and wait for the result. I cannot perform the whole task at once.\n\n9. **Construct the Tool Call:**\n    * `crm.find_customer(email=\"ada@example.com\")`",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "1. **Analyze the previous output:** The customer `ada@example.com` was found with `customer_id: \"C-17\"`.\n\n2. **Determine the next step:** The user wants to list the customer's orders. I have the `customer_id` now.\n\n3. **Identify the next tool:** `orders.list(customer_id)`\n\n4. **Construct the Tool Call:**\n    * `orders.list(customer_id=\"C-17\")`\n\n5. **Wait for the result:** I must wait for the output of this call before I can proceed to identify late orders.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "orders.list",
+            "input": {
+              "customer_id": "C-17"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "orders.list",
+          "input": {
+            "customer_id": "C-17"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 651,
+        "completion_tokens": 156,
+        "cached_tokens": 0,
+        "total_tokens": 807,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:38:11.981486Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Analyze the previous output:** The customer `ada@example.com` was found with `customer_id: \"C-17\"`.\n\n2. **Determine the next step:** The user wants to list the customer's orders. I have the `customer_id` now.\n\n3. **Identify the next tool:** `orders.list(customer_id)`\n\n4. **Construct the Tool Call:**\n    * `orders.list(customer_id=\"C-17\")`\n\n5. **Wait for the result:** I must wait for the output of this call before I can proceed to identify late orders.",
+          "tool_calls": [
+            {
+              "id": "call_qovv6l1a",
+              "function": {
+                "index": 0,
+                "name": "orders.list",
+                "arguments": {
+                  "customer_id": "C-17"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 4185392541,
+        "load_duration": 4591083,
+        "prompt_eval_count": 651,
+        "prompt_eval_duration": 344937000,
+        "eval_count": 156,
+        "eval_duration": 1839145000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "assistant",
+          "content": "{\"category\": \"spam\"}"
+        },
+        {
+          "role": "user",
+          "content": "Find the customer ada@example.com, list their orders, and reply with the IDs of the late ones."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Analyze the Request:** The user wants to find a customer with email `ada@example.com`, list their orders, and then reply with the IDs of the *late* ones.\n\n2. **Identify Necessary Tools:**\n    * To find a customer by email: `crm.find_customer(email)`\n    * To list orders by customer ID: `orders.list(customer_id)`\n\n3. **Step 1: Find the customer.**\n    * Call `crm.find_customer` with the provided email.\n    * `crm.find_customer(email=\"ada@example.com\")`\n\n4. **Evaluate the Result (Simulated):**\n    * The previous turn showed `{\"category\": \"spam\"}`.\n    * *Self-Correction/Observation:* This result is likely from a *previous* tool call that was not explicitly requested in this turn, or it's the system's state. The current request is to perform the multi-step task. I must proceed with the plan.\n\n5. **Step 2: List the customer's orders (after getting the customer ID).**\n    * This step depends on the output of Step 1.\n\n6. **Step 3: Identify late orders and extract IDs.**\n    * This step depends on the output of Step 2.\n\n7. **Determine the immediate next action:** The first required action is to find the customer. I must call the tool.\n\n8. **Constraint Check:** I must call one tool at a time and wait for the result. I cannot perform the whole task at once.\n\n9. **Construct the Tool Call:**\n    * `crm.find_customer(email=\"ada@example.com\")`",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Analyze the previous output:** The customer `ada@example.com` was found with `customer_id: \"C-17\"`.\n\n2. **Determine the next step:** The user wants to list the customer's orders. I have the `customer_id` now.\n\n3. **Identify the next tool:** `orders.list(customer_id)`\n\n4. **Construct the Tool Call:**\n    * `orders.list(customer_id=\"C-17\")`\n\n5. **Wait for the result:** I must wait for the output of this call before I can proceed to identify late orders.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "orders.list",
+              "input": {
+                "customer_id": "C-17"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"orders\":[{\"order_id\":\"O-301\",\"item\":\"keyboard\",\"status\":\"delivered\",\"total\":89},{\"order_id\":\"O-302\",\"item\":\"monitor\",\"status\":\"late\",\"total\":240,\"days_late\":9}]}",
+          "name": "orders.list",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "The ID of the late order is O-302.",
+        "thinking": "1. **Analyze the previous output:** The orders for customer C-17 were listed:\n    * Order O-301: status=\"delivered\"\n    * Order O-302: status=\"late\", days_late=9\n\n2. **Determine the final action:** The user requested the IDs of the *late* orders.\n\n3. **Extract the result:** The late order ID is \"O-302\".\n\n4. **Formulate the final response:** Reply with the extracted ID."
+      },
+      "usage": {
+        "prompt_tokens": 878,
+        "completion_tokens": 125,
+        "cached_tokens": 0,
+        "total_tokens": 1003,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:38:13.491613Z",
+        "message": {
+          "role": "assistant",
+          "content": "The ID of the late order is O-302.",
+          "thinking": "1. **Analyze the previous output:** The orders for customer C-17 were listed:\n    * Order O-301: status=\"delivered\"\n    * Order O-302: status=\"late\", days_late=9\n\n2. **Determine the final action:** The user requested the IDs of the *late* orders.\n\n3. **Extract the result:** The late order ID is \"O-302\".\n\n4. **Formulate the final response:** Reply with the extracted ID."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1509754250,
+        "load_duration": 5394500,
+        "prompt_eval_count": 878,
+        "prompt_eval_duration": 103312000,
+        "eval_count": 125,
+        "eval_duration": 1397087000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You write short, polite replies to customers."
+        },
+        {
+          "role": "assistant",
+          "content": "{\"category\": \"spam\"}"
+        },
+        {
+          "role": "user",
+          "content": "Write a two-sentence reply to this email:\nHello, my monitor order is late. Can I get a refund? - Ada\n\nAccount findings: The ID of the late order is O-302.\nPolicy: Items can be returned within 30 days of delivery for a full refund. Late orders can be refunded at once."
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "We sincerely apologize for the delay with your monitor order, O-302. Since late orders are eligible for a refund, we would be happy to process that for you immediately.",
+        "thinking": "Thinking Process:\n\n1.  **Analyze the Request:** The user wants a two-sentence, short, and polite reply to a customer email from \"Ada\" regarding a late monitor order (ID O-302) and a request for a refund.\n2.  **Analyze the Customer Email/Situation:**\n    *   Customer: Ada.\n    *   Issue: Order is late.\n    *   Request: Refund.\n    *   Specific Order ID: O-302.\n3.  **Analyze the Account Findings/Policy:**\n    *   Policy 1: Items can be returned within 30 days of delivery for a full refund.\n    *   Policy 2: Late orders can be refunded at once.\n4.  **Determine the Key Information to Include in the Reply (Goal: Resolve the query politely):**\n    *   Acknowledge the issue (late order).\n    *   Confirm the resolution (refund is possible based on policy).\n    *   State the next steps (implicitly or explicitly mention policy terms).\n5.  **Draft - Sentence 1 (Acknowledge \u0026 Action):** Address the late order and confirm that a refund can be processed.\n6.  **Draft - Sentence 2 (Clarify Process/Policy):** Mention the policy context (refund eligibility) and what happens next.\n7.  **Refine and Combine (Two Sentences, Short, Polite):**\n\n    *Initial Draft Idea:* We apologize for the delay with your order O-302. Since late orders are eligible for a refund, we can certainly process that for you.\n\n8.  **Final Polish (Check against \"short, polite replies\"):**\n    *The draft is concise, polite, addresses the core issue, and provides the required resolution.* (No changes needed.)"
+      },
+      "usage": {
+        "prompt_tokens": 107,
+        "completion_tokens": 428,
+        "cached_tokens": 0,
+        "total_tokens": 535,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:38:20.377731Z",
+        "message": {
+          "role": "assistant",
+          "content": "We sincerely apologize for the delay with your monitor order, O-302. Since late orders are eligible for a refund, we would be happy to process that for you immediately.",
+          "thinking": "Thinking Process:\n\n1.  **Analyze the Request:** The user wants a two-sentence, short, and polite reply to a customer email from \"Ada\" regarding a late monitor order (ID O-302) and a request for a refund.\n2.  **Analyze the Customer Email/Situation:**\n    *   Customer: Ada.\n    *   Issue: Order is late.\n    *   Request: Refund.\n    *   Specific Order ID: O-302.\n3.  **Analyze the Account Findings/Policy:**\n    *   Policy 1: Items can be returned within 30 days of delivery for a full refund.\n    *   Policy 2: Late orders can be refunded at once.\n4.  **Determine the Key Information to Include in the Reply (Goal: Resolve the query politely):**\n    *   Acknowledge the issue (late order).\n    *   Confirm the resolution (refund is possible based on policy).\n    *   State the next steps (implicitly or explicitly mention policy terms).\n5.  **Draft - Sentence 1 (Acknowledge \u0026 Action):** Address the late order and confirm that a refund can be processed.\n6.  **Draft - Sentence 2 (Clarify Process/Policy):** Mention the policy context (refund eligibility) and what happens next.\n7.  **Refine and Combine (Two Sentences, Short, Polite):**\n\n    *Initial Draft Idea:* We apologize for the delay with your order O-302. Since late orders are eligible for a refund, we can certainly process that for you.\n\n8.  **Final Polish (Check against \"short, polite replies\"):**\n    *The draft is concise, polite, addresses the core issue, and provides the required resolution.* (No changes needed.)"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 6885485166,
+        "load_duration": 5192916,
+        "prompt_eval_count": 107,
+        "prompt_eval_duration": 117428000,
+        "eval_count": 428,
+        "eval_duration": 6759758000
+      }
+    }
+  }
+]

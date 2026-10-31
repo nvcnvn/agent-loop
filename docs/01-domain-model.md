@@ -94,16 +94,13 @@ draft -> active -> deprecated -> disabled
 active -> deprecated
 ```
 
-Definition must include:
-- agent roles
-- allowed tools
-- allowed child agents
-- retry policy
-- timeout and deadline
-- stop conditions
-- human approval gates
-- input and output schema
-- explicit concurrent groups when concurrency is intended
+The definition is a graph of stages (see `docs/04-contracts-and-tests.md` §3). Each stage names
+its agent steps and may declare its dependencies, a retry policy, a timeout, a hand-back to an
+earlier stage, a stop condition, an output schema and approval gates; the workflow declares an
+input schema. Agents declare their allowed tools and child agents.
+
+Today templates are named entries in the server's config file. They have no ID, version or status,
+and a run stores the definition it started with instead of a reference to it.
 
 ### Run
 
@@ -127,7 +124,8 @@ Run state:
 ```text
 queued -> running -> succeeded
 queued -> canceled
-running -> awaiting_approval -> running   # approved, rejected or expired; a refusal goes back to the agent
+running -> awaiting_approval -> running   # approved, rejected or expired; a refused tool call goes back
+                                          # to the agent, a refused stage gate then fails the run
 running -> paused -> running
 running -> canceling -> canceled
 running -> failed
@@ -135,15 +133,16 @@ running -> timed_out
 running -> succeeded
 queued | running | awaiting_approval -> running   # resumed after an interruption
 paused -> canceling
-failed -> queued        # retry as same run attempt only when replay policy allows
+failed | timed_out -> queued   # resumed
 failed -> superseded    # new run attempt replaces it
 ```
 
 Rules:
 - `run.status` is a projection of the event stream, not the source of truth.
-- A run is resumable when it is not terminal and no process is executing it. Resuming reuses the
-  outputs of its completed tasks, marks interrupted tasks failed and runs them again, and cancels
-  its open approvals.
+- A run is resumable when no process is executing it and it is unfinished, failed or timed out.
+  Resuming reuses the outputs of its completed tasks, marks interrupted tasks failed, runs
+  interrupted and failed tasks again, and cancels its open approvals. Succeeded and canceled runs
+  are final.
 - Sub-agent execution should be represented as child tasks and optionally child runs when independent replay boundaries are needed.
 
 ### Task
@@ -176,8 +175,10 @@ blocked -> canceled
 ```
 
 Rules:
-- `depth` enforces recursive delegation limits.
+- A workflow stage's agent steps are tasks at depth 0. A task an agent creates with the `delegate`
+  tool has the calling task as its parent and one more level of depth; the run's `max_depth` caps it.
 - Parent tasks cannot complete until required child tasks reach a terminal state.
+- A retry of a failed task is a new task with the next `attempt` number.
 - Concurrent child tasks are linked by a `task_group`.
 
 ### Task Group

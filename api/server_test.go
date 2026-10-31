@@ -418,6 +418,42 @@ func TestStartRunOverloaded(t *testing.T) {
 	}
 }
 
+func TestStartRunFromTemplate(t *testing.T) {
+	srv, orch, s := newTestServer(t)
+	defer srv.Close()
+	orch.Workflows["greet"] = runtime.Workflow{Name: "greet", Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "echo", Prompt: "hi"}}}}}
+	sid, _ := s.CreateSession(context.Background(), store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	for body, want := range map[string]int{
+		`{"session_id":"` + string(sid) + `","template":"greet"}`:   http.StatusAccepted,
+		`{"session_id":"` + string(sid) + `","template":"missing"}`: http.StatusBadRequest,
+		`{"session_id":"` + string(sid) + `"}`:                      http.StatusBadRequest,
+	} {
+		resp, err := srv.Client().Post(srv.URL+"/v1/runs", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got startResp
+		_ = json.NewDecoder(resp.Body).Decode(&got)
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Fatalf("%s: status=%d want %d", body, resp.StatusCode, want)
+		}
+		if want != http.StatusAccepted {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		res, err := orch.Wait(ctx, core.DefaultTenant, got.RunID)
+		cancel()
+		if err != nil || res.Outputs["s"] != "hello world" {
+			t.Fatalf("result=%+v err=%v", res, err)
+		}
+	}
+}
+
+type startResp struct {
+	RunID core.RunID `json:"run_id"`
+}
+
 func TestSSEStreamOfFinishedRunCloses(t *testing.T) {
 	srv, orch, s := newTestServer(t)
 	defer srv.Close()
@@ -453,6 +489,51 @@ func TestSSEStreamOfFinishedRunCloses(t *testing.T) {
 	}
 	if !strings.Contains(string(stream), `"status":"succeeded"`) {
 		t.Fatalf("history missing terminal event: %s", stream)
+	}
+}
+
+func TestSSEStreamOfResumedRunPassesEarlierFailure(t *testing.T) {
+	s := store.NewMemStore()
+	prov := model.NewMockProvider(model.MockResponse{Err: errors.New("down")})
+	orch := runtime.NewOrchestrator(s, tool.NewRegistry(), []runtime.Agent{{Name: "a", Model: "m", Provider: prov}})
+	srv := httptest.NewServer(api.NewServer(orch, s).Handler())
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{
+		{Name: "s", Agents: []runtime.AgentStep{{Name: "a", Prompt: "x"}}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := orch.Wait(ctx, core.DefaultTenant, runID); res.Status != core.RunFailed {
+		t.Fatalf("status=%s", res.Status)
+	}
+	prov.Push(model.MockResponse{Content: "ok"})
+	resp, err := srv.Client().Post(srv.URL+"/v1/runs/"+string(runID)+"/resume", "application/json", nil)
+	if err != nil || resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("resume: resp=%v err=%v", resp, err)
+	}
+	resp.Body.Close()
+	if _, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/runs/"+string(runID)+"/stream", nil)
+	r, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	stream, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := strings.Index(string(stream), `"status":"failed"`)
+	succeeded := strings.Index(string(stream), `"status":"succeeded"`)
+	if failed < 0 || succeeded < failed {
+		t.Fatalf("stream stopped at the earlier failure: %s", stream)
 	}
 }
 
@@ -726,6 +807,9 @@ func FuzzRESTBodies(f *testing.F) {
 	f.Add(uint8(2), []byte(`{"decision":1}`))
 	f.Add(uint8(3), []byte(`{"session_id":"x","workflow":{"name":"wf","stages":[{"name":"a","kind":"sequential","agents":[{"name":"missing","prompt":"p"}]}]}}`))
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","workflow":{"stages":[{"name":"a","kind":"parallel","agents":[{"name":"missing"}]}]},"limits":{"max_concurrent":-1,"max_tool_calls":-1}}`))
+	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","template":"missing","workflow":{"stages":[{"name":"a","depends_on":["a"],"agents":[{"name":"x"}]}]}}`))
+	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","workflow":{"input_schema":{"$ref":"file:///etc/passwd"},"stages":[{"name":"a","hand_back":{"when":"(","to":"b"},"output_schema":{"type":5},"agents":[{"name":"x"}]}]}}`))
+	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","images":{"p":{"mime_type":"image/png","data":"not base64!"}},"workflow":{"stages":[{"name":"a","agents":[{"name":"x","images":["p","q"]}]}]}}`))
 	f.Fuzz(func(t *testing.T, which uint8, body []byte) {
 		path := paths[int(which)%len(paths)]
 		rec := httptest.NewRecorder()

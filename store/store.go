@@ -147,6 +147,7 @@ type RunStore interface {
 // TaskStore manages task records.
 type TaskStore interface {
 	CreateTask(ctx context.Context, t Task) (core.TaskID, error)
+	// UpdateTask writes the task's status, output and error.
 	UpdateTask(ctx context.Context, t Task) error
 	ListRunTasks(ctx context.Context, tenant core.TenantID, run core.RunID) ([]Task, error)
 }
@@ -432,8 +433,9 @@ func (m *MemStore) UpdateTask(_ context.Context, t Task) error {
 	if !ok || cur.TenantID != t.TenantID {
 		return core.ErrNotFound
 	}
-	t.UpdatedAt = time.Now().UTC()
-	m.tasks[t.ID] = t
+	cur.Status, cur.Output, cur.Error = t.Status, t.Output, t.Error
+	cur.UpdatedAt = time.Now().UTC()
+	m.tasks[t.ID] = cur
 	return nil
 }
 

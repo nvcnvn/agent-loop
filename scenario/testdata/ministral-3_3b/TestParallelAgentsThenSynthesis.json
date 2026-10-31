@@ -1,0 +1,420 @@
+[
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the math.add tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Add 2 and 3."
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "math.add",
+            "input": {
+              "a": 2,
+              "b": 3
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "math.add",
+          "input": {
+            "a": 2,
+            "b": 3
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 87,
+        "completion_tokens": 17,
+        "cached_tokens": 0,
+        "total_tokens": 104,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:06:26.471165Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_duqcb8wu",
+              "function": {
+                "index": 0,
+                "name": "math.add",
+                "arguments": {
+                  "a": 2,
+                  "b": 3
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 302140375,
+        "load_duration": 4132916,
+        "prompt_eval_count": 87,
+        "prompt_eval_duration": 105762000,
+        "eval_count": 17,
+        "eval_duration": 187870000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the uppercase tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Uppercase the text: agent loop"
+        }
+      ],
+      "tools": [
+        {
+          "name": "uppercase",
+          "description": "Return the uppercase version of the provided text.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "uppercase",
+            "input": {
+              "text": "agent loop"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "uppercase",
+          "input": {
+            "text": "agent loop"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 78,
+        "completion_tokens": 12,
+        "cached_tokens": 0,
+        "total_tokens": 90,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:06:26.711095Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_pp2lwvp9",
+              "function": {
+                "index": 0,
+                "name": "uppercase",
+                "arguments": {
+                  "text": "agent loop"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 541366542,
+        "load_duration": 4108583,
+        "prompt_eval_count": 78,
+        "prompt_eval_duration": 105355000,
+        "eval_count": 12,
+        "eval_duration": 132175000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the math.add tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Add 2 and 3."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "math.add",
+              "input": {
+                "a": 2,
+                "b": 3
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"sum\":5}",
+          "name": "math.add",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "5"
+      },
+      "usage": {
+        "prompt_tokens": 108,
+        "completion_tokens": 2,
+        "cached_tokens": 0,
+        "total_tokens": 110,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:06:26.770891Z",
+        "message": {
+          "role": "assistant",
+          "content": "5"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 299347708,
+        "load_duration": 6448792,
+        "prompt_eval_count": 108,
+        "prompt_eval_duration": 44882000,
+        "eval_count": 2,
+        "eval_duration": 12094000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always call the uppercase tool exactly once, then reply with only its result value."
+        },
+        {
+          "role": "user",
+          "content": "Uppercase the text: agent loop"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "uppercase",
+              "input": {
+                "text": "agent loop"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"text\":\"AGENT LOOP\"}",
+          "name": "uppercase",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "uppercase",
+          "description": "Return the uppercase version of the provided text.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "AGENT LOOP"
+      },
+      "usage": {
+        "prompt_tokens": 99,
+        "completion_tokens": 5,
+        "cached_tokens": 0,
+        "total_tokens": 104,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:06:26.866351Z",
+        "message": {
+          "role": "assistant",
+          "content": "AGENT LOOP"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 154888209,
+        "load_duration": 6258084,
+        "prompt_eval_count": 99,
+        "prompt_eval_duration": 44337000,
+        "eval_count": 5,
+        "eval_duration": 48052000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are terse."
+        },
+        {
+          "role": "user",
+          "content": "Repeat these results on one line:\nshouter=AGENT LOOP\nadder=5"
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "**shouter=AGENT LOOP, adder=5**"
+      },
+      "usage": {
+        "prompt_tokens": 28,
+        "completion_tokens": 15,
+        "cached_tokens": 0,
+        "total_tokens": 43,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:06:27.114322Z",
+        "message": {
+          "role": "assistant",
+          "content": "**shouter=AGENT LOOP, adder=5**"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 247630042,
+        "load_duration": 4043667,
+        "prompt_eval_count": 28,
+        "prompt_eval_duration": 44478000,
+        "eval_count": 15,
+        "eval_duration": 196714000
+      }
+    }
+  }
+]

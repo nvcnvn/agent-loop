@@ -116,3 +116,58 @@ func FuzzDecodeResponse(f *testing.F) {
 		}
 	})
 }
+
+func TestEncodeImages(t *testing.T) {
+	buf, err := encodeRequest(model.ChatRequest{Model: "m", Messages: []model.Message{
+		{Role: model.RoleUser, Content: "what is this?", Images: []model.Image{{MimeType: "image/png", Data: []byte("png!")}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(buf), `"images":["cG5nIQ=="]`) {
+		t.Fatalf("images not sent as base64: %s", buf)
+	}
+}
+
+func TestCapabilitiesFromShow(t *testing.T) {
+	shows := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/show" {
+			http.NotFound(w, r)
+			return
+		}
+		shows++
+		var req struct{ Model string }
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		caps := `["completion"]`
+		if req.Model == "vl" {
+			caps = `["completion","vision","tools","thinking"]`
+		}
+		_, _ = io.WriteString(w, `{"capabilities":`+caps+`}`)
+	}))
+	defer srv.Close()
+	p := New(srv.URL, srv.Client())
+	for range 2 {
+		c, err := p.Capabilities(context.Background(), "vl")
+		if err != nil || !c.Vision || !c.ToolCalling {
+			t.Fatalf("vl caps=%+v err=%v", c, err)
+		}
+	}
+	if c, err := p.Capabilities(context.Background(), "text"); err != nil || c.Vision || c.ToolCalling {
+		t.Fatalf("text caps=%+v err=%v", c, err)
+	}
+	if shows != 2 {
+		t.Fatalf("asked the server %d times, want once per model", shows)
+	}
+}
+
+func TestThinkingRoundTrips(t *testing.T) {
+	resp, err := decodeResponse([]byte(`{"message":{"role":"assistant","content":"2","thinking":"one plus one"}}`))
+	if err != nil || resp.Message.Thinking != "one plus one" {
+		t.Fatalf("resp=%+v err=%v", resp, err)
+	}
+	buf, err := encodeRequest(model.ChatRequest{Model: "m", Messages: []model.Message{resp.Message}})
+	if err != nil || !strings.Contains(string(buf), `"thinking":"one plus one"`) {
+		t.Fatalf("thinking not sent back: %s err=%v", buf, err)
+	}
+}

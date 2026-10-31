@@ -1,0 +1,606 @@
+[
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "1. First, I'll find the customer's ID to look up their orders.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "crm.find_customer",
+            "input": {
+              "email": "ada@example.com"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "crm.find_customer",
+          "input": {
+            "email": "ada@example.com"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 287,
+        "completion_tokens": 32,
+        "cached_tokens": 0,
+        "total_tokens": 319,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:51.852075Z",
+        "message": {
+          "role": "assistant",
+          "content": "1. First, I'll find the customer's ID to look up their orders.",
+          "tool_calls": [
+            {
+              "id": "call_vps7zi4t",
+              "function": {
+                "index": 0,
+                "name": "crm.find_customer",
+                "arguments": {
+                  "email": "ada@example.com"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 998219084,
+        "load_duration": 13171042,
+        "prompt_eval_count": 287,
+        "prompt_eval_duration": 43421000,
+        "eval_count": 32,
+        "eval_duration": 934511000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        },
+        {
+          "role": "assistant",
+          "content": "1. First, I'll find the customer's ID to look up their orders.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "2. Next, I'll list Ada's orders to find the one that was delayed.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "orders.list",
+            "input": {
+              "customer_id": "C-17"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "orders.list",
+          "input": {
+            "customer_id": "C-17"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 337,
+        "completion_tokens": 32,
+        "cached_tokens": 0,
+        "total_tokens": 369,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:52.654818Z",
+        "message": {
+          "role": "assistant",
+          "content": "2. Next, I'll list Ada's orders to find the one that was delayed.",
+          "tool_calls": [
+            {
+              "id": "call_qwpx3jqe",
+              "function": {
+                "index": 0,
+                "name": "orders.list",
+                "arguments": {
+                  "customer_id": "C-17"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 802070000,
+        "load_duration": 10143584,
+        "prompt_eval_count": 337,
+        "prompt_eval_duration": 109938000,
+        "eval_count": 32,
+        "eval_duration": 676401000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        },
+        {
+          "role": "assistant",
+          "content": "1. First, I'll find the customer's ID to look up their orders.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "assistant",
+          "content": "2. Next, I'll list Ada's orders to find the one that was delayed.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "orders.list",
+              "input": {
+                "customer_id": "C-17"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"orders\":[{\"order_id\":\"O-301\",\"item\":\"keyboard\",\"status\":\"delivered\",\"total\":89},{\"order_id\":\"O-302\",\"item\":\"monitor\",\"status\":\"late\",\"total\":240,\"days_late\":9}]}",
+          "name": "orders.list",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "3. Now, I'll request approval to refund Ada's late monitor order.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "orders.refund",
+            "input": {
+              "order_id": "O-302",
+              "reason": "Customer requested refund due to late delivery"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "orders.refund",
+          "input": {
+            "order_id": "O-302",
+            "reason": "Customer requested refund due to late delivery"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 430,
+        "completion_tokens": 44,
+        "cached_tokens": 0,
+        "total_tokens": 474,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:53.999168Z",
+        "message": {
+          "role": "assistant",
+          "content": "3. Now, I'll request approval to refund Ada's late monitor order.",
+          "tool_calls": [
+            {
+              "id": "call_rdvzr0km",
+              "function": {
+                "index": 0,
+                "name": "orders.refund",
+                "arguments": {
+                  "order_id": "O-302",
+                  "reason": "Customer requested refund due to late delivery"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1343859417,
+        "load_duration": 9090250,
+        "prompt_eval_count": 430,
+        "prompt_eval_duration": 145712000,
+        "eval_count": 44,
+        "eval_duration": 1183546000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        },
+        {
+          "role": "assistant",
+          "content": "1. First, I'll find the customer's ID to look up their orders.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "assistant",
+          "content": "2. Next, I'll list Ada's orders to find the one that was delayed.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "orders.list",
+              "input": {
+                "customer_id": "C-17"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"orders\":[{\"order_id\":\"O-301\",\"item\":\"keyboard\",\"status\":\"delivered\",\"total\":89},{\"order_id\":\"O-302\",\"item\":\"monitor\",\"status\":\"late\",\"total\":240,\"days_late\":9}]}",
+          "name": "orders.list",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "assistant",
+          "content": "3. Now, I'll request approval to refund Ada's late monitor order.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "orders.refund",
+              "input": {
+                "order_id": "O-302",
+                "reason": "Customer requested refund due to late delivery"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"error\":\"call to tool orders.refund was not approved (rejected)\"}",
+          "name": "orders.refund",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Unfortunately, the refund request for Ada's order (O-302) was not approved. I’ll need to check with a manager to see if there’s an alternative solution. Would you like me to explore other options for Ada?"
+      },
+      "usage": {
+        "prompt_tokens": 491,
+        "completion_tokens": 49,
+        "cached_tokens": 0,
+        "total_tokens": 540,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:55.402482Z",
+        "message": {
+          "role": "assistant",
+          "content": "Unfortunately, the refund request for Ada's order (O-302) was not approved. I’ll need to check with a manager to see if there’s an alternative solution. Would you like me to explore other options for Ada?"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1394752166,
+        "load_duration": 10470791,
+        "prompt_eval_count": 491,
+        "prompt_eval_duration": 100425000,
+        "eval_count": 49,
+        "eval_duration": 1276157000
+      }
+    }
+  }
+]

@@ -15,7 +15,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,6 +29,10 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
 	"github.com/nvcnvn/agent-loop/api"
 	"github.com/nvcnvn/agent-loop/model"
 	"github.com/nvcnvn/agent-loop/model/ollama"
@@ -34,16 +40,19 @@ import (
 	"github.com/nvcnvn/agent-loop/store"
 	pgstore "github.com/nvcnvn/agent-loop/store/pg"
 	"github.com/nvcnvn/agent-loop/tool"
+	"github.com/nvcnvn/agent-loop/tool/mcp"
 )
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	debug := flag.Bool("debug", false, "serve the debug console and /v1/debug/* (exposes agent instructions)")
 	trustHeaders := flag.Bool("trust-identity-headers", false, "take the tenant and principal from X-Tenant-ID/X-Principal-ID without authentication (local development only)")
+	configPath := flag.String("config", "", "JSON file of agents, named workflow templates and MCP servers (see README); without it the server has one echo agent")
 	drain := flag.Duration("shutdown-timeout", 30*time.Second, "on SIGINT/SIGTERM, how long to let requests and runs finish before checkpointing runs")
 	flag.Parse()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	auth := authenticator(*trustHeaders)
+	stopTracing := setupTracing()
 
 	persistence := openStore()
 	reg := tool.NewRegistry()
@@ -52,15 +61,26 @@ func main() {
 	}
 
 	prov, modelName := openProvider()
-	agent := runtime.Agent{
+	cfg := fileConfig{Config: runtime.Config{Agents: []runtime.Agent{{
 		Name:         "echo",
 		Role:         "demo",
 		Instructions: "Local debug agent for REST, SSE, persistence, and model-provider smoke tests.",
-		Model:        modelName,
-		Provider:     prov,
 		Tools:        []string{"echo", "uppercase", "math.add"},
+	}}}}
+	if *configPath != "" {
+		cfg = loadConfig(*configPath)
 	}
-	orch := runtime.NewOrchestrator(persistence, reg, []runtime.Agent{agent})
+	mcpClients := connectMCP(cfg.MCPServers, reg)
+	for i := range cfg.Agents {
+		cfg.Agents[i].Provider = prov
+		if cfg.Agents[i].Model == "" {
+			cfg.Agents[i].Model = modelName
+		}
+	}
+	orch := runtime.NewOrchestrator(persistence, reg, cfg.Agents)
+	for _, wf := range cfg.Workflows {
+		orch.Workflows[wf.Name] = wf
+	}
 	if n, err := orch.Recover(context.Background()); err != nil {
 		slog.Error("recover runs", "resumed", n, "err", err)
 	} else if n > 0 {
@@ -90,6 +110,74 @@ func main() {
 	}
 	if err := orch.Shutdown(ctx); err != nil {
 		slog.Warn("runs still executing were checkpointed for the next start", "err", err)
+	}
+	for _, c := range mcpClients {
+		_ = c.Close()
+	}
+	stopTracing(ctx)
+}
+
+// fileConfig is the -config file: runtime agents and workflows, and the MCP
+// servers whose tools are registered next to the builtin ones.
+type fileConfig struct {
+	runtime.Config
+	MCPServers []mcp.Server `json:"mcp_servers,omitempty"`
+}
+
+func loadConfig(path string) fileConfig {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fatal("read config", err)
+	}
+	var cfg fileConfig
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		fatal("config "+path, err)
+	}
+	if err := cfg.Validate(); err != nil {
+		fatal("config "+path, err)
+	}
+	slog.Info("loaded config", "path", path, "agents", len(cfg.Agents), "workflows", len(cfg.Workflows), "mcp_servers", len(cfg.MCPServers))
+	return cfg
+}
+
+func connectMCP(servers []mcp.Server, reg *tool.Registry) []*mcp.Client {
+	var clients []*mcp.Client
+	for _, s := range servers {
+		c, err := mcp.New(s)
+		if err != nil {
+			fatal("mcp", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		names, err := c.Register(ctx, reg)
+		cancel()
+		if err != nil {
+			fatal("mcp server "+s.Name, err)
+		}
+		slog.Info("registered MCP tools", "server", s.Name, "tools", names)
+		clients = append(clients, c)
+	}
+	return clients
+}
+
+// setupTracing exports spans over OTLP/HTTP when an OTLP endpoint is set in
+// the standard OTEL_EXPORTER_OTLP_* environment variables.
+func setupTracing() func(context.Context) {
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" && os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") == "" {
+		return func(context.Context) {}
+	}
+	exporter, err := otlptracehttp.New(context.Background())
+	if err != nil {
+		fatal("otlp exporter", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))
+	otel.SetTracerProvider(tp)
+	slog.Info("exporting traces over OTLP")
+	return func(ctx context.Context) {
+		if err := tp.Shutdown(ctx); err != nil {
+			slog.Error("flush traces", "err", err)
+		}
 	}
 }
 

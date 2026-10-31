@@ -36,7 +36,7 @@ func NewMockProvider(responses ...MockResponse) *MockProvider {
 func (m *MockProvider) Name() string { return "mock" }
 
 func (m *MockProvider) Capabilities(_ context.Context, _ string) (Capabilities, error) {
-	return Capabilities{ToolCalling: true, ParallelToolCalls: true, StructuredOutput: true, TokenAccounting: true}, nil
+	return Capabilities{ToolCalling: true, ParallelToolCalls: true, StructuredOutput: true, TokenAccounting: true, Vision: true}, nil
 }
 
 func (m *MockProvider) Push(r MockResponse) {

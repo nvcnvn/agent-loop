@@ -21,7 +21,7 @@ help:
 	  'test                     Unit tests, fuzz seeds and fixture-replayed scenarios; no network' \
 	  'fuzz                     Fuzz every Fuzz* target for $(FUZZTIME) each' \
 	  'record-docker-ollama     Run ./scenario live against Dockerized Ollama and rewrite its fixtures' \
-	  'record-host-ollama       Run ./scenario live against host Ollama on localhost:11434 and rewrite its fixtures' \
+	  'record-host-ollama       Run ./scenario live against host Ollama on localhost:11434 and rewrite the fixtures of OLLAMA_MODEL' \
 	  'api-local-docker-ollama  Start local API with Postgres + Dockerized Ollama on localhost:41434' \
 	  'api-local-host-ollama    Start local API with Postgres + host Ollama on localhost:11434' \
 	  'test-local               Run REST integration tests against a local API on localhost:8080' \

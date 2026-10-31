@@ -1,0 +1,269 @@
+[
+  {
+    "request": {
+      "model": "qwen3-vl:2b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You describe images precisely."
+        },
+        {
+          "role": "user",
+          "content": "Count the circles and the squares in this image.",
+          "images": [
+            {
+              "mime_type": "image/png",
+              "data": "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"
+            }
+          ]
+        }
+      ],
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "circles": {
+            "type": "integer"
+          },
+          "squares": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "circles",
+          "squares"
+        ]
+      }
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "{\"circles\": 2, \"squares\": 3}",
+        "thinking": "So, let's count the circles and squares in the image. First, look at the red circles. There are two red circles, one on the top left and one on the bottom left. Then the blue squares: there are three blue squares. Let's check the arrangement. Top row has two blue squares, bottom row has one blue square. So circles: 2, squares: 3. Need to make sure I didn't miss any. Yep, two red circles, three blue squares."
+      },
+      "usage": {
+        "prompt_tokens": 1213,
+        "completion_tokens": 15,
+        "cached_tokens": 0,
+        "total_tokens": 1228,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "qwen3-vl:2b",
+        "created_at": "2026-10-31T12:35:57.022712Z",
+        "message": {
+          "role": "assistant",
+          "content": "{\"circles\": 2, \"squares\": 3}",
+          "thinking": "So, let's count the circles and squares in the image. First, look at the red circles. There are two red circles, one on the top left and one on the bottom left. Then the blue squares: there are three blue squares. Let's check the arrangement. Top row has two blue squares, bottom row has one blue square. So circles: 2, squares: 3. Need to make sure I didn't miss any. Yep, two red circles, three blue squares."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 3294271292,
+        "load_duration": 6733458,
+        "prompt_eval_count": 1213,
+        "prompt_eval_duration": 18247000,
+        "eval_count": 15,
+        "eval_duration": 168065000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "qwen3-vl:2b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always use the math.add tool for arithmetic. After the tool result, answer with only the number."
+        },
+        {
+          "role": "user",
+          "content": "Shape counts: {\"circles\": 2, \"squares\": 3}. Add the two counts."
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "Okay, let's see. The user wants to add the two counts from the shape counts: circles have 2 and squares have 3. So I need to add 2 and 3. The tools provided include math.add, which takes two numbers. I should call math.add with a=2 and b=3. Let me check if there are any other functions, but no, the only one available is math.add. So the correct function call is math.add with a=2 and b=3. The answer should be the sum, which is 5. I need to make sure I don't use any other tools. Just the math.add function.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "math.add",
+            "input": {
+              "a": 2,
+              "b": 3
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "math.add",
+          "input": {
+            "a": 2,
+            "b": 3
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 203,
+        "completion_tokens": 163,
+        "cached_tokens": 0,
+        "total_tokens": 366,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "qwen3-vl:2b",
+        "created_at": "2026-10-31T12:35:58.954654Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "Okay, let's see. The user wants to add the two counts from the shape counts: circles have 2 and squares have 3. So I need to add 2 and 3. The tools provided include math.add, which takes two numbers. I should call math.add with a=2 and b=3. Let me check if there are any other functions, but no, the only one available is math.add. So the correct function call is math.add with a=2 and b=3. The answer should be the sum, which is 5. I need to make sure I don't use any other tools. Just the math.add function.",
+          "tool_calls": [
+            {
+              "id": "call_pdr618qi",
+              "function": {
+                "index": 0,
+                "name": "math.add",
+                "arguments": {
+                  "a": 2,
+                  "b": 3
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1931548667,
+        "load_duration": 5012875,
+        "prompt_eval_count": 203,
+        "prompt_eval_duration": 121697000,
+        "eval_count": 163,
+        "eval_duration": 1791787000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "qwen3-vl:2b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Always use the math.add tool for arithmetic. After the tool result, answer with only the number."
+        },
+        {
+          "role": "user",
+          "content": "Shape counts: {\"circles\": 2, \"squares\": 3}. Add the two counts."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "Okay, let's see. The user wants to add the two counts from the shape counts: circles have 2 and squares have 3. So I need to add 2 and 3. The tools provided include math.add, which takes two numbers. I should call math.add with a=2 and b=3. Let me check if there are any other functions, but no, the only one available is math.add. So the correct function call is math.add with a=2 and b=3. The answer should be the sum, which is 5. I need to make sure I don't use any other tools. Just the math.add function.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "math.add",
+              "input": {
+                "a": 2,
+                "b": 3
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"sum\":5}",
+          "name": "math.add",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "math.add",
+          "description": "Return the sum of a and b.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "number"
+              },
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "5",
+        "thinking": "Okay, the user asked to add the two counts from the shape counts. The counts were circles:2 and squares:3. So I need to sum 2 and 3. The tool provided is math.add, which takes a and b. I called it with a=2 and b=3, which gives the sum 5. The response from the tool was {\"sum\":5}, so the answer should be 5. I need to make sure to output only the number as per the instructions. No extra text, just the number."
+      },
+      "usage": {
+        "prompt_tokens": 383,
+        "completion_tokens": 115,
+        "cached_tokens": 0,
+        "total_tokens": 498,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "qwen3-vl:2b",
+        "created_at": "2026-10-31T12:36:00.249447Z",
+        "message": {
+          "role": "assistant",
+          "content": "5",
+          "thinking": "Okay, the user asked to add the two counts from the shape counts. The counts were circles:2 and squares:3. So I need to sum 2 and 3. The tool provided is math.add, which takes a and b. I called it with a=2 and b=3, which gives the sum 5. The response from the tool was {\"sum\":5}, so the answer should be 5. I need to make sure to output only the number as per the instructions. No extra text, just the number."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1294327916,
+        "load_duration": 5217000,
+        "prompt_eval_count": 383,
+        "prompt_eval_duration": 84732000,
+        "eval_count": 115,
+        "eval_duration": 1201916000
+      }
+    }
+  }
+]

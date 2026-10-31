@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
+	"github.com/nvcnvn/agent-loop/model"
 	"github.com/nvcnvn/agent-loop/observe"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
@@ -219,11 +220,13 @@ type postMessageReq struct {
 }
 
 type startRunReq struct {
-	SessionID      core.SessionID    `json:"session_id"`
-	IdempotencyKey string            `json:"idempotency_key,omitempty"`
-	Workflow       runtime.Workflow  `json:"workflow"`
-	Input          map[string]string `json:"input,omitempty"`
-	Limits         core.Limits       `json:"limits,omitempty"`
+	SessionID      core.SessionID         `json:"session_id"`
+	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
+	Workflow       runtime.Workflow       `json:"workflow"`
+	Template       string                 `json:"template,omitempty"`
+	Input          map[string]string      `json:"input,omitempty"`
+	Images         map[string]model.Image `json:"images,omitempty"`
+	Limits         core.Limits            `json:"limits,omitempty"`
 }
 type startRunResp struct {
 	RunID core.RunID `json:"run_id"`
@@ -370,8 +373,8 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "validation_error", "session_id required")
 		return
 	}
-	if len(req.Workflow.Stages) == 0 {
-		writeErr(w, http.StatusBadRequest, "validation_error", "workflow.stages required")
+	if len(req.Workflow.Stages) == 0 && req.Template == "" {
+		writeErr(w, http.StatusBadRequest, "validation_error", "workflow.stages or template required")
 		return
 	}
 	idemFromHeader := r.Header.Get("Idempotency-Key")
@@ -384,7 +387,9 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		SessionID:      req.SessionID,
 		IdempotencyKey: req.IdempotencyKey,
 		Workflow:       req.Workflow,
+		Template:       req.Template,
 		Input:          req.Input,
+		Images:         req.Images,
 		Limits:         req.Limits,
 	})
 	if errors.Is(err, core.ErrOverloaded) {
@@ -496,6 +501,7 @@ func (s *Server) listAgents(w http.ResponseWriter, _ *http.Request) {
 		Instructions string   `json:"instructions,omitempty"`
 		Model        string   `json:"model"`
 		Tools        []string `json:"tools,omitempty"`
+		Children     []string `json:"children,omitempty"`
 		MaxToolLoops int      `json:"max_tool_loops"`
 	}
 	agents := make([]agentDebug, 0, len(s.Orch.Agents))
@@ -506,6 +512,7 @@ func (s *Server) listAgents(w http.ResponseWriter, _ *http.Request) {
 			Instructions: agent.Instructions,
 			Model:        agent.Model,
 			Tools:        append([]string(nil), agent.Tools...),
+			Children:     append([]string(nil), agent.Children...),
 			MaxToolLoops: agent.MaxToolLoops,
 		})
 	}
@@ -546,12 +553,13 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 		afterSeq = v
 	}
 
-	// 1. Drain history first.
+	// 1. Drain history first. A terminal event followed by others ended an
+	// attempt of a run that was resumed later.
 	history, _ := s.Store.ListRunEvents(r.Context(), tenant, rid, afterSeq, 0)
-	for _, ev := range history {
+	for i, ev := range history {
 		writeSSE(w, ev)
 		afterSeq = ev.Sequence
-		if endsRun(ev) {
+		if endsRun(ev) && i == len(history)-1 {
 			flusher.Flush()
 			return
 		}

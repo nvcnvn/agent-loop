@@ -1,0 +1,52 @@
+[
+  {
+    "request": {
+      "model": "qwen3-vl:2b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are terse."
+        },
+        {
+          "role": "user",
+          "content": "Repeat this word and nothing else: pong"
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "pong",
+        "thinking": "Hmm, the user wants me to repeat the word \"pong\" and nothing else. That's straightforward—they're asking for a very simple task with a specific instruction. \n\nI should note that the user seems to want precision; they specified \"repeat this word and nothing else,\" so no extra words or explanations. The query is short, but the tone feels... slightly playful? Like they might be testing if I follow instructions strictly. \n\nI wonder if this is a test of my ability to be terse or if they're just bored and want a quick reply. Either way, I'll stick to the brief. \n\nNo need for fluff. Just \"pong\" as instructed. Keeping it clean and efficient. \n\nAlso, checking: is there any hidden meaning here? Probably not—the user seems to want literal execution. No context to overcomplicate. \n\nAlright, done. Output is exactly \"pong\" with zero punctuation or additional text."
+      },
+      "usage": {
+        "prompt_tokens": 27,
+        "completion_tokens": 193,
+        "cached_tokens": 0,
+        "total_tokens": 220,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "qwen3-vl:2b",
+        "created_at": "2026-10-31T12:09:10.822396Z",
+        "message": {
+          "role": "assistant",
+          "content": "pong",
+          "thinking": "Hmm, the user wants me to repeat the word \"pong\" and nothing else. That's straightforward—they're asking for a very simple task with a specific instruction. \n\nI should note that the user seems to want precision; they specified \"repeat this word and nothing else,\" so no extra words or explanations. The query is short, but the tone feels... slightly playful? Like they might be testing if I follow instructions strictly. \n\nI wonder if this is a test of my ability to be terse or if they're just bored and want a quick reply. Either way, I'll stick to the brief. \n\nNo need for fluff. Just \"pong\" as instructed. Keeping it clean and efficient. \n\nAlso, checking: is there any hidden meaning here? Probably not—the user seems to want literal execution. No context to overcomplicate. \n\nAlright, done. Output is exactly \"pong\" with zero punctuation or additional text."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 13315718083,
+        "load_duration": 11442088583,
+        "prompt_eval_count": 27,
+        "prompt_eval_duration": 52284000,
+        "eval_count": 193,
+        "eval_duration": 1819207000
+      }
+    }
+  }
+]

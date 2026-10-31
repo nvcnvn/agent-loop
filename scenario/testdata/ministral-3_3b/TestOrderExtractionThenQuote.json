@@ -1,0 +1,296 @@
+[
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You turn emails into order data."
+        },
+        {
+          "role": "user",
+          "content": "Extract the order in this email:\n\nFrom: bob@example.com\nHi! Please send me 2 x SKU-7731 and 1 x SKU-1200. Thanks, Bob"
+        }
+      ],
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "customer_email": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "sku",
+                "quantity"
+              ]
+            }
+          }
+        },
+        "required": [
+          "customer_email",
+          "items"
+        ]
+      }
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"customer_email\": \"bob@example.com\",\n  \"items\": [\n    {\n      \"sku\": \"SKU-7731\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"SKU-1200\",\n      \"quantity\": 1\n    }\n  ]\n}"
+      },
+      "usage": {
+        "prompt_tokens": 56,
+        "completion_tokens": 69,
+        "cached_tokens": 0,
+        "total_tokens": 125,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:08.830191Z",
+        "message": {
+          "role": "assistant",
+          "content": "{\n  \"customer_email\": \"bob@example.com\",\n  \"items\": [\n    {\n      \"sku\": \"SKU-7731\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"SKU-1200\",\n      \"quantity\": 1\n    }\n  ]\n}"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1650972125,
+        "load_duration": 9020375,
+        "prompt_eval_count": 56,
+        "prompt_eval_duration": 118808000,
+        "eval_count": 69,
+        "eval_duration": 1514958000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Look up the unit price of every SKU with catalog.price, then reply with only the order total in dollars."
+        },
+        {
+          "role": "user",
+          "content": "Order: {\n  \"customer_email\": \"bob@example.com\",\n  \"items\": [\n    {\n      \"sku\": \"SKU-7731\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"SKU-1200\",\n      \"quantity\": 1\n    }\n  ]\n}"
+        }
+      ],
+      "tools": [
+        {
+          "name": "catalog.price",
+          "description": "Unit price in dollars of a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "catalog.price",
+            "input": {
+              "sku": "SKU-7731"
+            }
+          },
+          {
+            "id": "call_1",
+            "name": "catalog.price",
+            "input": {
+              "sku": "SKU-1200"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "catalog.price",
+          "input": {
+            "sku": "SKU-7731"
+          }
+        },
+        {
+          "id": "call_1",
+          "name": "catalog.price",
+          "input": {
+            "sku": "SKU-1200"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 148,
+        "completion_tokens": 33,
+        "cached_tokens": 0,
+        "total_tokens": 181,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:09.914917Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_bvf8141l",
+              "function": {
+                "index": 0,
+                "name": "catalog.price",
+                "arguments": {
+                  "sku": "SKU-7731"
+                }
+              }
+            },
+            {
+              "id": "call_8l5d196t",
+              "function": {
+                "index": 1,
+                "name": "catalog.price",
+                "arguments": {
+                  "sku": "SKU-1200"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1063813083,
+        "load_duration": 10616750,
+        "prompt_eval_count": 148,
+        "prompt_eval_duration": 195786000,
+        "eval_count": 33,
+        "eval_duration": 851517000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Look up the unit price of every SKU with catalog.price, then reply with only the order total in dollars."
+        },
+        {
+          "role": "user",
+          "content": "Order: {\n  \"customer_email\": \"bob@example.com\",\n  \"items\": [\n    {\n      \"sku\": \"SKU-7731\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"SKU-1200\",\n      \"quantity\": 1\n    }\n  ]\n}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "catalog.price",
+              "input": {
+                "sku": "SKU-7731"
+              }
+            },
+            {
+              "id": "call_1",
+              "name": "catalog.price",
+              "input": {
+                "sku": "SKU-1200"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"price\":15,\"sku\":\"SKU-7731\"}",
+          "name": "catalog.price",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "tool",
+          "content": "{\"price\":40,\"sku\":\"SKU-1200\"}",
+          "name": "catalog.price",
+          "tool_call_id": "call_1"
+        }
+      ],
+      "tools": [
+        {
+          "name": "catalog.price",
+          "description": "Unit price in dollars of a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "(2 × $15) + $40 = **$70**"
+      },
+      "usage": {
+        "prompt_tokens": 214,
+        "completion_tokens": 18,
+        "cached_tokens": 0,
+        "total_tokens": 232,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:10.391078Z",
+        "message": {
+          "role": "assistant",
+          "content": "(2 × $15) + $40 = **$70**"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 475593750,
+        "load_duration": 9578000,
+        "prompt_eval_count": 214,
+        "prompt_eval_duration": 124184000,
+        "eval_count": 18,
+        "eval_duration": 335893000
+      }
+    }
+  }
+]

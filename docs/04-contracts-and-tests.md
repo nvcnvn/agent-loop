@@ -50,67 +50,159 @@ Required behavior:
 - `Last-Event-ID` resumes from the next event after the acknowledged sequence, with no gap
   between the replayed history and live events, and events arrive in sequence order.
 - The stream closes after the run's terminal `run_state_changed` event, whether it is
-  replayed from history or delivered live.
+  replayed from history or delivered live. A terminal event that later events follow ended an
+  attempt of a run that was resumed afterwards, and does not close the stream.
 - Public streams exclude `internal`, `hidden_reasoning`, and `audit` visibility.
 - Heartbeats do not advance run sequence.
 - Event names are backward-compatible or versioned.
 
 ### 3. Workflow Definition Contract
 
-Define JSON Schema for workflow templates. Minimum fields:
-- workflow name and version
-- input and output schema
-- nodes with agent role, instructions, allowed tools, and stop conditions
-- edges with condition expressions
-- retry policy
-- timeout and deadline
-- approval gates
-- explicit concurrency groups
-- fan-in failure policy
+A workflow is JSON (`runtime.Workflow`). A client sends it as `workflow` in `POST /v1/runs`, or
+starts a named template from the server's config file (§4) with `"template": "<name>"`. The run
+stores the definition it started with, so later config changes do not affect it. Durations are
+nanoseconds, as in `limits`.
 
-Concurrency should be explicit in templates for v1. Dynamic agent delegation can request concurrency, but the scheduler should reject it unless policy allows it.
+```json
+{
+  "name": "build-feature",
+  "input_schema": {"type": "object", "required": ["feature"]},
+  "stages": [
+    {"name": "requirements", "agents": [{"name": "analyst", "prompt": "Specify {{input.feature}}."}]},
+    {"name": "code", "agents": [{"name": "coder", "prompt": "Implement {{stage.requirements}}\nReview: {{feedback}}"}],
+     "retry": {"max_attempts": 2, "backoff": 1000000000}, "timeout": 600000000000},
+    {"name": "review", "agents": [{"name": "reviewer", "prompt": "Review {{stage.code}}. Start with APPROVED or REJECTED."}],
+     "hand_back": {"when": "^REJECTED", "to": "code", "max_times": 3}},
+    {"name": "test", "agents": [{"name": "tester", "prompt": "Test {{stage.code}}."}], "approve_output": true}
+  ]
+}
+```
+
+| Stage field | Meaning |
+| --- | --- |
+| `name` | Unique within the workflow; the run output maps it to the stage output. |
+| `agents` | Agent steps: a registered agent's `name`, a `prompt` template, and `images`, the names of run input images shown with the prompt. |
+| `kind` | `sequential` (default): steps run in order. `parallel`: steps run at once, up to `max_concurrent`, and the stage output is one `agent=answer` line per step. |
+| `failure_policy` | For parallel stages: `fail_fast` (default), `wait_all` or `best_effort`. |
+| `depends_on` | Stages that must finish first. When no stage sets it, each stage depends on the one before it. When any stage sets it, a stage without it starts at once, and stages whose dependencies have finished run concurrently. |
+| `timeout` | Bounds the stage's agent work, not its approval gates. When it passes, the run ends `timed_out`. |
+| `retry` | `max_attempts`, counting the first, and `backoff` before the first retry, doubled for each later one. A failed agent task is retried unless the run was canceled, hit its deadline or exhausted a budget. Each attempt is a task and counts as a sub-agent. |
+| `hand_back` | When the stage output matches the regexp `when`, the stage `to` (this stage or one it depends on, directly or not) and every stage depending on it run again, after running stages finish. One hand-back more than `max_times` (default 3) fails the run. |
+| `stop_when` | Regexp. When the stage output matches it, no further stage starts, and the run succeeds once running stages finish. |
+| `output_schema` | JSON Schema every answer in the stage must satisfy. It is sent to the provider as the response schema. An answer that does not match goes back to the model with the validation error and counts toward the agent's `max_tool_loops`. |
+| `approve_start`, `approve_output` | Ask for approval before the stage starts, or for its output. Any decision other than `approved` fails the run. Approving the last stage's output approves the final output. |
+
+Prompt templates fill `{{input.<key>}}`, `{{stage.<stage>}}`, `{{stage.<stage>.<agent>}}`, and
+`{{feedback}}`: the output that last handed work back to this stage, empty until one does.
+
+A run's `images` (in `POST /v1/runs`: `{"<name>": {"mime_type": "image/png", "data": "<base64>"}}`)
+are stored as the run's `input_image` artifacts and shown to the model with every step that names
+them. Request bodies are capped at 1 MiB by default (`api.Server.MaxBodyBytes`).
+
+`input_schema` is a JSON Schema that the run input, a JSON object of strings, must satisfy. Schemas
+cannot reference other documents.
+
+`StartRun` rejects an invalid workflow before creating a run (REST answers 400): a missing,
+duplicate or unknown stage, agent, kind, failure policy or image; a dependency cycle; a hand-back to a stage
+the handing stage does not depend on; an invalid regexp or schema; a negative timeout or retry; or
+input that does not match `input_schema`.
+
+The run records its workflow decisions as `system_event_recorded` events whose `event` is
+`stage_handed_back`, `workflow_stopped`, `task_retry_scheduled` or `output_rejected`. Stage gates
+use `approval_requested` and `approval_resolved` with `stage`, `gate` (`start` or `output`) and,
+for output gates, `output`, where tool approvals have `tool`.
 
 ### 4. Agent Definition Contract
 
-Define a versioned schema for agent definitions:
-- name, role, instruction
-- model profile reference
-- tool policy reference
-- memory policy reference
-- allowed child agents
-- default limits
-- visibility rules for traces and messages
+Agents are `runtime.Agent` values registered in Go, or come from the JSON file passed to
+`cmd/agent-loop -config`, which also holds the named workflow templates. `runtime.ParseConfig`
+rejects unknown fields, duplicate names, unknown child agents and invalid workflows.
 
-Agent definitions should be immutable after activation. Updates create a new version.
+```json
+{
+  "agents": [
+    {"name": "lead", "role": "plans the research", "instructions": "Split the question, then delegate.",
+     "children": ["researcher"], "max_tool_loops": 6, "timeout": 120000000000},
+    {"name": "researcher", "role": "finds facts", "tools": ["echo"]}
+  ],
+  "workflows": [
+    {"name": "research", "stages": [{"name": "answer", "agents": [{"name": "lead", "prompt": "{{input.question}}"}]}]}
+  ]
+}
+```
+
+- `model` defaults to the server's model, and every agent uses the server's provider.
+- `tools` lists registry tools the agent may call; `max_tool_loops` (default 4) caps its model calls
+  per task; `timeout` bounds each task attempt.
+- An agent with `children` gets a built-in `delegate` tool taking `{"agent", "task"}`. The child runs
+  as a task with the caller's task as its parent and one more level of depth, and its answer comes
+  back as the tool result `{"agent", "answer"}`. Delegate calls in one model response run
+  concurrently, up to `max_concurrent`. A delegated task counts as a tool call and a sub-agent; an
+  exhausted budget fails the run. A call naming an agent outside `children` is refused back to the
+  model, and agents at depth `max_depth` are not offered the tool.
+
+Agent definitions are not versioned and cannot be changed through the API, and there are no model
+profile, tool policy or memory policy references, per-agent default limits, or per-agent
+visibility rules.
 
 ### 5. Tool Registration Contract
 
-Define a Go and JSON contract for native and MCP tools:
-- name and semantic version
-- description
-- input JSON Schema
-- output JSON Schema
-- idempotency hint
-- side-effect level
-- concurrency class
-- timeout defaults
-- retry eligibility
-- approval requirements
+A tool is a `core.ToolDefinition` and a `tool.Executor`, registered by name in a `tool.Registry`.
+The definition holds the name, version, description, input and output JSON Schema, idempotency
+hint, side-effect level, concurrency class, whether calls need approval, and a per-call timeout.
+Native Go tools are registered in Go (`tool.RegisterBuiltins` registers the demo tools). Input is
+not yet validated against the schema.
 
-Native Go tools should have typed input/output wrappers, but schemas should still be materialized for model providers and API inspection.
+MCP servers are listed under `mcp_servers` in the `-config` file (§4):
+
+```json
+"mcp_servers": [
+  {"name": "files", "command": ["/usr/local/bin/files-mcp", "--root", "/srv/data"]},
+  {"name": "tickets", "url": "https://mcp.example.com/mcp",
+   "headers": {"Authorization": "Bearer ${TICKETS_TOKEN}"},
+   "timeout": 20000000000, "max_retries": 2, "break_after": 5, "break_for": 30000000000}
+]
+```
+
+- A server is a program spoken to over stdio (`command`) or a streamable HTTP endpoint (`url`).
+  `${VAR}` in a header value is read from the environment at startup.
+- At startup each server's tools are listed and registered as `<server>.<tool>`, the names agents
+  list in `tools`. A server that cannot be reached, or a header naming an unset variable, stops
+  startup. Tools a server adds later are not picked up until a restart.
+- The schemas are copied, the version is the one the server reports, and the timeout is the
+  server's `timeout` (default 30s). The tool's annotations, which are hints the server is trusted to
+  give, set its class; a missing annotation takes the MCP default (not read-only, destructive,
+  open-world):
+
+  | Annotations | Side effect | Concurrency |
+  | --- | --- | --- |
+  | read-only, open-world | `read_external` | `parallel_read` |
+  | read-only, closed-world | `none` | `parallel_read` |
+  | destructive | `dangerous` | `serial` |
+  | not destructive, open-world | `write_external` | `serial` |
+  | not destructive, closed-world | `write_internal` | `serial` |
+
+  Read-only and idempotent-hinted tools are `idempotent`; the rest are `unknown`.
+- A call result marked as an error, or a JSON-RPC error from the server, goes back to the model as a
+  tool error. Otherwise the output is the result's structured content or, without it,
+  `{"content": "<text>"}`.
+- Any other failure means the connection was lost. The session is dropped and the next attempt
+  reconnects; an `idempotent` call is retried up to `max_retries` (default 2) more times within its
+  timeout. After `break_after` (default 5) calls in a row that found no working connection, calls
+  fail at once with "circuit open" for `break_for` (default 30s), and every further failure reopens
+  the circuit until a call succeeds.
 
 ### 6. Model Provider Contract
 
-Define provider capability mapping:
-- chat completion
-- streaming
-- tool calling
-- parallel tool calling
-- embeddings
-- structured output
-- token accounting
+A provider reports per model what it supports (`model.Capabilities`). The Ollama adapter reads it
+from `/api/show` once per model: `tools` sets tool calling, `vision` image input, `embedding`
+embeddings. Before its first model call, a task whose prompt has images or whose agent has tools
+checks them, and fails with `model.ErrUnsupported` (and is not retried) when the model lacks either.
 
-Also define normalized errors:
+Messages carry images, and the model's reasoning as `thinking`, which the runtime stores only in the
+model call's `hidden_payload` and sends back with the conversation.
+
+Normalized errors are still to be defined:
 - transient provider failure
 - rate limited
 - context length exceeded
@@ -215,7 +307,9 @@ Each error should include:
 3. Cancel a running run and verify in-flight model/tool calls receive cancellation.
 4. Resume a run after process restart: completed agent tasks are reused, the interrupted task runs
    again, its usage carries over, and its open approvals are canceled.
-5. Agents see the session's earlier human messages (always as user turns) and earlier runs' answers
+5. Resume a failed or timed-out run: it goes back to `queued`, completed tasks are reused and the
+   failed task runs again. Succeeded and canceled runs cannot be resumed.
+6. Agents see the session's earlier human messages (always as user turns) and earlier runs' answers
    (as assistant turns) between their instructions and the stage prompt.
 
 ### Sequential Multi-Agent Workflow

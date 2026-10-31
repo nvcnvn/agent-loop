@@ -1,0 +1,323 @@
+[
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer stock questions with the inventory.stock tool. If a tool returns an error, read it, fix the input and call the tool again."
+        },
+        {
+          "role": "user",
+          "content": "How many units of item 7731 do we have in stock? Pass the item number to the tool as given."
+        }
+      ],
+      "tools": [
+        {
+          "name": "inventory.stock",
+          "description": "Units in stock for a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "1.  **Analyze the user's request:** The user wants to know the stock quantity for item number 7731. They explicitly instructed to pass the item number \"7731\" to the tool.\n\n2.  **Examine the available tools:** The only tool available is `inventory.stock`, which takes a `sku` (stock-keeping unit/item number) as input.\n\n3.  **Determine the required action:** The goal is to get the stock quantity, which requires calling `inventory.stock` with `sku=\"7731\"`.\n\n4.  **Construct the tool call:**\n    *   Function name: `inventory.stock`\n    *   Argument: `sku` = \"7731\"\n\n5.  **Format the output:** Generate the tool call in the required format.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "inventory.stock",
+            "input": {
+              "sku": "7731"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "inventory.stock",
+          "input": {
+            "sku": "7731"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 115,
+        "completion_tokens": 200,
+        "cached_tokens": 0,
+        "total_tokens": 315,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:36:56.427676Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1.  **Analyze the user's request:** The user wants to know the stock quantity for item number 7731. They explicitly instructed to pass the item number \"7731\" to the tool.\n\n2.  **Examine the available tools:** The only tool available is `inventory.stock`, which takes a `sku` (stock-keeping unit/item number) as input.\n\n3.  **Determine the required action:** The goal is to get the stock quantity, which requires calling `inventory.stock` with `sku=\"7731\"`.\n\n4.  **Construct the tool call:**\n    *   Function name: `inventory.stock`\n    *   Argument: `sku` = \"7731\"\n\n5.  **Format the output:** Generate the tool call in the required format.",
+          "tool_calls": [
+            {
+              "id": "call_jcnsdfwq",
+              "function": {
+                "index": 0,
+                "name": "inventory.stock",
+                "arguments": {
+                  "sku": "7731"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 3249059583,
+        "load_duration": 4283417,
+        "prompt_eval_count": 115,
+        "prompt_eval_duration": 179294000,
+        "eval_count": 200,
+        "eval_duration": 3061773000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer stock questions with the inventory.stock tool. If a tool returns an error, read it, fix the input and call the tool again."
+        },
+        {
+          "role": "user",
+          "content": "How many units of item 7731 do we have in stock? Pass the item number to the tool as given."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1.  **Analyze the user's request:** The user wants to know the stock quantity for item number 7731. They explicitly instructed to pass the item number \"7731\" to the tool.\n\n2.  **Examine the available tools:** The only tool available is `inventory.stock`, which takes a `sku` (stock-keeping unit/item number) as input.\n\n3.  **Determine the required action:** The goal is to get the stock quantity, which requires calling `inventory.stock` with `sku=\"7731\"`.\n\n4.  **Construct the tool call:**\n    *   Function name: `inventory.stock`\n    *   Argument: `sku` = \"7731\"\n\n5.  **Format the output:** Generate the tool call in the required format.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "inventory.stock",
+              "input": {
+                "sku": "7731"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"error\":\"unknown sku \\\"7731\\\": SKUs look like SKU-7731\"}",
+          "name": "inventory.stock",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "inventory.stock",
+          "description": "Units in stock for a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "1.  **Analyze the previous tool call and response:**\n    *   Tool call: `inventory.stock{sku: \"7731\"}`\n    *   Tool response: `{\"error\":\"unknown sku \\\"7731\\\": SKUs look like SKU-7731\"}`\n\n2.  **Identify the problem:** The tool failed because the input SKU \"7731\" was likely incorrect or in the wrong format. The error message suggests the SKU might be \"SKU-7731\".\n\n3.  **Formulate a plan:**\n    *   The user asked for item number \"7731\".\n    *   The tool suggests the correct format might be \"SKU-7731\".\n    *   Since I don't have a way to confirm the *actual* correct SKU, the best approach is to try the corrected format based on the error message.\n\n4.  **Construct the corrected tool call:** Call `inventory.stock` with `sku=\"SKU-7731\"`.\n\n5.  **Execute the corrected action:** (Self-correction: The prompt requires me to fix the input and call the tool again. I must make the call now.)",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "inventory.stock",
+            "input": {
+              "sku": "SKU-7731"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "inventory.stock",
+          "input": {
+            "sku": "SKU-7731"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 353,
+        "completion_tokens": 284,
+        "cached_tokens": 0,
+        "total_tokens": 637,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:00.807881Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1.  **Analyze the previous tool call and response:**\n    *   Tool call: `inventory.stock{sku: \"7731\"}`\n    *   Tool response: `{\"error\":\"unknown sku \\\"7731\\\": SKUs look like SKU-7731\"}`\n\n2.  **Identify the problem:** The tool failed because the input SKU \"7731\" was likely incorrect or in the wrong format. The error message suggests the SKU might be \"SKU-7731\".\n\n3.  **Formulate a plan:**\n    *   The user asked for item number \"7731\".\n    *   The tool suggests the correct format might be \"SKU-7731\".\n    *   Since I don't have a way to confirm the *actual* correct SKU, the best approach is to try the corrected format based on the error message.\n\n4.  **Construct the corrected tool call:** Call `inventory.stock` with `sku=\"SKU-7731\"`.\n\n5.  **Execute the corrected action:** (Self-correction: The prompt requires me to fix the input and call the tool again. I must make the call now.)",
+          "tool_calls": [
+            {
+              "id": "call_zse7chne",
+              "function": {
+                "index": 0,
+                "name": "inventory.stock",
+                "arguments": {
+                  "sku": "SKU-7731"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 4380066458,
+        "load_duration": 4335875,
+        "prompt_eval_count": 353,
+        "prompt_eval_duration": 208973000,
+        "eval_count": 284,
+        "eval_duration": 4164120000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer stock questions with the inventory.stock tool. If a tool returns an error, read it, fix the input and call the tool again."
+        },
+        {
+          "role": "user",
+          "content": "How many units of item 7731 do we have in stock? Pass the item number to the tool as given."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1.  **Analyze the user's request:** The user wants to know the stock quantity for item number 7731. They explicitly instructed to pass the item number \"7731\" to the tool.\n\n2.  **Examine the available tools:** The only tool available is `inventory.stock`, which takes a `sku` (stock-keeping unit/item number) as input.\n\n3.  **Determine the required action:** The goal is to get the stock quantity, which requires calling `inventory.stock` with `sku=\"7731\"`.\n\n4.  **Construct the tool call:**\n    *   Function name: `inventory.stock`\n    *   Argument: `sku` = \"7731\"\n\n5.  **Format the output:** Generate the tool call in the required format.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "inventory.stock",
+              "input": {
+                "sku": "7731"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"error\":\"unknown sku \\\"7731\\\": SKUs look like SKU-7731\"}",
+          "name": "inventory.stock",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1.  **Analyze the previous tool call and response:**\n    *   Tool call: `inventory.stock{sku: \"7731\"}`\n    *   Tool response: `{\"error\":\"unknown sku \\\"7731\\\": SKUs look like SKU-7731\"}`\n\n2.  **Identify the problem:** The tool failed because the input SKU \"7731\" was likely incorrect or in the wrong format. The error message suggests the SKU might be \"SKU-7731\".\n\n3.  **Formulate a plan:**\n    *   The user asked for item number \"7731\".\n    *   The tool suggests the correct format might be \"SKU-7731\".\n    *   Since I don't have a way to confirm the *actual* correct SKU, the best approach is to try the corrected format based on the error message.\n\n4.  **Construct the corrected tool call:** Call `inventory.stock` with `sku=\"SKU-7731\"`.\n\n5.  **Execute the corrected action:** (Self-correction: The prompt requires me to fix the input and call the tool again. I must make the call now.)",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "inventory.stock",
+              "input": {
+                "sku": "SKU-7731"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"in_stock\":42,\"sku\":\"SKU-7731\"}",
+          "name": "inventory.stock",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "inventory.stock",
+          "description": "Units in stock for a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "We have 42 units of item SKU-7731 in stock.",
+        "thinking": "1.  **Analyze the final tool response:**\n    *   Tool call: `inventory.stock{sku: \"SKU-7731\"}`\n    *   Tool response: `{\"in_stock\":42,\"sku\":\"SKU-7731\"}`\n\n2.  **Determine the answer:** The response indicates that the SKU \"SKU-7731\" has 42 units in stock.\n\n3.  **Format the final response:** State the result clearly to the user."
+      },
+      "usage": {
+        "prompt_tokens": 670,
+        "completion_tokens": 131,
+        "cached_tokens": 0,
+        "total_tokens": 801,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:02.747504Z",
+        "message": {
+          "role": "assistant",
+          "content": "We have 42 units of item SKU-7731 in stock.",
+          "thinking": "1.  **Analyze the final tool response:**\n    *   Tool call: `inventory.stock{sku: \"SKU-7731\"}`\n    *   Tool response: `{\"in_stock\":42,\"sku\":\"SKU-7731\"}`\n\n2.  **Determine the answer:** The response indicates that the SKU \"SKU-7731\" has 42 units in stock.\n\n3.  **Format the final response:** State the result clearly to the user."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1939123500,
+        "load_duration": 4872125,
+        "prompt_eval_count": 670,
+        "prompt_eval_duration": 73824000,
+        "eval_count": 131,
+        "eval_duration": 1857012000
+      }
+    }
+  }
+]

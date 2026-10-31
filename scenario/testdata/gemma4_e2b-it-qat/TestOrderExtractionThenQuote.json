@@ -1,0 +1,303 @@
+[
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You turn emails into order data."
+        },
+        {
+          "role": "user",
+          "content": "Extract the order in this email:\n\nFrom: bob@example.com\nHi! Please send me 2 x SKU-7731 and 1 x SKU-1200. Thanks, Bob"
+        }
+      ],
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "customer_email": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "sku",
+                "quantity"
+              ]
+            }
+          }
+        },
+        "required": [
+          "customer_email",
+          "items"
+        ]
+      }
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"customer_email\": \"bob@example.com\",\n  \"items\": [\n    {\n      \"sku\": \"SKU-7731\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"SKU-1200\",\n      \"quantity\": 1\n    }\n  ]\n}",
+        "thinking": "*   Input: An email from Bob requesting specific items.\n*   Goal: Convert the email into structured order data.\n    *   Recipient/Sender: Bob (sender), implied customer/order details are internal.\n    *   Items: 2 x SKU-7731, 1 x SKU-1200.\n\n    *   SKU-7731: Quantity = 2\n    *   SKU-1200: Quantity = 1\n\n*   Output should be structured order data."
+      },
+      "usage": {
+        "prompt_tokens": 190,
+        "completion_tokens": 81,
+        "cached_tokens": 0,
+        "total_tokens": 271,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:39.818679Z",
+        "message": {
+          "role": "assistant",
+          "content": "{\n  \"customer_email\": \"bob@example.com\",\n  \"items\": [\n    {\n      \"sku\": \"SKU-7731\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"SKU-1200\",\n      \"quantity\": 1\n    }\n  ]\n}",
+          "thinking": "*   Input: An email from Bob requesting specific items.\n*   Goal: Convert the email into structured order data.\n    *   Recipient/Sender: Bob (sender), implied customer/order details are internal.\n    *   Items: 2 x SKU-7731, 1 x SKU-1200.\n\n    *   SKU-7731: Quantity = 2\n    *   SKU-1200: Quantity = 1\n\n*   Output should be structured order data."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 3117291750,
+        "load_duration": 5925375,
+        "prompt_eval_count": 190,
+        "prompt_eval_duration": 154931000,
+        "eval_count": 81,
+        "eval_duration": 1024771000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Look up the unit price of every SKU with catalog.price, then reply with only the order total in dollars."
+        },
+        {
+          "role": "user",
+          "content": "Order: {\n  \"customer_email\": \"bob@example.com\",\n  \"items\": [\n    {\n      \"sku\": \"SKU-7731\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"SKU-1200\",\n      \"quantity\": 1\n    }\n  ]\n}"
+        }
+      ],
+      "tools": [
+        {
+          "name": "catalog.price",
+          "description": "Unit price in dollars of a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "1. **Identify the Goal:** The user wants the total order cost based on the provided order details (items and quantities), but first, I need the unit prices for each SKU using the `catalog.price` tool.\n\n2. **Analyze the Request:**\n    *   Order details:\n        *   Item 1: SKU \"SKU-7731\", Quantity 2\n        *   Item 2: SKU \"SKU-1200\", Quantity 1\n    *   Goal: Calculate `(Price of SKU-7731 * 2) + (Price of SKU-1200 * 1)`.\n    *   The user explicitly asked to \"Look up the unit price of every SKU with catalog.price\" and then \"reply with only the order total in dollars.\"\n\n3. **Determine Necessary Actions (Tool Calls):** I need to call `catalog.price` twice, once for each unique SKU.\n\n4. **Formulate Tool Calls:**\n    *   Call 1: `catalog.price(sku=\"SKU-7731\")`\n    *   Call 2: `catalog.price(sku=\"SKU-1200\")`\n\n5. **Execute and Wait:** (Simulated step, waiting for tool output).\n\n6. **(Self-Correction/Constraint Check):** Since I need the prices *before* I can calculate the total, I must use the tools first. The response must *only* be the final total dollar amount.\n\n7. **Final Output Strategy:**\n    *   Call the tools.\n    *   Once I receive the prices, calculate the sum.\n    *   Provide only the final dollar amount. (If the tool calls return prices, I will proceed with the calculation in the next turn, or I can chain the calls if the platform allows for sequential thinking). *In this single turn structure, I must output the calls.*",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "catalog.price",
+            "input": {
+              "sku": "SKU-7731"
+            }
+          },
+          {
+            "id": "call_1",
+            "name": "catalog.price",
+            "input": {
+              "sku": "SKU-1200"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "catalog.price",
+          "input": {
+            "sku": "SKU-7731"
+          }
+        },
+        {
+          "id": "call_1",
+          "name": "catalog.price",
+          "input": {
+            "sku": "SKU-1200"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 166,
+        "completion_tokens": 456,
+        "cached_tokens": 0,
+        "total_tokens": 622,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:46.028088Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Identify the Goal:** The user wants the total order cost based on the provided order details (items and quantities), but first, I need the unit prices for each SKU using the `catalog.price` tool.\n\n2. **Analyze the Request:**\n    *   Order details:\n        *   Item 1: SKU \"SKU-7731\", Quantity 2\n        *   Item 2: SKU \"SKU-1200\", Quantity 1\n    *   Goal: Calculate `(Price of SKU-7731 * 2) + (Price of SKU-1200 * 1)`.\n    *   The user explicitly asked to \"Look up the unit price of every SKU with catalog.price\" and then \"reply with only the order total in dollars.\"\n\n3. **Determine Necessary Actions (Tool Calls):** I need to call `catalog.price` twice, once for each unique SKU.\n\n4. **Formulate Tool Calls:**\n    *   Call 1: `catalog.price(sku=\"SKU-7731\")`\n    *   Call 2: `catalog.price(sku=\"SKU-1200\")`\n\n5. **Execute and Wait:** (Simulated step, waiting for tool output).\n\n6. **(Self-Correction/Constraint Check):** Since I need the prices *before* I can calculate the total, I must use the tools first. The response must *only* be the final total dollar amount.\n\n7. **Final Output Strategy:**\n    *   Call the tools.\n    *   Once I receive the prices, calculate the sum.\n    *   Provide only the final dollar amount. (If the tool calls return prices, I will proceed with the calculation in the next turn, or I can chain the calls if the platform allows for sequential thinking). *In this single turn structure, I must output the calls.*",
+          "tool_calls": [
+            {
+              "id": "call_7xvaat5h",
+              "function": {
+                "index": 0,
+                "name": "catalog.price",
+                "arguments": {
+                  "sku": "SKU-7731"
+                }
+              }
+            },
+            {
+              "id": "call_2n7g8xps",
+              "function": {
+                "index": 1,
+                "name": "catalog.price",
+                "arguments": {
+                  "sku": "SKU-1200"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 6198531000,
+        "load_duration": 5113750,
+        "prompt_eval_count": 166,
+        "prompt_eval_duration": 156974000,
+        "eval_count": 456,
+        "eval_duration": 6033874000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Look up the unit price of every SKU with catalog.price, then reply with only the order total in dollars."
+        },
+        {
+          "role": "user",
+          "content": "Order: {\n  \"customer_email\": \"bob@example.com\",\n  \"items\": [\n    {\n      \"sku\": \"SKU-7731\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"SKU-1200\",\n      \"quantity\": 1\n    }\n  ]\n}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Identify the Goal:** The user wants the total order cost based on the provided order details (items and quantities), but first, I need the unit prices for each SKU using the `catalog.price` tool.\n\n2. **Analyze the Request:**\n    *   Order details:\n        *   Item 1: SKU \"SKU-7731\", Quantity 2\n        *   Item 2: SKU \"SKU-1200\", Quantity 1\n    *   Goal: Calculate `(Price of SKU-7731 * 2) + (Price of SKU-1200 * 1)`.\n    *   The user explicitly asked to \"Look up the unit price of every SKU with catalog.price\" and then \"reply with only the order total in dollars.\"\n\n3. **Determine Necessary Actions (Tool Calls):** I need to call `catalog.price` twice, once for each unique SKU.\n\n4. **Formulate Tool Calls:**\n    *   Call 1: `catalog.price(sku=\"SKU-7731\")`\n    *   Call 2: `catalog.price(sku=\"SKU-1200\")`\n\n5. **Execute and Wait:** (Simulated step, waiting for tool output).\n\n6. **(Self-Correction/Constraint Check):** Since I need the prices *before* I can calculate the total, I must use the tools first. The response must *only* be the final total dollar amount.\n\n7. **Final Output Strategy:**\n    *   Call the tools.\n    *   Once I receive the prices, calculate the sum.\n    *   Provide only the final dollar amount. (If the tool calls return prices, I will proceed with the calculation in the next turn, or I can chain the calls if the platform allows for sequential thinking). *In this single turn structure, I must output the calls.*",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "catalog.price",
+              "input": {
+                "sku": "SKU-7731"
+              }
+            },
+            {
+              "id": "call_1",
+              "name": "catalog.price",
+              "input": {
+                "sku": "SKU-1200"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"price\":15,\"sku\":\"SKU-7731\"}",
+          "name": "catalog.price",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "tool",
+          "content": "{\"price\":40,\"sku\":\"SKU-1200\"}",
+          "name": "catalog.price",
+          "tool_call_id": "call_1"
+        }
+      ],
+      "tools": [
+        {
+          "name": "catalog.price",
+          "description": "Unit price in dollars of a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "$70",
+        "thinking": "1. **Analyze Tool Output:**\n    *   Price for SKU-7731: $15\n    *   Price for SKU-1200: $40\n\n2. **Calculate the Order Total:**\n    *   Item 1 (SKU-7731): Quantity is 2. Cost = $15 * 2 = $30\n    *   Item 2 (SKU-1200): Quantity is 1. Cost = $40 * 1 = $40\n    *   Total = $30 + $40 = $70\n\n3. **Format the Final Response:** The user requested \"only the order total in dollars.\""
+      },
+      "usage": {
+        "prompt_tokens": 683,
+        "completion_tokens": 156,
+        "cached_tokens": 0,
+        "total_tokens": 839,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:48.091635Z",
+        "message": {
+          "role": "assistant",
+          "content": "$70",
+          "thinking": "1. **Analyze Tool Output:**\n    *   Price for SKU-7731: $15\n    *   Price for SKU-1200: $40\n\n2. **Calculate the Order Total:**\n    *   Item 1 (SKU-7731): Quantity is 2. Cost = $15 * 2 = $30\n    *   Item 2 (SKU-1200): Quantity is 1. Cost = $40 * 1 = $40\n    *   Total = $30 + $40 = $70\n\n3. **Format the Final Response:** The user requested \"only the order total in dollars.\""
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 2063010417,
+        "load_duration": 7384959,
+        "prompt_eval_count": 683,
+        "prompt_eval_duration": 144321000,
+        "eval_count": 156,
+        "eval_duration": 1906337000
+      }
+    }
+  }
+]

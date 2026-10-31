@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
@@ -19,6 +21,8 @@ import (
 type Provider struct {
 	BaseURL string
 	HTTP    *http.Client
+
+	caps sync.Map // model name -> model.Capabilities
 }
 
 // New returns a provider pointed at baseURL (default "http://localhost:11434")
@@ -35,9 +39,28 @@ func New(baseURL string, client *http.Client) *Provider {
 
 func (p *Provider) Name() string { return "ollama" }
 
-func (p *Provider) Capabilities(_ context.Context, _ string) (model.Capabilities, error) {
-	// Tool calling is per model in Ollama; this is the conservative common set.
-	return model.Capabilities{Streaming: true, ToolCalling: true, TokenAccounting: true}, nil
+// Capabilities asks the server what the model can do, once per model.
+func (p *Provider) Capabilities(ctx context.Context, name string) (model.Capabilities, error) {
+	if c, ok := p.caps.Load(name); ok {
+		return c.(model.Capabilities), nil
+	}
+	body, _ := json.Marshal(map[string]string{"model": name})
+	var show struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := p.post(ctx, "/api/show", body, &show); err != nil {
+		return model.Capabilities{}, err
+	}
+	c := model.Capabilities{
+		Streaming:        true,
+		TokenAccounting:  true,
+		StructuredOutput: true,
+		ToolCalling:      slices.Contains(show.Capabilities, "tools"),
+		Vision:           slices.Contains(show.Capabilities, "vision"),
+		Embeddings:       slices.Contains(show.Capabilities, "embedding"),
+	}
+	p.caps.Store(name, c)
+	return c, nil
 }
 
 func (p *Provider) Chat(ctx context.Context, req model.ChatRequest) (model.ChatResponse, error) {
@@ -45,25 +68,39 @@ func (p *Provider) Chat(ctx context.Context, req model.ChatRequest) (model.ChatR
 	if err != nil {
 		return model.ChatResponse{}, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.BaseURL+"/api/chat", bytes.NewReader(buf))
-	if err != nil {
+	var raw json.RawMessage
+	if err := p.post(ctx, "/api/chat", buf, &raw); err != nil {
 		return model.ChatResponse{}, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	return decodeResponse(raw)
+}
 
+func (p *Provider) post(ctx context.Context, path string, body []byte, out any) error {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.BaseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := p.HTTP.Do(httpReq)
 	if err != nil {
-		return model.ChatResponse{}, fmt.Errorf("ollama: %w", err)
+		return fmt.Errorf("ollama: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return model.ChatResponse{}, err
+		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return model.ChatResponse{}, fmt.Errorf("ollama: status %d: %s", resp.StatusCode, string(raw))
+		return fmt.Errorf("ollama: %s: status %d: %s", path, resp.StatusCode, string(raw))
 	}
-	return decodeResponse(raw)
+	if r, ok := out.(*json.RawMessage); ok {
+		*r = raw
+		return nil
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("ollama: %s: decode: %w", path, err)
+	}
+	return nil
 }
 
 type chatRequest struct {
@@ -78,9 +115,11 @@ type chatRequest struct {
 type message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`
+	Thinking   string     `json:"thinking,omitempty"`
 	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
 	ToolName   string     `json:"tool_name,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Images     [][]byte   `json:"images,omitempty"`
 }
 
 type toolCall struct {
@@ -99,9 +138,12 @@ type chatResponse struct {
 func encodeRequest(req model.ChatRequest) ([]byte, error) {
 	msgs := make([]message, 0, len(req.Messages))
 	for _, m := range req.Messages {
-		om := message{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+		om := message{Role: m.Role, Content: m.Content, Thinking: m.Thinking, ToolCallID: m.ToolCallID}
 		if m.Role == model.RoleTool {
 			om.ToolName = m.Name
+		}
+		for _, img := range m.Images {
+			om.Images = append(om.Images, img.Data)
 		}
 		for _, tc := range m.ToolCalls {
 			var c toolCall
@@ -151,7 +193,7 @@ func decodeResponse(raw []byte) (model.ChatResponse, error) {
 		})
 	}
 	return model.ChatResponse{
-		Message:   model.Message{Role: model.RoleAssistant, Content: r.Message.Content, ToolCalls: calls},
+		Message:   model.Message{Role: model.RoleAssistant, Content: r.Message.Content, Thinking: r.Message.Thinking, ToolCalls: calls},
 		ToolCalls: calls,
 		Usage: core.Usage{
 			PromptTokens:     r.PromptEvalCount,

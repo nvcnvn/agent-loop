@@ -87,7 +87,7 @@ func LoadReplayer(path string) (*Replayer, error) {
 func (r *Replayer) Name() string { return "replay" }
 
 func (r *Replayer) Capabilities(_ context.Context, _ string) (Capabilities, error) {
-	return Capabilities{ToolCalling: true, ParallelToolCalls: true, StructuredOutput: true, TokenAccounting: true}, nil
+	return Capabilities{ToolCalling: true, ParallelToolCalls: true, StructuredOutput: true, TokenAccounting: true, Vision: true}, nil
 }
 
 func (r *Replayer) Chat(_ context.Context, req ChatRequest) (ChatResponse, error) {

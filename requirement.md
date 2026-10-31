@@ -38,15 +38,16 @@ Primary goals:
 
 The framework must:
 - [x] Run several agents in one run as workflow stages.
-- [ ] Spawn sub-agents from a parent agent at runtime (no task has a parent task or depth today).
+- [x] Spawn sub-agents from a parent agent at runtime (the `delegate` tool; each delegated task
+  records its parent task and depth).
 - [x] Support sequential and concurrent execution (sequential and parallel stages).
-- [ ] Support mixed graph-style execution (stages with dependencies instead of a linear list).
+- [x] Support mixed graph-style execution (stages declare `depends_on`; independent stages run concurrently).
 - [x] Allow workflow templates such as:
   - requirements -> code -> review -> test
   - planner -> multiple research agents in parallel -> synthesizer
-- [ ] Allow an agent to hand work back to a previous stage when validation fails.
+- [x] Allow an agent to hand work back to a previous stage when validation fails (`hand_back`).
 - [x] Enforce per-run limits on total spawned agents, sub-agent concurrency, tokens, runtime, model calls, and tool calls.
-- [ ] Enforce the recursion depth limit (`MaxDepth` is defined but nothing recurses yet).
+- [x] Enforce the recursion depth limit (`MaxDepth`).
 - [x] Allow per-run limits that override the defaults.
 - [x] Cap per-run limits at server-side maximums (`Orchestrator.MaxLimits`) so a client cannot raise them without bound.
   Cost is not capped by default because no provider reports it yet.
@@ -61,23 +62,24 @@ The framework should define a clear execution model:
 ### 4.2 Workflow Definition
 
 The framework must support two ways to define behavior:
-- [ ] Dynamic delegation at runtime by an agent.
+- [x] Dynamic delegation at runtime by an agent.
 - [x] Predefined workflows, sent as JSON with each run or built in Go.
-- [ ] Named workflow templates stored in configuration and started by name.
+- [x] Named workflow templates stored in configuration and started by name.
 
 Workflow definitions should support:
-- [x] Agent role and instruction (agents are registered in Go at startup).
-- [ ] Agent definitions loaded from configuration or the API.
+- [x] Agent role and instruction.
+- [x] Agent definitions loaded from configuration (`cmd/agent-loop -config`).
+- [ ] Agent definitions managed through the API.
 - [x] Allowed tools per agent.
-- [ ] Allowed child agents.
-- [ ] Retry policy.
+- [x] Allowed child agents.
+- [x] Retry policy (per stage: attempts and backoff).
 - [x] Run timeout (`MaxRuntime`).
-- [ ] Timeouts and deadlines per stage, agent, and tool.
+- [x] Timeouts per stage, per agent task attempt, and per tool call.
 - [x] Stop after a maximum number of tool loops per agent.
-- [ ] Declared stop conditions.
+- [x] Declared stop conditions (`stop_when`).
 - [x] Human approval gates on tools.
-- [ ] Human approval gates on stages and final outputs.
-- [ ] Input and output schema (input is a flat string map; output is free text).
+- [x] Human approval gates on stages and their outputs; gating the last stage's output gates the final output.
+- [x] Input and output schema (JSON Schema for the run input, a map of strings, and for each stage's answers).
 
 ## 5. State, Persistence, and Replay
 
@@ -95,7 +97,7 @@ Each session must preserve:
 - [x] Agent state transitions.
 - [x] Tool invocations and results.
 - [x] Run-to-task relationships.
-- [ ] Task-to-child-task relationships.
+- [x] Task-to-child-task relationships.
 - [ ] Artifacts produced during execution.
 
 Chat-style sessions require:
@@ -138,7 +140,7 @@ Requirements:
 ### 5.4 Resumability and Replay
 
 The framework must:
-- [x] Resume interrupted runs (`Orchestrator.Resume`, `POST /v1/runs/{rid}/resume`).
+- [x] Resume interrupted, failed and timed-out runs (`Orchestrator.Resume`, `POST /v1/runs/{rid}/resume`).
 - [ ] Retry failed steps safely.
 - [x] Replay a run for debugging by rebuilding its terminal state from stored events.
 - [x] Store the workflow, input, limits, tool inputs and outputs, and model output for each run.
@@ -156,7 +158,7 @@ Requirements:
 - [x] Input and output JSON schema declared on each tool.
 - [ ] Input validated against the schema before execution.
 - [x] Context propagation for run timeout and cancellation.
-- [ ] Per-tool timeout.
+- [x] Per-tool timeout (`ToolDefinition.Timeout`).
 - [x] Structured error handling: a tool error or panic, or a call to a tool the agent may not use, goes
   back to the model as an `{"error": ...}` result instead of failing the task. A refused call still
   counts toward the tool-call budget.
@@ -167,10 +169,12 @@ Requirements:
 Support MCP-based tools and remote MCP servers.
 
 Requirements:
-- [ ] Tool discovery.
-- [ ] Schema translation into the framework's internal tool model.
-- [ ] Authentication and connection lifecycle handling.
-- [ ] Timeout, retry, and circuit-breaker support.
+- [x] Tool discovery (at startup, from the servers under `mcp_servers` in the `-config` file).
+- [ ] Picking up tools a server adds after startup.
+- [x] Schema translation into the framework's internal tool model.
+- [x] Authentication (HTTP headers whose secrets come from the environment) and connection lifecycle
+  handling (reconnect after a lost connection).
+- [x] Timeout, retry, and circuit-breaker support.
 
 ### 6.3 Tool Policy Layer
 
@@ -219,8 +223,11 @@ Requirements:
 - [x] Unified interface for chat completion and tool calling.
 - [ ] Streaming.
 - [ ] Embeddings.
-- [ ] Structured output used by the runtime (the Ollama adapter maps `ResponseSchema`, but nothing sets it).
-- [ ] Provider capability detection (capabilities are static).
+- [x] Structured output used by the runtime (a stage's `output_schema` is sent as `ResponseSchema`).
+- [x] Provider capability detection: the Ollama adapter asks the server what each model supports, and
+  a task that needs images or tools its model lacks fails before the model is called.
+- [x] Image input for vision models (named run input images shown with an agent step's prompt).
+- [x] Model reasoning (`thinking`) kept as hidden reasoning and passed back in the conversation.
 - [ ] Model-specific parameter mapping.
 - [ ] Retry and backoff.
 - [x] Token accounting for prompt, completion, and total usage.
@@ -297,7 +304,7 @@ Track and enforce:
 Support approval checkpoints for:
 - [x] Dangerous tools and tools with external side effects, when flagged.
 - [ ] High-cost actions.
-- [ ] Final answer publication in selected workflows.
+- [x] Final answer publication in selected workflows (`approve_output` on the last stage).
 - [x] Approval expiry (`Orchestrator.ApprovalTimeout`): an expired approval can no longer be granted and
   the agent gets the expiry as the tool result. An approval still open when its run ends is canceled.
 - [x] A rejection returned to the agent as a tool result instead of failing the run.
@@ -307,9 +314,10 @@ Support approval checkpoints for:
 Requirements:
 - [x] Structured logs (`log/slog`; `cmd/agent-loop` writes JSON to stdout): HTTP requests, run start and
   finish with usage, failed tool calls, and store writes that fail.
-- [ ] Traces across model calls, tool calls, and sub-agent boundaries.
+- [x] Traces across model calls, tool calls, and sub-agent boundaries (OpenTelemetry, exported over
+  OTLP when configured; run logs carry the trace ID).
 - [x] Metrics for latency, token use, cost, queue depth, failures, and tool usage at `/metrics`
-  (Prometheus text; listed in docs/03). Nothing retries yet, so there is no retry metric.
+  (Prometheus text; listed in docs/03), including task retries.
 - [x] Audit trail of human messages and approvals in the event history.
 - [ ] Audit of run cancellations and of who resolved each approval.
 - [x] Run timeline view data model (events, tasks, and the debug console).
@@ -330,7 +338,8 @@ Operational requirements:
 - [x] Versioned schema migrations (`store/pg/migrations`, applied by `pg.Store.Migrate`).
 - [x] In-process state for finished runs is released; `Wait` answers finished runs from the store.
 - [ ] Run ownership by lease, so several API replicas can share one database.
-- [ ] Deployment configuration for agents, tools, policy, and limits from file or environment.
+- [x] Deployment configuration for agents and workflow templates from a file (`-config`).
+- [ ] Deployment configuration for tools, policy, and limits from file or environment.
 
 ## 11. Security and Multi-Tenancy
 
@@ -366,7 +375,8 @@ Agents will often produce outputs beyond messages.
 
 Support artifact storage for:
 - [x] Files, structured JSON outputs, reports, code patches, and test results, stored with a kind, MIME type, and metadata.
-- [ ] Agents and tools producing artifacts during a run (nothing writes to the artifact store yet).
+- [ ] Agents and tools producing artifacts during a run (only a run's input images are stored, as
+  `input_image` artifacts).
 
 Requirements:
 - [ ] Artifact versioning.
@@ -380,7 +390,10 @@ Requirements:
 - [x] Unit tests for workflow engine, persistence, budget enforcement, and policy checks.
 - [x] Acceptance tests with mock LLM adapters.
 - [x] Integration tests with Ollama in a controlled test environment.
-- [ ] Contract tests for tool registration and MCP integration.
+- [x] Scenarios replayed from fixtures recorded on several small model families (Gemma 4, Qwen3-VL,
+  Ministral 3), including image input.
+- [x] Contract tests for tool registration and MCP integration (against the MCP SDK's server over
+  stdio, streamable HTTP and in-memory transports).
 - [x] Replay tests on runs produced in the test.
 - [ ] Replay tests using recorded run fixtures.
 - [x] Concurrency tests for fan-out and cancellation.
@@ -412,16 +425,16 @@ The framework should be considered powerful when it can act as:
 
 The product vision is met when the framework can:
 - [x] Accept human requests through an API and stream real-time execution events.
-- [ ] Execute workflows that combine planning, delegation, tool use, review, and retry.
+- [x] Execute workflows that combine planning, delegation, tool use, review, and retry.
 - [x] Spawn multiple agents concurrently and merge their outputs safely.
 - [x] Schedule multiple tool calls concurrently when policy permits.
 - [x] Persist enough state to inspect and audit any run.
 - [ ] Persist enough state to resume and deterministically replay any run.
 - [x] Apply budgets, limits, and approval gates without relying on prompt discipline alone.
 - [ ] Support long-term memory and retrieval with clear provenance.
-- [ ] Expose operational telemetry sufficient for debugging and production monitoring.
+- [x] Expose operational telemetry sufficient for debugging and production monitoring.
 - [x] Remain provider-agnostic at the model layer.
-- [ ] Remain protocol-agnostic at the tool layer (native tools only; no MCP).
+- [x] Remain protocol-agnostic at the tool layer (native Go and MCP tools).
 - [x] Pass deterministic or replay-based test scenarios for important workflows.
 
 ## 17. Design Decisions
@@ -431,11 +444,12 @@ The product vision is met when the framework can:
   `core.DefaultTenant`).
 - Hidden reasoning: persisted by default in `hidden_payload` and never served by the public REST or
   SSE endpoints.
-- Workflow definitions: both. Agents and tools are registered in Go; workflows are JSON sent with
-  each run or Go structs.
+- Workflow definitions: both. Tools are registered in Go; agents are registered in Go or loaded from
+  the `-config` file; workflows are JSON sent with each run, Go structs, or named templates from the
+  config file.
 - Replay: a best-effort debugging feature that rebuilds state from stored events, not a hard
   determinism guarantee.
-- Tools run in-process only.
+- Native tools run in-process; MCP tools run in their servers, reached over stdio or streamable HTTP.
 - Approvals are asynchronous: the run waits in `awaiting_approval` until a client resolves the
   approval over REST.
 - Session history is linear.
@@ -460,11 +474,11 @@ The first implementation is viable when the framework can:
 - [x] Spawn sub-agents sequentially and concurrently.
 - [x] Persist all major run events in PostgreSQL.
 - [x] Call native Go tools.
-- [ ] Call MCP tools.
+- [x] Call MCP tools.
 - [x] Execute safe tool calls concurrently with cancellation.
 - [x] Bound concurrent tool calls with limits.
 - [x] Enforce limits and stop runaway runs.
 - [x] Replay a failed run.
-- [ ] Resume a failed run.
-- [ ] Produce observable logs, metrics, and traceable diagnostics.
+- [x] Resume a failed run.
+- [x] Produce observable logs, metrics, and traceable diagnostics.
 - [x] Pass acceptance and integration test suites.

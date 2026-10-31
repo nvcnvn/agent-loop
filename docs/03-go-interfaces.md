@@ -131,10 +131,17 @@ type ToolDefinition struct {
     SideEffect       SideEffectLevel  // none | read_external | write_internal | write_external | dangerous
     Concurrency      ConcurrencyClass // serial | parallel_read | parallel_isolated_write | exclusive | external_side_effect
     RequiresApproval bool
+    Timeout          time.Duration // per call; zero means only the run's deadline applies
 }
 ```
 
 ## Runtime Orchestration
+
+Workflows and agents are the JSON-tagged structs `runtime.Workflow`, `runtime.Stage` and
+`runtime.Agent`, whose fields are the contract in `docs/04-contracts-and-tests.md` §3 and §4.
+`StartRunInput.Template` names one of `Orchestrator.Workflows` instead of passing a `Workflow`, and
+`runtime.ParseConfig(data []byte) (runtime.Config, error)` decodes and checks a config file of agents
+and workflow templates.
 
 ```go
 package runtime
@@ -281,8 +288,26 @@ type Capabilities struct {
     ParallelToolCalls bool
     StructuredOutput bool
     Embeddings       bool
+    Vision           bool
     TokenAccounting  bool
 }
+
+type Message struct {
+    Role       string
+    Content    string
+    Thinking   string // reasoning; hidden from public events
+    Name       string
+    ToolCallID string
+    ToolCalls  []ToolCall
+    Images     []Image
+}
+
+type Image struct {
+    MimeType string
+    Data     []byte
+}
+
+var ErrUnsupported error // a model lacks a capability the request needs
 
 type ChatRequest struct {
     TenantID       core.TenantID
@@ -360,12 +385,29 @@ type Result struct {
     Metadata map[string]any
 }
 
-type MCPClient interface {
-    Connect(ctx context.Context, server ServerConfig) error
-    DiscoverTools(ctx context.Context) ([]core.ToolDefinition, error)
-    Invoke(ctx context.Context, call Call) (Result, error)
-    Close(ctx context.Context) error
+```
+
+MCP servers are adapted in `tool/mcp`; only `cmd/` and `scenario/` import it:
+
+```go
+package mcp
+
+type Server struct {
+    Name       string            // tools are registered as <Name>.<tool>
+    Command    []string          // stdio, or
+    URL        string            // streamable HTTP
+    Headers    map[string]string // ${VAR} read from the environment
+    Timeout    time.Duration
+    MaxRetries int
+    BreakAfter int
+    BreakFor   time.Duration
 }
+
+var ErrCircuitOpen error
+
+func New(cfg Server) (*Client, error)
+func (c *Client) Register(ctx context.Context, reg *tool.Registry) ([]string, error)
+func (c *Client) Close() error
 ```
 
 ## Policy, Budget, and Approval
@@ -487,9 +529,16 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, r *http.Request)
 | `agentloop_cost_units_total` | `model` |
 | `agentloop_tool_calls_total` | `tool` (`unknown` for calls to unregistered tools), `outcome` (`ok`, `error`; refused calls are errors) |
 | `agentloop_tool_call_duration_seconds` | `tool` |
+| `agentloop_task_retries_total` | `agent` |
 | `agentloop_http_request_duration_seconds` | `route` (mux pattern), `code` |
 
-Traces are not implemented.
+`runtime.Orchestrator.Tracer` (OpenTelemetry; `NewOrchestrator` takes the global provider, which
+records nothing until one is set) records a span tree per run: `run <workflow>` > `stage <name>` >
+`task <agent>` > `chat <model>` and `execute_tool <tool>`, plus `await_approval`. A delegated
+task's span is a child of the caller's `execute_tool delegate` span. Spans carry the run, task and
+step IDs, and model spans the token counts. `cmd/agent-loop` exports them over OTLP/HTTP when
+`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set (the other standard
+`OTEL_*` variables apply), and its run logs carry `trace_id`.
 
 ## Implementation Notes
 

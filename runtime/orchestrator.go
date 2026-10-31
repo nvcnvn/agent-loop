@@ -16,10 +16,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
@@ -29,54 +38,6 @@ import (
 	"github.com/nvcnvn/agent-loop/tool"
 )
 
-// Agent is a runtime-resolvable agent definition.
-type Agent struct {
-	Name         string
-	Role         string
-	Instructions string
-	Model        string         // provider model name
-	Provider     model.Provider // provider implementation
-	Tools        []string       // tool names from the tool registry the agent may call
-	MaxToolLoops int            // max tool-call iterations per RunAgent invocation; default 4
-}
-
-// StageKind picks between sequential and parallel execution within a workflow.
-type StageKind string
-
-const (
-	StageSequential StageKind = "sequential"
-	StageParallel   StageKind = "parallel"
-)
-
-// FailurePolicy mirrors the values described in the domain model for fan-in.
-type FailurePolicy string
-
-const (
-	FailFast   FailurePolicy = "fail_fast"
-	WaitAll    FailurePolicy = "wait_all"
-	BestEffort FailurePolicy = "best_effort"
-)
-
-// AgentStep is one agent invocation inside a stage.
-type AgentStep struct {
-	Name   string // agent name; resolved against the registered agents
-	Prompt string // prompt template; {{stage.<name>}} placeholders are filled from previous stage outputs
-}
-
-// Stage is one step of a workflow.
-type Stage struct {
-	Name          string
-	Kind          StageKind
-	Agents        []AgentStep
-	FailurePolicy FailurePolicy
-}
-
-// Workflow defines an ordered list of stages.
-type Workflow struct {
-	Name   string
-	Stages []Stage
-}
-
 // StartRunInput carries everything the orchestrator needs to begin.
 type StartRunInput struct {
 	TenantID       core.TenantID
@@ -84,12 +45,17 @@ type StartRunInput struct {
 	SessionID      core.SessionID
 	IdempotencyKey string
 	Workflow       Workflow
-	Input          map[string]string // available as {{input.<key>}} in templates
-	Limits         core.Limits
-	Metadata       map[string]any
+	// Template names one of Orchestrator.Workflows to run instead of Workflow.
+	Template string
+	Input    map[string]string // available as {{input.<key>}} in templates
+	// Images are named input images that agent steps show the model.
+	Images   map[string]model.Image
+	Limits   core.Limits
+	Metadata map[string]any
 
 	history []model.Message
 	reuse   *completedTasks
+	plan    *plan
 }
 
 // Result is the terminal state returned by Wait.
@@ -103,9 +69,11 @@ type Result struct {
 
 // Orchestrator is the central runtime entry point.
 type Orchestrator struct {
-	Store     store.Store // any driver: store.MemStore or store/pg.Store
-	Tools     *tool.Registry
-	Agents    map[string]Agent
+	Store  store.Store // any driver: store.MemStore or store/pg.Store
+	Tools  *tool.Registry
+	Agents map[string]Agent
+	// Workflows are the named workflow templates a run can start by name.
+	Workflows map[string]Workflow
 	Policy    policy.ToolPolicy
 	Budget    *policy.BudgetManager
 	LoopDet   *policy.LoopDetector
@@ -114,6 +82,9 @@ type Orchestrator struct {
 	MaxLimits core.Limits
 	// Log receives run lifecycle and error logs; NewOrchestrator sets slog.Default().
 	Log *slog.Logger
+	// Tracer records a span per run, stage, task, model call, tool call and approval wait;
+	// NewOrchestrator uses the global OpenTelemetry tracer provider.
+	Tracer trace.Tracer
 	// Metrics records run, model and tool metrics; nil disables them. NewOrchestrator registers
 	// the queue gauges on the instance it creates.
 	Metrics *observe.Metrics
@@ -175,9 +146,11 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 	}
 	o := &Orchestrator{
 		Metrics:            observe.New(),
+		Tracer:             otel.Tracer("github.com/nvcnvn/agent-loop/runtime"),
 		Store:              s,
 		Tools:              reg,
 		Agents:             am,
+		Workflows:          map[string]Workflow{},
 		Budget:             policy.NewBudgetManager(),
 		LoopDet:            policy.NewLoopDetector(5),
 		Approvals:          s,
@@ -225,6 +198,33 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 			return existing.ID, nil
 		}
 	}
+	if in.Template != "" {
+		if len(in.Workflow.Stages) > 0 {
+			return "", errors.New("give a workflow or a template, not both")
+		}
+		wf, ok := o.Workflows[in.Template]
+		if !ok {
+			return "", fmt.Errorf("workflow template %q: %w", in.Template, core.ErrNotFound)
+		}
+		in.Workflow = wf
+	}
+	p, err := compileWorkflow(in.Workflow, o.Agents)
+	if err != nil {
+		return "", err
+	}
+	if err := p.checkInput(in.Input); err != nil {
+		return "", err
+	}
+	for _, stage := range in.Workflow.Stages {
+		for _, step := range stage.Agents {
+			for _, name := range step.Images {
+				if _, ok := in.Images[name]; !ok {
+					return "", fmt.Errorf("stage %q: agent %s shows image %q, which the run input lacks", stage.Name, step.Name, name)
+				}
+			}
+		}
+	}
+	in.plan = p
 
 	if err := o.admit(false); err != nil {
 		return "", err
@@ -251,6 +251,14 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 	runID, err := o.Store.CreateRun(ctx, runRec)
 	if err != nil {
 		return "", err
+	}
+	for name, img := range in.Images {
+		if _, err := o.Store.PutArtifact(ctx, store.Artifact{
+			TenantID: in.TenantID, SessionID: in.SessionID, RunID: runID,
+			Kind: inputImageKind, Name: name, MimeType: img.MimeType, Content: img.Data,
+		}); err != nil {
+			return "", err
+		}
 	}
 	o.Budget.Init(runID, in.Limits)
 	if err := o.launch(runID, in); err != nil {
@@ -298,9 +306,10 @@ func (o *Orchestrator) unclaim(runID core.RunID, st *runState) {
 	close(st.done)
 }
 
-// Resume continues the tenant's run that is not finished and not executing
-// in this process, for example after a restart. Agent tasks that completed
-// are reused; a task that was interrupted runs again from its start.
+// Resume continues the tenant's run that is not executing in this process and
+// is unfinished, for example after a restart, or failed or timed out. Agent
+// tasks that completed are reused; a task that was interrupted or failed runs
+// again from its start. Succeeded and canceled runs give core.ErrConflict.
 func (o *Orchestrator) Resume(ctx context.Context, tenant core.TenantID, runID core.RunID) error {
 	return o.resume(ctx, tenant, runID, false)
 }
@@ -341,7 +350,7 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 	if err != nil {
 		return err
 	}
-	if run.Status.Terminal() {
+	if run.Status == core.RunSucceeded || run.Status == core.RunCanceled {
 		return fmt.Errorf("run %s already %s: %w", run.ID, run.Status, core.ErrConflict)
 	}
 	in := StartRunInput{TenantID: run.TenantID, SessionID: run.SessionID, Limits: run.Limits}
@@ -351,6 +360,21 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 	if len(run.Input) > 0 {
 		if err := json.Unmarshal(run.Input, &in.Input); err != nil {
 			return fmt.Errorf("stored input: %w", err)
+		}
+	}
+	if in.plan, err = compileWorkflow(in.Workflow, o.Agents); err != nil {
+		return fmt.Errorf("stored workflow: %w", err)
+	}
+	artifacts, err := o.Store.ListRunArtifacts(ctx, run.TenantID, run.ID)
+	if err != nil {
+		return err
+	}
+	for _, a := range artifacts {
+		if a.Kind == inputImageKind {
+			if in.Images == nil {
+				in.Images = map[string]model.Image{}
+			}
+			in.Images[a.Name] = model.Image{MimeType: a.MimeType, Data: a.Content}
 		}
 	}
 	reuse, attempts, err := o.reconcileTasks(ctx, run)
@@ -363,6 +387,22 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 	}
 	if err := o.admit(force); err != nil {
 		return err
+	}
+	if run.Status.Terminal() {
+		reopened := run
+		reopened.Status, reopened.FailureReason, reopened.EndedAt = core.RunQueued, "", time.Time{}
+		if err := o.Store.UpdateRun(ctx, reopened); err != nil {
+			o.release()
+			return err
+		}
+		o.emit(ctx, core.Event{
+			TenantID:   run.TenantID,
+			SessionID:  run.SessionID,
+			RunID:      run.ID,
+			Type:       core.EvRunStateChanged,
+			Visibility: core.VisibilityPublic,
+			Payload:    mustJSON(map[string]any{"status": core.RunQueued, "reason": "resumed"}),
+		})
 	}
 	usage := run.Usage
 	// A parallel stage reserves all its agents up front, so the stored count
@@ -436,7 +476,7 @@ func (c *completedTasks) take(stage, agent, prompt string) (string, bool) {
 }
 
 // toRun returns how many of the stage's agent steps have no reusable output.
-func (c *completedTasks) toRun(stage string, steps []AgentStep, input, prior map[string]string) int {
+func (c *completedTasks) toRun(stage string, steps []AgentStep, prompts []string) int {
 	if c == nil {
 		return len(steps)
 	}
@@ -444,8 +484,8 @@ func (c *completedTasks) toRun(stage string, steps []AgentStep, input, prior map
 	defer c.mu.Unlock()
 	used := map[string]int{}
 	n := 0
-	for _, step := range steps {
-		key := taskKey(stage, step.Name, renderTemplate(step.Prompt, input, prior))
+	for i, step := range steps {
+		key := taskKey(stage, step.Name, prompts[i])
 		if used[key] < len(c.outputs[key]) {
 			used[key]++
 			continue
@@ -659,27 +699,41 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	defer stopTimer()
 
 	startedAt := time.Now().UTC()
-	log := o.Log.With("run_id", runID, "tenant_id", in.TenantID, "session_id", in.SessionID)
-	log.InfoContext(ctx, "run started", "workflow", in.Workflow.Name)
-
 	stageOutputs := map[string]string{}
 	var finalStatus core.RunStatus = core.RunSucceeded
 	var failureReason string
 
-	stages := in.Workflow.Stages
+	ctx, span := o.startSpan(ctx, "run "+in.Workflow.Name,
+		attribute.String("agentloop.run_id", string(runID)),
+		attribute.String("agentloop.tenant_id", string(in.TenantID)),
+		attribute.String("agentloop.session_id", string(in.SessionID)))
+	defer func() {
+		span.SetAttributes(attribute.String("agentloop.run_status", string(finalStatus)))
+		var err error
+		if finalStatus != core.RunSucceeded && failureReason != "" {
+			err = errors.New(failureReason)
+		}
+		endSpan(span, err)
+	}()
+	log := o.Log.With("run_id", runID, "tenant_id", in.TenantID, "session_id", in.SessionID)
+	if span.SpanContext().IsValid() {
+		log = log.With("trace_id", span.SpanContext().TraceID().String())
+	}
+	log.InfoContext(ctx, "run started", "workflow", in.Workflow.Name)
+
+	runnable := false
 	if ctx.Err() != nil {
 		finalStatus = core.RunCanceled
 		failureReason = "canceled while queued"
-		stages = nil
 	} else {
 		o.transitionRun(ctx, runID, in.TenantID, core.RunRunning, "")
 		history, err := o.sessionHistory(ctx, in.TenantID, in.SessionID, runID)
 		if err != nil {
 			finalStatus = core.RunFailed
 			failureReason = "session history: " + err.Error()
-			stages = nil
 		}
 		in.history = history
+		runnable = err == nil
 	}
 
 	stopIdleWatch := func() {}
@@ -690,27 +744,23 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		stopIdleWatch = func() { close(stop); wg.Wait() }
 	}
 
-	for _, stage := range stages {
-		if ctx.Err() != nil {
+	if runnable {
+		err := o.runStages(ctx, runID, in, in.plan, stageOutputs)
+		switch {
+		case err == nil:
+		case errors.Is(err, context.Canceled):
 			finalStatus = core.RunCanceled
-			failureReason = "context canceled"
-			break
-		}
-		out, err := o.runStage(ctx, runID, in, stage, stageOutputs)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				finalStatus = core.RunCanceled
-				failureReason = "canceled"
-			} else if errors.Is(err, context.DeadlineExceeded) {
-				finalStatus = core.RunTimedOut
-				failureReason = "deadline exceeded"
-			} else {
-				finalStatus = core.RunFailed
+			failureReason = "canceled"
+		case errors.Is(err, context.DeadlineExceeded):
+			finalStatus = core.RunTimedOut
+			failureReason = "deadline exceeded"
+			if ctx.Err() == nil {
 				failureReason = err.Error()
 			}
-			break
+		default:
+			finalStatus = core.RunFailed
+			failureReason = err.Error()
 		}
-		stageOutputs[stage.Name] = out
 	}
 
 	usage := o.Budget.Snapshot(runID)
@@ -781,34 +831,13 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	}
 }
 
-// runStage runs one stage and returns its aggregated output.
-func (o *Orchestrator) runStage(ctx context.Context, runID core.RunID, in StartRunInput, stage Stage, prior map[string]string) (string, error) {
-	switch stage.Kind {
-	case StageSequential, "":
-		var last string
-		for _, ag := range stage.Agents {
-			out, err := o.runAgentStep(ctx, runID, in, stage.Name, ag, prior)
-			if err != nil {
-				return "", err
-			}
-			prior[stage.Name+"."+ag.Name] = out
-			last = out
-		}
-		return last, nil
-	case StageParallel:
-		return o.runParallelStage(ctx, runID, in, stage, prior)
-	default:
-		return "", fmt.Errorf("unknown stage kind: %s", stage.Kind)
+func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, in StartRunInput, p *plan, i int, vars map[string]string, feedback string) (string, error) {
+	stage := p.stages[i]
+	prompts := make([]string, len(stage.Agents))
+	for j, step := range stage.Agents {
+		prompts[j] = render(step.Prompt, in.Input, vars, feedback)
 	}
-}
-
-func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, in StartRunInput, stage Stage, prior map[string]string) (string, error) {
-	for _, ag := range stage.Agents {
-		if _, ok := o.Agents[ag.Name]; !ok {
-			return "", fmt.Errorf("unknown agent: %s", ag.Name)
-		}
-	}
-	if err := o.Budget.Reserve(runID, core.Usage{SubAgents: int64(in.reuse.toRun(stage.Name, stage.Agents, in.Input, prior))}); err != nil {
+	if err := o.Budget.Reserve(runID, core.Usage{SubAgents: int64(in.reuse.toRun(stage.Name, stage.Agents, prompts))}); err != nil {
 		return "", err
 	}
 
@@ -820,27 +849,20 @@ func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, i
 	gctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan result, len(stage.Agents))
-	priorCopy := map[string]string{}
-	for k, v := range prior {
-		priorCopy[k] = v
-	}
-
 	sem := make(chan struct{}, in.Limits.MaxConcurrent)
 	var wg sync.WaitGroup
-	for i, ag := range stage.Agents {
-		wg.Add(1)
-		go func(idx int, ag AgentStep) {
-			defer wg.Done()
+	for j, step := range stage.Agents {
+		wg.Go(func() {
 			select {
 			case sem <- struct{}{}:
 			case <-gctx.Done():
-				results <- result{idx: idx, err: gctx.Err()}
+				results <- result{idx: j, err: gctx.Err()}
 				return
 			}
 			defer func() { <-sem }()
-			out, err := o.runAgentStepReserved(gctx, runID, in, stage.Name, ag, priorCopy, false)
-			results <- result{idx: idx, out: out, err: err}
-		}(i, ag)
+			out, err := o.runAgentStep(gctx, runID, in, p, i, step, prompts[j], true)
+			results <- result{idx: j, out: out, err: err}
+		})
 	}
 	wg.Wait()
 	close(results)
@@ -869,7 +891,7 @@ func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, i
 			continue
 		}
 		parts = append(parts, fmt.Sprintf("%s=%s", stage.Agents[r.idx].Name, r.out))
-		prior[stage.Name+"."+stage.Agents[r.idx].Name] = r.out
+		vars[stage.Name+"."+stage.Agents[r.idx].Name] = r.out
 	}
 
 	switch policy {
@@ -878,59 +900,96 @@ func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, i
 			return "", firstErr
 		}
 	case BestEffort:
-		// proceed even with partial failures, as long as at least one succeeded
 		if len(parts) == 0 && firstErr != nil {
 			return "", firstErr
 		}
 	}
-
-	aggregated := joinParts(parts)
-	return aggregated, nil
+	return strings.Join(parts, "\n"), nil
 }
 
-func joinParts(parts []string) string {
-	out := ""
-	for i, p := range parts {
-		if i > 0 {
-			out += "\n"
-		}
-		out += p
-	}
-	return out
+// inputImageKind is the artifact kind that stores a run's input images.
+const inputImageKind = "input_image"
+
+// taskSpec is one agent task: a workflow step, or a task a parent task delegated.
+type taskSpec struct {
+	stage     string
+	agent     Agent
+	prompt    string
+	images    []model.Image
+	parent    core.TaskID
+	depth     int
+	retry     RetryPolicy
+	schema    *jsonschema.Schema
+	rawSchema json.RawMessage
 }
 
-func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in StartRunInput, stageName string, step AgentStep, prior map[string]string) (string, error) {
-	return o.runAgentStepReserved(ctx, runID, in, stageName, step, prior, true)
-}
-
-func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunID, in StartRunInput, stageName string, step AgentStep, prior map[string]string, reserveBudget bool) (string, error) {
+// runAgentStep runs a stage's agent step; reserved means the caller has
+// already reserved the sub-agent budget for its first attempt.
+func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in StartRunInput, p *plan, i int, step AgentStep, prompt string, reserved bool) (string, error) {
 	agent, ok := o.Agents[step.Name]
 	if !ok {
 		return "", fmt.Errorf("unknown agent: %s", step.Name)
 	}
-	prompt := renderTemplate(step.Prompt, in.Input, prior)
-	if out, ok := in.reuse.take(stageName, agent.Name, prompt); ok {
+	stage := p.stages[i]
+	var images []model.Image
+	for _, name := range step.Images {
+		images = append(images, in.Images[name])
+	}
+	return o.runTask(ctx, runID, in, taskSpec{
+		stage:     stage.Name,
+		agent:     agent,
+		prompt:    prompt,
+		images:    images,
+		retry:     stage.Retry,
+		schema:    p.output[i],
+		rawSchema: stage.OutputSchema,
+	}, reserved)
+}
+
+// runTask runs spec, or reuses the output of a run it resumes, retrying as
+// spec.retry allows. Every attempt is a task that counts as a sub-agent.
+func (o *Orchestrator) runTask(ctx context.Context, runID core.RunID, in StartRunInput, spec taskSpec, reserved bool) (string, error) {
+	if out, ok := in.reuse.take(spec.stage, spec.agent.Name, spec.prompt); ok {
 		return out, nil
 	}
-	reserved := false
-	if reserveBudget {
-		if err := o.Budget.ReserveSubAgent(runID); err != nil {
-			return "", err
+	backoff := spec.retry.Backoff
+	for attempt := 1; ; attempt++ {
+		if !reserved || attempt > 1 {
+			if err := o.Budget.ReserveSubAgent(runID); err != nil {
+				return "", err
+			}
 		}
-		reserved = true
+		out, err := o.attemptTask(ctx, runID, in, spec, attempt)
+		if err == nil || attempt >= spec.retry.MaxAttempts || ctx.Err() != nil || errors.Is(err, core.ErrBudgetExceeded) || errors.Is(err, model.ErrUnsupported) {
+			return out, err
+		}
+		o.Metrics.Add("agentloop_task_retries_total", 1, "agent", spec.agent.Name)
+		o.systemEvent(ctx, in, runID, "", map[string]any{
+			"event": "task_retry_scheduled", "agent": spec.agent.Name, "stage": spec.stage,
+			"attempt": attempt + 1, "error": err.Error(),
+		})
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
 	}
+}
 
+func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in StartRunInput, spec taskSpec, attempt int) (string, error) {
 	taskID, err := o.Store.CreateTask(ctx, store.Task{
-		TenantID:  in.TenantID,
-		RunID:     runID,
-		AgentName: agent.Name,
-		Status:    core.TaskRunning,
-		Input:     mustJSON(map[string]any{"prompt": prompt, "stage": stageName}),
+		TenantID:     in.TenantID,
+		RunID:        runID,
+		ParentTaskID: spec.parent,
+		AgentName:    spec.agent.Name,
+		Status:       core.TaskRunning,
+		Depth:        spec.depth,
+		Attempt:      attempt,
+		Input:        mustJSON(map[string]any{"prompt": spec.prompt, "stage": spec.stage}),
 	})
 	if err != nil {
-		if reserved {
-			o.Budget.Release(runID, core.Usage{SubAgents: 1})
-		}
+		o.Budget.Release(runID, core.Usage{SubAgents: 1})
 		return "", err
 	}
 	o.emit(ctx, core.Event{
@@ -940,17 +999,44 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 		TaskID:     taskID,
 		Type:       core.EvTaskSpawned,
 		Visibility: core.VisibilityInternal,
-		Payload:    mustJSON(map[string]any{"agent": agent.Name, "stage": stageName, "prompt": prompt}),
+		Payload: mustJSON(map[string]any{
+			"agent": spec.agent.Name, "stage": spec.stage, "prompt": spec.prompt,
+			"parent_task_id": spec.parent, "depth": spec.depth, "attempt": attempt,
+		}),
 	})
-	// Build initial messages.
+	ctx, span := o.startSpan(ctx, "task "+spec.agent.Name,
+		attribute.String("agentloop.task_id", string(taskID)),
+		attribute.String("agentloop.parent_task_id", string(spec.parent)),
+		attribute.String("agentloop.stage", spec.stage),
+		attribute.Int("agentloop.depth", spec.depth),
+		attribute.Int("agentloop.attempt", attempt))
+	actx := ctx
+	if spec.agent.Timeout > 0 {
+		var cancel context.CancelFunc
+		actx, cancel = context.WithTimeout(ctx, spec.agent.Timeout)
+		defer cancel()
+	}
+	out, err := o.agentLoop(actx, runID, in, spec, taskID)
+	if err != nil && actx.Err() != nil && ctx.Err() == nil {
+		err = fmt.Errorf("agent %s timed out after %s: %w", spec.agent.Name, spec.agent.Timeout, context.DeadlineExceeded)
+	}
+	endSpan(span, err)
+	if err != nil {
+		return "", o.failTask(ctx, in.TenantID, taskID, err)
+	}
+	return out, nil
+}
+
+// agentLoop calls the model and the tools it asks for until the model answers.
+func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in StartRunInput, spec taskSpec, taskID core.TaskID) (string, error) {
+	agent := spec.agent
 	messages := []model.Message{}
 	if agent.Instructions != "" {
 		messages = append(messages, model.Message{Role: model.RoleSystem, Content: agent.Instructions})
 	}
 	messages = append(messages, in.history...)
-	messages = append(messages, model.Message{Role: model.RoleUser, Content: prompt})
+	messages = append(messages, model.Message{Role: model.RoleUser, Content: spec.prompt, Images: spec.images})
 
-	// Tool specs the model is allowed to call.
 	toolSpecs := []model.ToolSpec{}
 	allowed := map[string]allowedTool{}
 	for _, name := range agent.Tools {
@@ -960,15 +1046,7 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 		}
 		ok2, requiresApproval, reason := o.Policy.Authorize(def)
 		if !ok2 {
-			o.emit(ctx, core.Event{
-				TenantID:   in.TenantID,
-				SessionID:  in.SessionID,
-				RunID:      runID,
-				TaskID:     taskID,
-				Type:       core.EvSystem,
-				Visibility: core.VisibilityInternal,
-				Payload:    mustJSON(map[string]any{"event": "tool_denied", "tool": def.Name, "reason": reason}),
-			})
+			o.systemEvent(ctx, in, runID, taskID, map[string]any{"event": "tool_denied", "tool": def.Name, "reason": reason})
 			continue
 		}
 		allowed[def.Name] = allowedTool{def: def, requiresApproval: requiresApproval, approvalReason: reason}
@@ -978,11 +1056,45 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 			InputSchema: def.InputSchema,
 		})
 	}
+	var delegate tool.Executor
+	if len(agent.Children) > 0 && spec.depth < in.Limits.MaxDepth {
+		toolSpecs = append(toolSpecs, o.delegateSpec(agent))
+		delegate = tool.ExecutorFunc(func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			var req struct {
+				Agent string `json:"agent"`
+				Task  string `json:"task"`
+			}
+			if err := json.Unmarshal(call.Input, &req); err != nil {
+				return tool.Result{}, err
+			}
+			child, ok := o.Agents[req.Agent]
+			if !ok || !slices.Contains(agent.Children, req.Agent) {
+				return tool.Result{}, fmt.Errorf("%w: %s may not delegate to %q", core.ErrPolicyDenied, agent.Name, req.Agent)
+			}
+			out, err := o.runTask(ctx, runID, in, taskSpec{stage: spec.stage, agent: child, prompt: req.Task, parent: taskID, depth: spec.depth + 1}, false)
+			if err != nil {
+				return tool.Result{}, err
+			}
+			return tool.Result{Output: mustJSON(map[string]string{"agent": req.Agent, "answer": out})}, nil
+		})
+	}
 
-	maxLoops := agent.MaxToolLoops
-	for loop := 0; loop < maxLoops; loop++ {
+	if len(spec.images) > 0 || len(toolSpecs) > 0 {
+		caps, err := agent.Provider.Capabilities(ctx, agent.Model)
+		if err != nil {
+			return "", fmt.Errorf("model capabilities: %w", err)
+		}
+		if len(spec.images) > 0 && !caps.Vision {
+			return "", fmt.Errorf("agent %s: model %s does not accept images: %w", agent.Name, agent.Model, model.ErrUnsupported)
+		}
+		if len(toolSpecs) > 0 && !caps.ToolCalling {
+			return "", fmt.Errorf("agent %s: model %s does not call tools: %w", agent.Name, agent.Model, model.ErrUnsupported)
+		}
+	}
+
+	for range agent.MaxToolLoops {
 		if err := o.Budget.ReserveModelCall(runID); err != nil {
-			return "", o.failTask(ctx, in.TenantID, taskID, err)
+			return "", err
 		}
 		stepID := core.StepID(core.NewID())
 		o.emit(ctx, core.Event{
@@ -997,24 +1109,34 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 		})
 
 		req := model.ChatRequest{
-			TenantID: in.TenantID,
-			RunID:    runID,
-			StepID:   stepID,
-			Model:    agent.Model,
-			Messages: messages,
-			Tools:    toolSpecs,
+			TenantID:       in.TenantID,
+			RunID:          runID,
+			StepID:         stepID,
+			Model:          agent.Model,
+			Messages:       messages,
+			Tools:          toolSpecs,
+			ResponseSchema: spec.rawSchema,
 		}
 		releaseAgent, err := o.sems.Acquire(ctx, "agent:"+agent.Name, o.Concurrency.PerAgent)
 		if err != nil {
-			return "", o.failTask(ctx, in.TenantID, taskID, err)
+			return "", err
 		}
 		callStart := time.Now()
-		resp, err := agent.Provider.Chat(ctx, req)
+		cctx, span := o.startSpan(ctx, "chat "+agent.Model,
+			attribute.String("gen_ai.operation.name", "chat"),
+			attribute.String("gen_ai.request.model", agent.Model),
+			attribute.String("agentloop.step_id", string(stepID)))
+		resp, err := agent.Provider.Chat(cctx, req)
+		span.SetAttributes(
+			attribute.Int64("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
+			attribute.Int64("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
+			attribute.Int("agentloop.tool_calls", len(resp.ToolCalls)))
+		endSpan(span, err)
 		releaseAgent()
 		o.Metrics.Observe("agentloop_model_call_duration_seconds", time.Since(callStart).Seconds(), "model", agent.Model)
 		if err != nil {
 			o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "error")
-			return "", o.failTask(ctx, in.TenantID, taskID, fmt.Errorf("model: %w", err))
+			return "", fmt.Errorf("model: %w", err)
 		}
 		o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "ok")
 		o.Metrics.Add("agentloop_tokens_total", float64(resp.Usage.PromptTokens), "model", agent.Model, "type", "prompt")
@@ -1031,64 +1153,112 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 			Type:          core.EvModelCompleted,
 			Visibility:    core.VisibilityInternal,
 			Payload:       mustJSON(map[string]any{"usage": resp.Usage, "tool_calls": len(resp.ToolCalls)}),
-			HiddenPayload: mustJSON(map[string]any{"content": resp.Message.Content}),
+			HiddenPayload: mustJSON(map[string]any{"content": resp.Message.Content, "thinking": resp.Message.Thinking}),
 		})
 		commitErr := o.Budget.Commit(runID, usage)
 		o.persistUsage(ctx, in.TenantID, runID)
 		if commitErr != nil {
-			return "", o.failTask(ctx, in.TenantID, taskID, commitErr)
+			return "", commitErr
 		}
 
-		if len(resp.ToolCalls) == 0 {
-			// Final answer.
-			content := resp.Message.Content
-			o.emit(ctx, core.Event{
-				TenantID:   in.TenantID,
-				SessionID:  in.SessionID,
-				RunID:      runID,
-				TaskID:     taskID,
-				Type:       core.EvAgentMessage,
-				Visibility: core.VisibilityPublic,
-				Payload:    mustJSON(map[string]any{"agent": agent.Name, "content": content}),
-			})
-			o.logErr(ctx, "add message", o.Store.AddMessage(ctx, store.MessageProjection{
-				SessionID:  in.SessionID,
-				RunID:      runID,
-				Role:       "assistant:" + agent.Name,
-				Visibility: core.VisibilityPublic,
-				Content:    content,
-			}), "run_id", runID)
-			task := store.Task{
-				ID:        taskID,
-				TenantID:  in.TenantID,
-				RunID:     runID,
-				AgentName: agent.Name,
-				Status:    core.TaskCompleted,
-				Output:    mustJSON(map[string]any{"content": content}),
-			}
-			o.logErr(ctx, "update task", o.Store.UpdateTask(ctx, task), "run_id", runID, "task_id", taskID)
-			o.emit(ctx, core.Event{
-				TenantID:   in.TenantID,
-				SessionID:  in.SessionID,
-				RunID:      runID,
-				TaskID:     taskID,
-				Type:       core.EvTaskCompleted,
-				Visibility: core.VisibilityInternal,
-				Payload:    mustJSON(map[string]any{"agent": agent.Name}),
-			})
-			return content, nil
-		}
-
-		// Execute tool calls (in parallel for parallel-safe tools).
 		messages = append(messages, resp.Message)
-		toolMessages, err := o.runToolCalls(ctx, in.TenantID, in.SessionID, runID, taskID, resp.ToolCalls, allowed, in.Limits.MaxConcurrent)
-		if err != nil {
-			return "", o.failTask(ctx, in.TenantID, taskID, err)
+		if len(resp.ToolCalls) > 0 {
+			toolMessages, err := o.runToolCalls(ctx, in.TenantID, in.SessionID, runID, taskID, resp.ToolCalls, allowed, delegate, in.Limits.MaxConcurrent)
+			if err != nil {
+				return "", err
+			}
+			messages = append(messages, toolMessages...)
+			continue
 		}
-		messages = append(messages, toolMessages...)
+		content := resp.Message.Content
+		if spec.schema != nil {
+			if err := validateJSON(spec.schema, content); err != nil {
+				o.systemEvent(ctx, in, runID, taskID, map[string]any{"event": "output_rejected", "agent": agent.Name, "error": err.Error()})
+				messages = append(messages, model.Message{
+					Role:    model.RoleUser,
+					Content: "Your answer does not match the required output schema: " + err.Error() + "\nReply with only a JSON document that matches it.",
+				})
+				continue
+			}
+		}
+		o.completeTask(ctx, in, runID, taskID, agent.Name, content)
+		return content, nil
 	}
+	return "", fmt.Errorf("agent %s exceeded MaxToolLoops=%d", agent.Name, agent.MaxToolLoops)
+}
 
-	return "", o.failTask(ctx, in.TenantID, taskID, fmt.Errorf("agent %s exceeded MaxToolLoops=%d", agent.Name, maxLoops))
+func (o *Orchestrator) completeTask(ctx context.Context, in StartRunInput, runID core.RunID, taskID core.TaskID, agent, content string) {
+	o.emit(ctx, core.Event{
+		TenantID:   in.TenantID,
+		SessionID:  in.SessionID,
+		RunID:      runID,
+		TaskID:     taskID,
+		Type:       core.EvAgentMessage,
+		Visibility: core.VisibilityPublic,
+		Payload:    mustJSON(map[string]any{"agent": agent, "content": content}),
+	})
+	o.logErr(ctx, "add message", o.Store.AddMessage(ctx, store.MessageProjection{
+		SessionID:  in.SessionID,
+		RunID:      runID,
+		Role:       "assistant:" + agent,
+		Visibility: core.VisibilityPublic,
+		Content:    content,
+	}), "run_id", runID)
+	o.logErr(ctx, "update task", o.Store.UpdateTask(ctx, store.Task{
+		ID:        taskID,
+		TenantID:  in.TenantID,
+		RunID:     runID,
+		AgentName: agent,
+		Status:    core.TaskCompleted,
+		Output:    mustJSON(map[string]any{"content": content}),
+	}), "run_id", runID, "task_id", taskID)
+	o.emit(ctx, core.Event{
+		TenantID:   in.TenantID,
+		SessionID:  in.SessionID,
+		RunID:      runID,
+		TaskID:     taskID,
+		Type:       core.EvTaskCompleted,
+		Visibility: core.VisibilityInternal,
+		Payload:    mustJSON(map[string]any{"agent": agent}),
+	})
+}
+
+// delegateTool is the built-in tool an agent with children calls to hand
+// them tasks. It is also its tool ID, which no registered tool can have.
+const delegateTool = "delegate"
+
+func (o *Orchestrator) delegateSpec(agent Agent) model.ToolSpec {
+	desc := "Give a task to another agent and get its answer. The agents you can give tasks to:"
+	for _, name := range agent.Children {
+		desc += "\n- " + name
+		if role := o.Agents[name].Role; role != "" {
+			desc += ": " + role
+		}
+	}
+	return model.ToolSpec{
+		Name:        delegateTool,
+		Description: desc,
+		InputSchema: mustJSON(map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"agent": map[string]any{"type": "string", "enum": agent.Children},
+				"task":  map[string]any{"type": "string", "description": "everything the agent needs to know to do the task"},
+			},
+			"required": []string{"agent", "task"},
+		}),
+	}
+}
+
+func (o *Orchestrator) systemEvent(ctx context.Context, in StartRunInput, runID core.RunID, taskID core.TaskID, payload map[string]any) {
+	o.emit(ctx, core.Event{
+		TenantID:   in.TenantID,
+		SessionID:  in.SessionID,
+		RunID:      runID,
+		TaskID:     taskID,
+		Type:       core.EvSystem,
+		Visibility: core.VisibilityInternal,
+		Payload:    mustJSON(payload),
+	})
 }
 
 // sessionHistory returns the session's last MaxHistoryMessages messages from
@@ -1118,6 +1288,7 @@ func (o *Orchestrator) sessionHistory(ctx context.Context, tenant core.TenantID,
 }
 
 func (o *Orchestrator) failTask(ctx context.Context, tenant core.TenantID, taskID core.TaskID, err error) error {
+	ctx = context.WithoutCancel(ctx)
 	o.logErr(ctx, "update task", o.Store.UpdateTask(ctx, store.Task{
 		ID:       taskID,
 		TenantID: tenant,
@@ -1137,7 +1308,7 @@ func (o *Orchestrator) logErr(ctx context.Context, op string, err error, attrs .
 	}
 }
 
-func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, calls []model.ToolCall, allowed map[string]allowedTool, maxParallel int) ([]model.Message, error) {
+func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, calls []model.ToolCall, allowed map[string]allowedTool, delegate tool.Executor, maxParallel int) ([]model.Message, error) {
 	type toolOut struct {
 		idx int
 		msg model.Message
@@ -1187,6 +1358,11 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			Tool:     core.ToolDefinition{Name: tc.Name},
 			Input:    tc.Input,
 		}
+		if tc.Name == delegateTool && delegate != nil {
+			callRec.Tool = core.ToolDefinition{ID: delegateTool, Name: delegateTool}
+			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, exec: delegate, runParallel: true})
+			continue
+		}
 		allowedTool, ok := allowed[tc.Name]
 		if !ok {
 			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, refused: fmt.Errorf("%w: tool %s is not available to this agent", core.ErrPolicyDenied, tc.Name)})
@@ -1233,7 +1409,9 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 
 	for i := range plans {
 		if plans[i].requiresApproval {
-			status, err := o.awaitToolApproval(gctx, tenant, session, runID, taskID, plans[i].call, plans[i].approvalReason)
+			call := plans[i].call
+			request := mustJSON(map[string]any{"tool": call.Tool.Name, "input": json.RawMessage(call.Input)})
+			status, err := o.awaitApproval(gctx, tenant, session, runID, taskID, call.StepID, plans[i].approvalReason, map[string]any{"tool": call.Tool.Name}, request)
 			if err != nil {
 				return nil, err
 			}
@@ -1287,10 +1465,14 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 	return out, nil
 }
 
-func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, reason string) (string, error) {
+// awaitApproval records an approval request about subject, which its events
+// carry, and waits until it is resolved, expires or ctx ends.
+func (o *Orchestrator) awaitApproval(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, stepID core.StepID, reason string, subject map[string]any, request json.RawMessage) (string, error) {
 	if reason == "" {
 		reason = "tool requires approval"
 	}
+	ctx, span := o.startSpan(ctx, "await_approval", attribute.String("agentloop.step_id", string(stepID)))
+	defer span.End()
 	var expiresAt time.Time
 	if o.ApprovalTimeout > 0 {
 		expiresAt = time.Now().UTC().Add(o.ApprovalTimeout)
@@ -1298,13 +1480,10 @@ func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.Tenant
 	approvalID, err := o.Approvals.CreateApproval(ctx, store.Approval{
 		TenantID:  tenant,
 		RunID:     runID,
-		StepID:    call.StepID,
+		StepID:    stepID,
 		Reason:    reason,
 		ExpiresAt: expiresAt,
-		Request: mustJSON(map[string]any{
-			"tool":  call.Tool.Name,
-			"input": json.RawMessage(call.Input),
-		}),
+		Request:   request,
 	})
 	if err != nil {
 		return "", err
@@ -1315,15 +1494,10 @@ func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.Tenant
 		SessionID:  session,
 		RunID:      runID,
 		TaskID:     taskID,
-		StepID:     call.StepID,
+		StepID:     stepID,
 		Type:       core.EvApprovalReq,
 		Visibility: core.VisibilityParticipant,
-		Payload: mustJSON(map[string]any{
-			"approval_id": approvalID,
-			"tool":        call.Tool.Name,
-			"reason":      reason,
-			"expires_at":  expiresAt,
-		}),
+		Payload:    mustJSON(withFields(subject, map[string]any{"approval_id": approvalID, "reason": reason, "expires_at": expiresAt})),
 	})
 
 	waitCtx, cancel := context.WithCancel(ctx)
@@ -1349,20 +1523,22 @@ func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.Tenant
 		SessionID:  session,
 		RunID:      runID,
 		TaskID:     taskID,
-		StepID:     call.StepID,
+		StepID:     stepID,
 		Type:       core.EvApprovalRes,
 		Visibility: core.VisibilityParticipant,
-		Payload: mustJSON(map[string]any{
-			"approval_id": approvalID,
-			"tool":        call.Tool.Name,
-			"status":      approval.Status,
-		}),
+		Payload:    mustJSON(withFields(subject, map[string]any{"approval_id": approvalID, "status": approval.Status})),
 	})
 	if ctx.Err() != nil {
 		return "", fmt.Errorf("approval %s: %w", approvalID, ctx.Err())
 	}
 	o.transitionRun(ctx, runID, tenant, core.RunRunning, "")
 	return approval.Status, nil
+}
+
+func withFields(base, extra map[string]any) map[string]any {
+	out := maps.Clone(base)
+	maps.Copy(out, extra)
+	return out
 }
 
 // closeApproval resolves an open approval with status, or returns the
@@ -1374,16 +1550,24 @@ func (o *Orchestrator) closeApproval(ctx context.Context, tenant core.TenantID, 
 	return o.Approvals.GetApproval(ctx, tenant, id)
 }
 
-func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call tool.Call, tc model.ToolCall, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (model.Message, error) {
-	limit := o.Concurrency.PerTool
-	if call.Tool.Concurrency == core.ConcurrencyExclusive {
-		limit = 1
+func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call tool.Call, tc model.ToolCall, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (_ model.Message, err error) {
+	ctx, span := o.startSpan(ctx, "execute_tool "+call.Tool.Name,
+		attribute.String("gen_ai.operation.name", "execute_tool"),
+		attribute.String("gen_ai.tool.name", call.Tool.Name),
+		attribute.String("agentloop.step_id", string(call.StepID)))
+	defer func() { endSpan(span, err) }()
+	// A delegating task holding a slot its descendants wait for would deadlock.
+	if call.Tool.ID != delegateTool {
+		limit := o.Concurrency.PerTool
+		if call.Tool.Concurrency == core.ConcurrencyExclusive {
+			limit = 1
+		}
+		releaseTool, err := o.sems.Acquire(ctx, "tool:"+call.Tool.Name, limit)
+		if err != nil {
+			return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
+		}
+		defer releaseTool()
 	}
-	releaseTool, err := o.sems.Acquire(ctx, "tool:"+call.Tool.Name, limit)
-	if err != nil {
-		return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
-	}
-	defer releaseTool()
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
 		SessionID:  session,
@@ -1395,10 +1579,18 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		Payload:    mustJSON(map[string]any{"tool": call.Tool.Name}),
 	})
 	callStart := time.Now()
-	res, err := safeExecute(ctx, exec, call)
+	tctx, cancel := ctx, context.CancelFunc(func() {})
+	if call.Tool.Timeout > 0 {
+		tctx, cancel = context.WithTimeout(ctx, call.Tool.Timeout)
+	}
+	res, err := safeExecute(tctx, exec, call)
+	cancel()
+	if err != nil {
+		span.RecordError(err)
+	}
 	o.Metrics.Observe("agentloop_tool_call_duration_seconds", time.Since(callStart).Seconds(), "tool", call.Tool.Name)
 	if err != nil {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || errors.Is(err, core.ErrBudgetExceeded) {
 			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err)
 			return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
 		}
@@ -1528,6 +1720,21 @@ func (o *Orchestrator) watchIdle(ctx context.Context, stop <-chan struct{}, log 
 	}
 }
 
+func (o *Orchestrator) startSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	if o.Tracer == nil {
+		return ctx, trace.SpanFromContext(ctx)
+	}
+	return o.Tracer.Start(ctx, name, trace.WithAttributes(attrs...))
+}
+
+func endSpan(span trace.Span, err error) {
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	span.End()
+}
+
 func mustJSON(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -1539,45 +1746,4 @@ func mustJSON(v any) json.RawMessage {
 func hashInput(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
-}
-
-// renderTemplate substitutes {{input.<key>}} and {{stage.<name>}} placeholders.
-// It is intentionally simple to keep dependencies minimal.
-func renderTemplate(tmpl string, input map[string]string, prior map[string]string) string {
-	out := tmpl
-	for k, v := range input {
-		out = replaceAll(out, "{{input."+k+"}}", v)
-	}
-	for k, v := range prior {
-		out = replaceAll(out, "{{stage."+k+"}}", v)
-	}
-	return out
-}
-
-func replaceAll(s, old, new string) string {
-	if old == "" {
-		return s
-	}
-	out := ""
-	for {
-		idx := indexOf(s, old)
-		if idx < 0 {
-			out += s
-			return out
-		}
-		out += s[:idx] + new
-		s = s[idx+len(old):]
-	}
-}
-
-func indexOf(s, sub string) int {
-	if len(sub) == 0 || len(sub) > len(s) {
-		return -1
-	}
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }

@@ -1,0 +1,390 @@
+[
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You answer customers. You cannot look anything up yourself: give the question to the librarian with the delegate tool, then answer the customer in one sentence."
+        },
+        {
+          "role": "user",
+          "content": "A customer asks: how many business days does express shipping take?"
+        }
+      ],
+      "tools": [
+        {
+          "name": "delegate",
+          "description": "Give a task to another agent and get its answer. The agents you can give tasks to:\n- librarian: searches the help-center knowledge base",
+          "input_schema": {
+            "properties": {
+              "agent": {
+                "enum": [
+                  "librarian"
+                ],
+                "type": "string"
+              },
+              "task": {
+                "description": "everything the agent needs to know to do the task",
+                "type": "string"
+              }
+            },
+            "required": [
+              "agent",
+              "task"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "1.  **Analyze the Request:** The user is asking a specific factual question: \"how many business days does express shipping take?\"\n\n2.  **Determine the Information Needed:** I need to find the shipping duration for express shipping.\n\n3.  **Identify Available Tools:** The only available tool is `delegate`, which allows me to ask the `librarian` to search the help-center knowledge base.\n\n4.  **Formulate the Plan:**\n    *   Call the `delegate` tool with the `librarian` agent and a task that asks for the answer to the shipping question.\n    *   Once the librarian provides the answer, I will synthesize it into a single-sentence response for the customer.\n\n5.  **Execute the Tool Call (Internal Monologue/Draft):**\n    *   *Tool:* `delegate(agent=\"librarian\", task=\"how many business days does express shipping take?\")`\n\n6.  **Anticipate the Librarian's Output (Self-Correction/Refinement):** The librarian will likely return some information about express shipping times (e.g., \"Express shipping typically takes 2-3 business days\").\n\n7.  **Construct the Final Answer (Based on the anticipated outcome):** The final response must be *one sentence*.\n\n8.  **Final Check against Constraints:**\n    *   Did I use the tool? Yes.\n    *   Did I give the customer an answer? Yes (after the tool call).\n    *   Is the answer one sentence? Yes.\n    *   Did I look anything up myself? No, I delegated the lookup.\n\n**(Self-Correction during generation):** Since I must *first* call the tool, I must output the tool call now.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "delegate",
+            "input": {
+              "agent": "librarian",
+              "task": "how many business days does express shipping take?"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "delegate",
+          "input": {
+            "agent": "librarian",
+            "task": "how many business days does express shipping take?"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 158,
+        "completion_tokens": 399,
+        "cached_tokens": 0,
+        "total_tokens": 557,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:08.365004Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1.  **Analyze the Request:** The user is asking a specific factual question: \"how many business days does express shipping take?\"\n\n2.  **Determine the Information Needed:** I need to find the shipping duration for express shipping.\n\n3.  **Identify Available Tools:** The only available tool is `delegate`, which allows me to ask the `librarian` to search the help-center knowledge base.\n\n4.  **Formulate the Plan:**\n    *   Call the `delegate` tool with the `librarian` agent and a task that asks for the answer to the shipping question.\n    *   Once the librarian provides the answer, I will synthesize it into a single-sentence response for the customer.\n\n5.  **Execute the Tool Call (Internal Monologue/Draft):**\n    *   *Tool:* `delegate(agent=\"librarian\", task=\"how many business days does express shipping take?\")`\n\n6.  **Anticipate the Librarian's Output (Self-Correction/Refinement):** The librarian will likely return some information about express shipping times (e.g., \"Express shipping typically takes 2-3 business days\").\n\n7.  **Construct the Final Answer (Based on the anticipated outcome):** The final response must be *one sentence*.\n\n8.  **Final Check against Constraints:**\n    *   Did I use the tool? Yes.\n    *   Did I give the customer an answer? Yes (after the tool call).\n    *   Is the answer one sentence? Yes.\n    *   Did I look anything up myself? No, I delegated the lookup.\n\n**(Self-Correction during generation):** Since I must *first* call the tool, I must output the tool call now.",
+          "tool_calls": [
+            {
+              "id": "call_nkt6742h",
+              "function": {
+                "index": 0,
+                "name": "delegate",
+                "arguments": {
+                  "agent": "librarian",
+                  "task": "how many business days does express shipping take?"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 5607809584,
+        "load_duration": 4462459,
+        "prompt_eval_count": 158,
+        "prompt_eval_duration": 191874000,
+        "eval_count": 399,
+        "eval_duration": 5407390000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Search the knowledge base with kb.search and reply with the fact that answers the question."
+        },
+        {
+          "role": "user",
+          "content": "how many business days does express shipping take?"
+        }
+      ],
+      "tools": [
+        {
+          "name": "kb.search",
+          "description": "Search the help-center knowledge base. Returns the best matching article.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "1. **Analyze the Request:** The user is asking \"how many business days does express shipping take?\".\n\n2. **Identify the Information Needed:** I need specific details about the delivery time (in business days) for \"express shipping\".\n\n3. **Determine the Tool:** The available tool is `kb.search`, which is designed to search a knowledge base. This is the appropriate tool to find specific policy details.\n\n4. **Formulate Search Queries:**\n    * \"express shipping delivery time\"\n    * \"business days for express shipping\"\n\n5. **Execute the Search (Simulated):** I will call `kb.search` with one of these queries.\n\n6. **Process the Search Results (Anticipated):** (Self-Correction/Refinement: I must actually call the tool to get the *real* answer based on the system prompt's expected behavior.)\n\n7. **Final Response Generation:** (Based on the tool output, I will extract the answer and present it to the user.)\n\n**(Self-Correction/Action):** Since I cannot *actually* run the tool in this thought block, I must generate the tool call as the first step.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "kb.search",
+            "input": {
+              "query": "how many business days does express shipping take"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "kb.search",
+          "input": {
+            "query": "how many business days does express shipping take"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 94,
+        "completion_tokens": 271,
+        "cached_tokens": 0,
+        "total_tokens": 365,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:12.473667Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Analyze the Request:** The user is asking \"how many business days does express shipping take?\".\n\n2. **Identify the Information Needed:** I need specific details about the delivery time (in business days) for \"express shipping\".\n\n3. **Determine the Tool:** The available tool is `kb.search`, which is designed to search a knowledge base. This is the appropriate tool to find specific policy details.\n\n4. **Formulate Search Queries:**\n    * \"express shipping delivery time\"\n    * \"business days for express shipping\"\n\n5. **Execute the Search (Simulated):** I will call `kb.search` with one of these queries.\n\n6. **Process the Search Results (Anticipated):** (Self-Correction/Refinement: I must actually call the tool to get the *real* answer based on the system prompt's expected behavior.)\n\n7. **Final Response Generation:** (Based on the tool output, I will extract the answer and present it to the user.)\n\n**(Self-Correction/Action):** Since I cannot *actually* run the tool in this thought block, I must generate the tool call as the first step.",
+          "tool_calls": [
+            {
+              "id": "call_sjv2jgsn",
+              "function": {
+                "index": 0,
+                "name": "kb.search",
+                "arguments": {
+                  "query": "how many business days does express shipping take"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 4108387750,
+        "load_duration": 4527708,
+        "prompt_eval_count": 94,
+        "prompt_eval_duration": 130610999,
+        "eval_count": 271,
+        "eval_duration": 3971228000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Search the knowledge base with kb.search and reply with the fact that answers the question."
+        },
+        {
+          "role": "user",
+          "content": "how many business days does express shipping take?"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1. **Analyze the Request:** The user is asking \"how many business days does express shipping take?\".\n\n2. **Identify the Information Needed:** I need specific details about the delivery time (in business days) for \"express shipping\".\n\n3. **Determine the Tool:** The available tool is `kb.search`, which is designed to search a knowledge base. This is the appropriate tool to find specific policy details.\n\n4. **Formulate Search Queries:**\n    * \"express shipping delivery time\"\n    * \"business days for express shipping\"\n\n5. **Execute the Search (Simulated):** I will call `kb.search` with one of these queries.\n\n6. **Process the Search Results (Anticipated):** (Self-Correction/Refinement: I must actually call the tool to get the *real* answer based on the system prompt's expected behavior.)\n\n7. **Final Response Generation:** (Based on the tool output, I will extract the answer and present it to the user.)\n\n**(Self-Correction/Action):** Since I cannot *actually* run the tool in this thought block, I must generate the tool call as the first step.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "kb.search",
+              "input": {
+                "query": "how many business days does express shipping take"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"text\":\"Standard shipping takes 5 business days. Express shipping takes 2 business days and costs $15.\",\"title\":\"Shipping times\"}",
+          "name": "kb.search",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "kb.search",
+          "description": "Search the help-center knowledge base. Returns the best matching article.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Express shipping takes 2 business days. It also costs $15.",
+        "thinking": "The user asked how many business days express shipping takes.\nI used the `kb.search` tool.\nThe search returned the following information: `{\"text\":\"Standard shipping takes 5 business days. Express shipping takes 2 business days and costs $15.\", \"title\":\"Shipping times\"}`.\n\nThe relevant fact is that express shipping takes 2 business days. I can now answer the user's question directly."
+      },
+      "usage": {
+        "prompt_tokens": 411,
+        "completion_tokens": 105,
+        "cached_tokens": 0,
+        "total_tokens": 516,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:14.049112Z",
+        "message": {
+          "role": "assistant",
+          "content": "Express shipping takes 2 business days. It also costs $15.",
+          "thinking": "The user asked how many business days express shipping takes.\nI used the `kb.search` tool.\nThe search returned the following information: `{\"text\":\"Standard shipping takes 5 business days. Express shipping takes 2 business days and costs $15.\", \"title\":\"Shipping times\"}`.\n\nThe relevant fact is that express shipping takes 2 business days. I can now answer the user's question directly."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1575024000,
+        "load_duration": 4843042,
+        "prompt_eval_count": 411,
+        "prompt_eval_duration": 248907000,
+        "eval_count": 105,
+        "eval_duration": 1318349000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You answer customers. You cannot look anything up yourself: give the question to the librarian with the delegate tool, then answer the customer in one sentence."
+        },
+        {
+          "role": "user",
+          "content": "A customer asks: how many business days does express shipping take?"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "1.  **Analyze the Request:** The user is asking a specific factual question: \"how many business days does express shipping take?\"\n\n2.  **Determine the Information Needed:** I need to find the shipping duration for express shipping.\n\n3.  **Identify Available Tools:** The only available tool is `delegate`, which allows me to ask the `librarian` to search the help-center knowledge base.\n\n4.  **Formulate the Plan:**\n    *   Call the `delegate` tool with the `librarian` agent and a task that asks for the answer to the shipping question.\n    *   Once the librarian provides the answer, I will synthesize it into a single-sentence response for the customer.\n\n5.  **Execute the Tool Call (Internal Monologue/Draft):**\n    *   *Tool:* `delegate(agent=\"librarian\", task=\"how many business days does express shipping take?\")`\n\n6.  **Anticipate the Librarian's Output (Self-Correction/Refinement):** The librarian will likely return some information about express shipping times (e.g., \"Express shipping typically takes 2-3 business days\").\n\n7.  **Construct the Final Answer (Based on the anticipated outcome):** The final response must be *one sentence*.\n\n8.  **Final Check against Constraints:**\n    *   Did I use the tool? Yes.\n    *   Did I give the customer an answer? Yes (after the tool call).\n    *   Is the answer one sentence? Yes.\n    *   Did I look anything up myself? No, I delegated the lookup.\n\n**(Self-Correction during generation):** Since I must *first* call the tool, I must output the tool call now.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "delegate",
+              "input": {
+                "agent": "librarian",
+                "task": "how many business days does express shipping take?"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"agent\":\"librarian\",\"answer\":\"Express shipping takes 2 business days. It also costs $15.\"}",
+          "name": "delegate",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "delegate",
+          "description": "Give a task to another agent and get its answer. The agents you can give tasks to:\n- librarian: searches the help-center knowledge base",
+          "input_schema": {
+            "properties": {
+              "agent": {
+                "enum": [
+                  "librarian"
+                ],
+                "type": "string"
+              },
+              "task": {
+                "description": "everything the agent needs to know to do the task",
+                "type": "string"
+              }
+            },
+            "required": [
+              "agent",
+              "task"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Express shipping typically takes 2 business days.",
+        "thinking": "The user asked how many business days express shipping takes.\nI used the `delegate` tool, and the librarian replied: \"Express shipping takes 2 business days. It also costs $15.\"\n\nI need to provide a one-sentence answer to the customer based on this information."
+      },
+      "usage": {
+        "prompt_tokens": 595,
+        "completion_tokens": 70,
+        "cached_tokens": 0,
+        "total_tokens": 665,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:37:15.356615Z",
+        "message": {
+          "role": "assistant",
+          "content": "Express shipping typically takes 2 business days.",
+          "thinking": "The user asked how many business days express shipping takes.\nI used the `delegate` tool, and the librarian replied: \"Express shipping takes 2 business days. It also costs $15.\"\n\nI need to provide a one-sentence answer to the customer based on this information."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1306889125,
+        "load_duration": 6661250,
+        "prompt_eval_count": 595,
+        "prompt_eval_duration": 345373000,
+        "eval_count": 70,
+        "eval_duration": 948171000
+      }
+    }
+  }
+]

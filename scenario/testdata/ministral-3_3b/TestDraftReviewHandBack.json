@@ -1,0 +1,456 @@
+[
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You write short, polite replies to customers. Reply with only the text of the reply."
+        },
+        {
+          "role": "user",
+          "content": "Write a reply of at most three sentences to a customer whose monitor delivery is late.\nReviewer feedback on your previous draft, if any: "
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "I apologize for the delay in your monitor delivery. We’re working to resolve this as quickly as possible. Could you please confirm your preferred delivery date?"
+      },
+      "usage": {
+        "prompt_tokens": 52,
+        "completion_tokens": 31,
+        "cached_tokens": 0,
+        "total_tokens": 83,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:03.07599Z",
+        "message": {
+          "role": "assistant",
+          "content": "I apologize for the delay in your monitor delivery. We’re working to resolve this as quickly as possible. Could you please confirm your preferred delivery date?"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 798845250,
+        "load_duration": 9280167,
+        "prompt_eval_count": 52,
+        "prompt_eval_duration": 97230000,
+        "eval_count": 31,
+        "eval_duration": 685668000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Call style.check once with the draft text exactly as given. If the result has ok true, reply with exactly APPROVED. Otherwise reply with REJECTED: followed by the problems it lists."
+        },
+        {
+          "role": "user",
+          "content": "Check this draft:\n\nI apologize for the delay in your monitor delivery. We’re working to resolve this as quickly as possible. Could you please confirm your preferred delivery date?"
+        }
+      ],
+      "tools": [
+        {
+          "name": "style.check",
+          "description": "Check a customer reply against the support style guide.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "style.check",
+            "input": {
+              "text": "I apologize for the delay in your monitor delivery. We’re working to resolve this as quickly as possible. Could you please confirm your preferred delivery date?"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "style.check",
+          "input": {
+            "text": "I apologize for the delay in your monitor delivery. We’re working to resolve this as quickly as possible. Could you please confirm your preferred delivery date?"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 131,
+        "completion_tokens": 40,
+        "cached_tokens": 0,
+        "total_tokens": 171,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:04.085619Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_wf58wnws",
+              "function": {
+                "index": 0,
+                "name": "style.check",
+                "arguments": {
+                  "text": "I apologize for the delay in your monitor delivery. We’re working to resolve this as quickly as possible. Could you please confirm your preferred delivery date?"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 989161458,
+        "load_duration": 9430125,
+        "prompt_eval_count": 131,
+        "prompt_eval_duration": 226151000,
+        "eval_count": 40,
+        "eval_duration": 745652000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Call style.check once with the draft text exactly as given. If the result has ok true, reply with exactly APPROVED. Otherwise reply with REJECTED: followed by the problems it lists."
+        },
+        {
+          "role": "user",
+          "content": "Check this draft:\n\nI apologize for the delay in your monitor delivery. We’re working to resolve this as quickly as possible. Could you please confirm your preferred delivery date?"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "style.check",
+              "input": {
+                "text": "I apologize for the delay in your monitor delivery. We’re working to resolve this as quickly as possible. Could you please confirm your preferred delivery date?"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"ok\":false,\"problems\":[\"it must mention the ticket number T-1042\"]}",
+          "name": "style.check",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "style.check",
+          "description": "Check a customer reply against the support style guide.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "REJECTED: The draft must include the ticket number T-1042."
+      },
+      "usage": {
+        "prompt_tokens": 195,
+        "completion_tokens": 19,
+        "cached_tokens": 0,
+        "total_tokens": 214,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:04.605311Z",
+        "message": {
+          "role": "assistant",
+          "content": "REJECTED: The draft must include the ticket number T-1042."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 518813750,
+        "load_duration": 8813209,
+        "prompt_eval_count": 195,
+        "prompt_eval_duration": 140732000,
+        "eval_count": 19,
+        "eval_duration": 364969000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You write short, polite replies to customers. Reply with only the text of the reply."
+        },
+        {
+          "role": "user",
+          "content": "Write a reply of at most three sentences to a customer whose monitor delivery is late.\nReviewer feedback on your previous draft, if any: REJECTED: The draft must include the ticket number T-1042."
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Thank you for your patience regarding your monitor order, T-1042. We sincerely apologize for the delay and will ensure it’s resolved promptly. Our team is working diligently to expedite your shipment."
+      },
+      "usage": {
+        "prompt_tokens": 69,
+        "completion_tokens": 46,
+        "cached_tokens": 0,
+        "total_tokens": 115,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:05.61902Z",
+        "message": {
+          "role": "assistant",
+          "content": "Thank you for your patience regarding your monitor order, T-1042. We sincerely apologize for the delay and will ensure it’s resolved promptly. Our team is working diligently to expedite your shipment."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1012989416,
+        "load_duration": 16865625,
+        "prompt_eval_count": 69,
+        "prompt_eval_duration": 69909000,
+        "eval_count": 46,
+        "eval_duration": 914477000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Call style.check once with the draft text exactly as given. If the result has ok true, reply with exactly APPROVED. Otherwise reply with REJECTED: followed by the problems it lists."
+        },
+        {
+          "role": "user",
+          "content": "Check this draft:\n\nThank you for your patience regarding your monitor order, T-1042. We sincerely apologize for the delay and will ensure it’s resolved promptly. Our team is working diligently to expedite your shipment."
+        }
+      ],
+      "tools": [
+        {
+          "name": "style.check",
+          "description": "Check a customer reply against the support style guide.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "style.check",
+            "input": {
+              "text": "Thank you for your patience regarding your monitor order, T-1042. We sincerely apologize for the delay and will ensure it’s resolved promptly. Our team is working diligently to expedite your shipment."
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "style.check",
+          "input": {
+            "text": "Thank you for your patience regarding your monitor order, T-1042. We sincerely apologize for the delay and will ensure it’s resolved promptly. Our team is working diligently to expedite your shipment."
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 146,
+        "completion_tokens": 55,
+        "cached_tokens": 0,
+        "total_tokens": 201,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:06.879875Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_iat8lmeb",
+              "function": {
+                "index": 0,
+                "name": "style.check",
+                "arguments": {
+                  "text": "Thank you for your patience regarding your monitor order, T-1042. We sincerely apologize for the delay and will ensure it’s resolved promptly. Our team is working diligently to expedite your shipment."
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1260121667,
+        "load_duration": 9888917,
+        "prompt_eval_count": 146,
+        "prompt_eval_duration": 99073000,
+        "eval_count": 55,
+        "eval_duration": 1144466000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Call style.check once with the draft text exactly as given. If the result has ok true, reply with exactly APPROVED. Otherwise reply with REJECTED: followed by the problems it lists."
+        },
+        {
+          "role": "user",
+          "content": "Check this draft:\n\nThank you for your patience regarding your monitor order, T-1042. We sincerely apologize for the delay and will ensure it’s resolved promptly. Our team is working diligently to expedite your shipment."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "style.check",
+              "input": {
+                "text": "Thank you for your patience regarding your monitor order, T-1042. We sincerely apologize for the delay and will ensure it’s resolved promptly. Our team is working diligently to expedite your shipment."
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"ok\":true,\"problems\":[]}",
+          "name": "style.check",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "style.check",
+          "description": "Check a customer reply against the support style guide.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "**APPROVED**"
+      },
+      "usage": {
+        "prompt_tokens": 212,
+        "completion_tokens": 7,
+        "cached_tokens": 0,
+        "total_tokens": 219,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:07.177336Z",
+        "message": {
+          "role": "assistant",
+          "content": "**APPROVED**"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 296818208,
+        "load_duration": 9901000,
+        "prompt_eval_count": 212,
+        "prompt_eval_duration": 130632000,
+        "eval_count": 7,
+        "eval_duration": 152314000
+      }
+    }
+  }
+]

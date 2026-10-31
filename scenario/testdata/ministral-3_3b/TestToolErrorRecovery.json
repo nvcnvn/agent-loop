@@ -1,0 +1,314 @@
+[
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer stock questions with the inventory.stock tool. If a tool returns an error, read it, fix the input and call the tool again."
+        },
+        {
+          "role": "user",
+          "content": "How many units of item 7731 do we have in stock? Pass the item number to the tool as given."
+        }
+      ],
+      "tools": [
+        {
+          "name": "inventory.stock",
+          "description": "Units in stock for a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "inventory.stock",
+            "input": {
+              "sku": "7731"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "inventory.stock",
+          "input": {
+            "sku": "7731"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 110,
+        "completion_tokens": 15,
+        "cached_tokens": 0,
+        "total_tokens": 125,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:18:57.426671Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_bxtzcx95",
+              "function": {
+                "index": 0,
+                "name": "inventory.stock",
+                "arguments": {
+                  "sku": "7731"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 415140000,
+        "load_duration": 7615625,
+        "prompt_eval_count": 110,
+        "prompt_eval_duration": 152680000,
+        "eval_count": 15,
+        "eval_duration": 240900000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer stock questions with the inventory.stock tool. If a tool returns an error, read it, fix the input and call the tool again."
+        },
+        {
+          "role": "user",
+          "content": "How many units of item 7731 do we have in stock? Pass the item number to the tool as given."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "inventory.stock",
+              "input": {
+                "sku": "7731"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"error\":\"unknown sku \\\"7731\\\": SKUs look like SKU-7731\"}",
+          "name": "inventory.stock",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "inventory.stock",
+          "description": "Units in stock for a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "The correct format for the SKU is `SKU-7731`. Let me check that for you.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "inventory.stock",
+            "input": {
+              "sku": "SKU-7731"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "inventory.stock",
+          "input": {
+            "sku": "SKU-7731"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 149,
+        "completion_tokens": 41,
+        "cached_tokens": 0,
+        "total_tokens": 190,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:18:58.311296Z",
+        "message": {
+          "role": "assistant",
+          "content": "The correct format for the SKU is `SKU-7731`. Let me check that for you.",
+          "tool_calls": [
+            {
+              "id": "call_lx8o5kw8",
+              "function": {
+                "index": 0,
+                "name": "inventory.stock",
+                "arguments": {
+                  "sku": "SKU-7731"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 884109917,
+        "load_duration": 7410750,
+        "prompt_eval_count": 149,
+        "prompt_eval_duration": 82115000,
+        "eval_count": 41,
+        "eval_duration": 791870000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Answer stock questions with the inventory.stock tool. If a tool returns an error, read it, fix the input and call the tool again."
+        },
+        {
+          "role": "user",
+          "content": "How many units of item 7731 do we have in stock? Pass the item number to the tool as given."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "inventory.stock",
+              "input": {
+                "sku": "7731"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"error\":\"unknown sku \\\"7731\\\": SKUs look like SKU-7731\"}",
+          "name": "inventory.stock",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "assistant",
+          "content": "The correct format for the SKU is `SKU-7731`. Let me check that for you.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "inventory.stock",
+              "input": {
+                "sku": "SKU-7731"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"in_stock\":42,\"sku\":\"SKU-7731\"}",
+          "name": "inventory.stock",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "inventory.stock",
+          "description": "Units in stock for a SKU.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "There are **42 units** of item **SKU-7731** in stock."
+      },
+      "usage": {
+        "prompt_tokens": 209,
+        "completion_tokens": 22,
+        "cached_tokens": 0,
+        "total_tokens": 231,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:18:58.889629Z",
+        "message": {
+          "role": "assistant",
+          "content": "There are **42 units** of item **SKU-7731** in stock."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 577847583,
+        "load_duration": 8416917,
+        "prompt_eval_count": 209,
+        "prompt_eval_duration": 83950000,
+        "eval_count": 22,
+        "eval_duration": 481275000
+      }
+    }
+  }
+]

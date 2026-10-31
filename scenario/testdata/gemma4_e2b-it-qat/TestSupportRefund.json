@@ -1,0 +1,620 @@
+[
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The user wants to perform several actions for a customer with the email `ada@example.com`:\n1.  **Find the customer** using their email address. (Tool: `crm.find_customer`)\n2.  **List their orders** using the retrieved customer ID. (Tool: `orders.list`)\n3.  **Refund the late order**. This requires an `order_id` and a `reason`.\n4.  **Provide a final response** to the customer including the refund ID.\n\nI need to execute these steps sequentially, using the output of one tool as the input for the next.\n\n**Step 1: Find the customer.**\nI will call `crm.find_customer` with the email `ada@example.com`.\n\n**Constraint Checklist \u0026 Confidence Score:**\n1.  Find the customer? Yes.\n2.  List their orders? Yes.\n3.  Refund the late one? Yes (but requires an `order_id` which I will get from the list).\n4.  Finish with one sentence including refund ID? Yes.\n5.  Use tools? Yes.\n6.  Never invent IDs? Yes.\n7.  Call one tool at a time and wait for the result? Yes.\n\n**Plan:**\n1. Call `crm.find_customer`.\n2. Wait for the result.\n3. If customer is found, call `orders.list` with the customer ID.\n4. Wait for the result.\n5. If orders are listed, identify the \"late\" one and call `orders.refund`.\n6. Wait for the result.\n7. Construct the final response.\n\nI will start with the first tool call.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "crm.find_customer",
+            "input": {
+              "email": "ada@example.com"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "crm.find_customer",
+          "input": {
+            "email": "ada@example.com"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 304,
+        "completion_tokens": 389,
+        "cached_tokens": 0,
+        "total_tokens": 693,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:36:39.113318Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants to perform several actions for a customer with the email `ada@example.com`:\n1.  **Find the customer** using their email address. (Tool: `crm.find_customer`)\n2.  **List their orders** using the retrieved customer ID. (Tool: `orders.list`)\n3.  **Refund the late order**. This requires an `order_id` and a `reason`.\n4.  **Provide a final response** to the customer including the refund ID.\n\nI need to execute these steps sequentially, using the output of one tool as the input for the next.\n\n**Step 1: Find the customer.**\nI will call `crm.find_customer` with the email `ada@example.com`.\n\n**Constraint Checklist \u0026 Confidence Score:**\n1.  Find the customer? Yes.\n2.  List their orders? Yes.\n3.  Refund the late one? Yes (but requires an `order_id` which I will get from the list).\n4.  Finish with one sentence including refund ID? Yes.\n5.  Use tools? Yes.\n6.  Never invent IDs? Yes.\n7.  Call one tool at a time and wait for the result? Yes.\n\n**Plan:**\n1. Call `crm.find_customer`.\n2. Wait for the result.\n3. If customer is found, call `orders.list` with the customer ID.\n4. Wait for the result.\n5. If orders are listed, identify the \"late\" one and call `orders.refund`.\n6. Wait for the result.\n7. Construct the final response.\n\nI will start with the first tool call.",
+          "tool_calls": [
+            {
+              "id": "call_wozxbsc8",
+              "function": {
+                "index": 0,
+                "name": "crm.find_customer",
+                "arguments": {
+                  "email": "ada@example.com"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 22786861417,
+        "load_duration": 17542522042,
+        "prompt_eval_count": 304,
+        "prompt_eval_duration": 659051000,
+        "eval_count": 389,
+        "eval_duration": 4581719000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants to perform several actions for a customer with the email `ada@example.com`:\n1.  **Find the customer** using their email address. (Tool: `crm.find_customer`)\n2.  **List their orders** using the retrieved customer ID. (Tool: `orders.list`)\n3.  **Refund the late order**. This requires an `order_id` and a `reason`.\n4.  **Provide a final response** to the customer including the refund ID.\n\nI need to execute these steps sequentially, using the output of one tool as the input for the next.\n\n**Step 1: Find the customer.**\nI will call `crm.find_customer` with the email `ada@example.com`.\n\n**Constraint Checklist \u0026 Confidence Score:**\n1.  Find the customer? Yes.\n2.  List their orders? Yes.\n3.  Refund the late one? Yes (but requires an `order_id` which I will get from the list).\n4.  Finish with one sentence including refund ID? Yes.\n5.  Use tools? Yes.\n6.  Never invent IDs? Yes.\n7.  Call one tool at a time and wait for the result? Yes.\n\n**Plan:**\n1. Call `crm.find_customer`.\n2. Wait for the result.\n3. If customer is found, call `orders.list` with the customer ID.\n4. Wait for the result.\n5. If orders are listed, identify the \"late\" one and call `orders.refund`.\n6. Wait for the result.\n7. Construct the final response.\n\nI will start with the first tool call.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The first step is complete. I found the customer with `customer_id`: \"C-17\".\n\nNow, the next step is to list their orders using `orders.list` with this `customer_id`.\nThe prompt mentions \"My monitor order is very late,\" so I expect the order list to contain an order that can be refunded.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "orders.list",
+            "input": {
+              "customer_id": "C-17"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "orders.list",
+          "input": {
+            "customer_id": "C-17"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 727,
+        "completion_tokens": 95,
+        "cached_tokens": 0,
+        "total_tokens": 822,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:36:40.327256Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The first step is complete. I found the customer with `customer_id`: \"C-17\".\n\nNow, the next step is to list their orders using `orders.list` with this `customer_id`.\nThe prompt mentions \"My monitor order is very late,\" so I expect the order list to contain an order that can be refunded.",
+          "tool_calls": [
+            {
+              "id": "call_5s31zqst",
+              "function": {
+                "index": 0,
+                "name": "orders.list",
+                "arguments": {
+                  "customer_id": "C-17"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1213421500,
+        "load_duration": 4108458,
+        "prompt_eval_count": 727,
+        "prompt_eval_duration": 111416000,
+        "eval_count": 95,
+        "eval_duration": 1094266000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants to perform several actions for a customer with the email `ada@example.com`:\n1.  **Find the customer** using their email address. (Tool: `crm.find_customer`)\n2.  **List their orders** using the retrieved customer ID. (Tool: `orders.list`)\n3.  **Refund the late order**. This requires an `order_id` and a `reason`.\n4.  **Provide a final response** to the customer including the refund ID.\n\nI need to execute these steps sequentially, using the output of one tool as the input for the next.\n\n**Step 1: Find the customer.**\nI will call `crm.find_customer` with the email `ada@example.com`.\n\n**Constraint Checklist \u0026 Confidence Score:**\n1.  Find the customer? Yes.\n2.  List their orders? Yes.\n3.  Refund the late one? Yes (but requires an `order_id` which I will get from the list).\n4.  Finish with one sentence including refund ID? Yes.\n5.  Use tools? Yes.\n6.  Never invent IDs? Yes.\n7.  Call one tool at a time and wait for the result? Yes.\n\n**Plan:**\n1. Call `crm.find_customer`.\n2. Wait for the result.\n3. If customer is found, call `orders.list` with the customer ID.\n4. Wait for the result.\n5. If orders are listed, identify the \"late\" one and call `orders.refund`.\n6. Wait for the result.\n7. Construct the final response.\n\nI will start with the first tool call.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The first step is complete. I found the customer with `customer_id`: \"C-17\".\n\nNow, the next step is to list their orders using `orders.list` with this `customer_id`.\nThe prompt mentions \"My monitor order is very late,\" so I expect the order list to contain an order that can be refunded.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "orders.list",
+              "input": {
+                "customer_id": "C-17"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"orders\":[{\"order_id\":\"O-301\",\"item\":\"keyboard\",\"status\":\"delivered\",\"total\":89},{\"order_id\":\"O-302\",\"item\":\"monitor\",\"status\":\"late\",\"total\":240,\"days_late\":9}]}",
+          "name": "orders.list",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The second step is complete. I have listed the orders for customer C-17.\nThe orders are:\n1. `order_id`: \"O-301\", item: \"keyboard\", status: \"delivered\"\n2. `order_id`: \"O-302\", item: \"monitor\", status: \"late\", total: 240, days_late: 9\n\nThe customer complained about the \"monitor order\" being late. Therefore, I should refund order \"O-302\".\n\nThe next step is to call `orders.refund` with `order_id` \"O-302\" and a reason.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "orders.refund",
+            "input": {
+              "order_id": "O-302",
+              "reason": "Monitor order was very late."
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "orders.refund",
+          "input": {
+            "order_id": "O-302",
+            "reason": "Monitor order was very late."
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 893,
+        "completion_tokens": 175,
+        "cached_tokens": 0,
+        "total_tokens": 1068,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:36:42.468117Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The second step is complete. I have listed the orders for customer C-17.\nThe orders are:\n1. `order_id`: \"O-301\", item: \"keyboard\", status: \"delivered\"\n2. `order_id`: \"O-302\", item: \"monitor\", status: \"late\", total: 240, days_late: 9\n\nThe customer complained about the \"monitor order\" being late. Therefore, I should refund order \"O-302\".\n\nThe next step is to call `orders.refund` with `order_id` \"O-302\" and a reason.",
+          "tool_calls": [
+            {
+              "id": "call_ea5wog3h",
+              "function": {
+                "index": 0,
+                "name": "orders.refund",
+                "arguments": {
+                  "order_id": "O-302",
+                  "reason": "Monitor order was very late."
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 2140472125,
+        "load_duration": 4190291,
+        "prompt_eval_count": 893,
+        "prompt_eval_duration": 100081000,
+        "eval_count": 175,
+        "eval_duration": 2032810000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a customer support agent. Use the tools to look things up and act; never invent IDs. Call one tool at a time and wait for its result. Tools that need a manager's approval ask for it themselves when you call them, so never ask the customer for approval. If a tool call comes back not approved, tell the customer it could not be done."
+        },
+        {
+          "role": "user",
+          "content": "Customer ada@example.com writes: \"My monitor order is very late. I want my money back.\" Find the customer, list their orders, and refund the late one. Finish with one sentence for the customer that includes the refund ID."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user wants to perform several actions for a customer with the email `ada@example.com`:\n1.  **Find the customer** using their email address. (Tool: `crm.find_customer`)\n2.  **List their orders** using the retrieved customer ID. (Tool: `orders.list`)\n3.  **Refund the late order**. This requires an `order_id` and a `reason`.\n4.  **Provide a final response** to the customer including the refund ID.\n\nI need to execute these steps sequentially, using the output of one tool as the input for the next.\n\n**Step 1: Find the customer.**\nI will call `crm.find_customer` with the email `ada@example.com`.\n\n**Constraint Checklist \u0026 Confidence Score:**\n1.  Find the customer? Yes.\n2.  List their orders? Yes.\n3.  Refund the late one? Yes (but requires an `order_id` which I will get from the list).\n4.  Finish with one sentence including refund ID? Yes.\n5.  Use tools? Yes.\n6.  Never invent IDs? Yes.\n7.  Call one tool at a time and wait for the result? Yes.\n\n**Plan:**\n1. Call `crm.find_customer`.\n2. Wait for the result.\n3. If customer is found, call `orders.list` with the customer ID.\n4. Wait for the result.\n5. If orders are listed, identify the \"late\" one and call `orders.refund`.\n6. Wait for the result.\n7. Construct the final response.\n\nI will start with the first tool call.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "crm.find_customer",
+              "input": {
+                "email": "ada@example.com"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"customer_id\":\"C-17\",\"name\":\"Ada Lovelace\"}",
+          "name": "crm.find_customer",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The first step is complete. I found the customer with `customer_id`: \"C-17\".\n\nNow, the next step is to list their orders using `orders.list` with this `customer_id`.\nThe prompt mentions \"My monitor order is very late,\" so I expect the order list to contain an order that can be refunded.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "orders.list",
+              "input": {
+                "customer_id": "C-17"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"orders\":[{\"order_id\":\"O-301\",\"item\":\"keyboard\",\"status\":\"delivered\",\"total\":89},{\"order_id\":\"O-302\",\"item\":\"monitor\",\"status\":\"late\",\"total\":240,\"days_late\":9}]}",
+          "name": "orders.list",
+          "tool_call_id": "call_0"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The second step is complete. I have listed the orders for customer C-17.\nThe orders are:\n1. `order_id`: \"O-301\", item: \"keyboard\", status: \"delivered\"\n2. `order_id`: \"O-302\", item: \"monitor\", status: \"late\", total: 240, days_late: 9\n\nThe customer complained about the \"monitor order\" being late. Therefore, I should refund order \"O-302\".\n\nThe next step is to call `orders.refund` with `order_id` \"O-302\" and a reason.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "orders.refund",
+              "input": {
+                "order_id": "O-302",
+                "reason": "Monitor order was very late."
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"amount\":240,\"order_id\":\"O-302\",\"refund_id\":\"R-9001\"}",
+          "name": "orders.refund",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "crm.find_customer",
+          "description": "Find a customer by email address.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "description": "List a customer's orders by customer ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "customer_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "customer_id"
+            ]
+          }
+        },
+        {
+          "name": "orders.refund",
+          "description": "Refund an order in full. Needs a human's approval.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_id",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Your refund for order O-302, which covers your late monitor order, has been processed successfully with refund ID R-9001.",
+        "thinking": "The third step is complete. I have successfully called the `orders.refund` tool.\nThe tool returned a `refund_id`: \"R-9001\".\n\nNow I need to fulfill the final requirement: \"Finish with one sentence for the customer that includes the refund ID.\"\nThe refund was for order O-302. The customer is Ada Lovelace.\n\nI will now construct the final response."
+      },
+      "usage": {
+        "prompt_tokens": 1111,
+        "completion_tokens": 122,
+        "cached_tokens": 0,
+        "total_tokens": 1233,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:36:43.999026Z",
+        "message": {
+          "role": "assistant",
+          "content": "Your refund for order O-302, which covers your late monitor order, has been processed successfully with refund ID R-9001.",
+          "thinking": "The third step is complete. I have successfully called the `orders.refund` tool.\nThe tool returned a `refund_id`: \"R-9001\".\n\nNow I need to fulfill the final requirement: \"Finish with one sentence for the customer that includes the refund ID.\"\nThe refund was for order O-302. The customer is Ada Lovelace.\n\nI will now construct the final response."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1518554917,
+        "load_duration": 4350917,
+        "prompt_eval_count": 1111,
+        "prompt_eval_duration": 126248000,
+        "eval_count": 122,
+        "eval_duration": 1383983000
+      }
+    }
+  }
+]

@@ -1,0 +1,380 @@
+[
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You answer customers. You cannot look anything up yourself: give the question to the librarian with the delegate tool, then answer the customer in one sentence."
+        },
+        {
+          "role": "user",
+          "content": "A customer asks: how many business days does express shipping take?"
+        }
+      ],
+      "tools": [
+        {
+          "name": "delegate",
+          "description": "Give a task to another agent and get its answer. The agents you can give tasks to:\n- librarian: searches the help-center knowledge base",
+          "input_schema": {
+            "properties": {
+              "agent": {
+                "enum": [
+                  "librarian"
+                ],
+                "type": "string"
+              },
+              "task": {
+                "description": "everything the agent needs to know to do the task",
+                "type": "string"
+              }
+            },
+            "required": [
+              "agent",
+              "task"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "delegate",
+            "input": {
+              "agent": "librarian",
+              "task": "Find the typical number of business days for express shipping in the help-center knowledge base."
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "delegate",
+          "input": {
+            "agent": "librarian",
+            "task": "Find the typical number of business days for express shipping in the help-center knowledge base."
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 149,
+        "completion_tokens": 34,
+        "cached_tokens": 0,
+        "total_tokens": 183,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:00.069901Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_rkj26opb",
+              "function": {
+                "index": 0,
+                "name": "delegate",
+                "arguments": {
+                  "agent": "librarian",
+                  "task": "Find the typical number of business days for express shipping in the help-center knowledge base."
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1162430334,
+        "load_duration": 11693250,
+        "prompt_eval_count": 149,
+        "prompt_eval_duration": 216224000,
+        "eval_count": 34,
+        "eval_duration": 916772000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Search the knowledge base with kb.search and reply with the fact that answers the question."
+        },
+        {
+          "role": "user",
+          "content": "Find the typical number of business days for express shipping in the help-center knowledge base."
+        }
+      ],
+      "tools": [
+        {
+          "name": "kb.search",
+          "description": "Search the help-center knowledge base. Returns the best matching article.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "kb.search",
+            "input": {
+              "query": "typical number of business days for express shipping"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "kb.search",
+          "input": {
+            "query": "typical number of business days for express shipping"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 93,
+        "completion_tokens": 19,
+        "cached_tokens": 0,
+        "total_tokens": 112,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:01.012155Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_hhbbjxay",
+              "function": {
+                "index": 0,
+                "name": "kb.search",
+                "arguments": {
+                  "query": "typical number of business days for express shipping"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 941628750,
+        "load_duration": 15050459,
+        "prompt_eval_count": 93,
+        "prompt_eval_duration": 269105000,
+        "eval_count": 19,
+        "eval_duration": 485116000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Search the knowledge base with kb.search and reply with the fact that answers the question."
+        },
+        {
+          "role": "user",
+          "content": "Find the typical number of business days for express shipping in the help-center knowledge base."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "kb.search",
+              "input": {
+                "query": "typical number of business days for express shipping"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"text\":\"Standard shipping takes 5 business days. Express shipping takes 2 business days and costs $15.\",\"title\":\"Shipping times\"}",
+          "name": "kb.search",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "kb.search",
+          "description": "Search the help-center knowledge base. Returns the best matching article.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "The typical number of business days for express shipping is **2 business days**."
+      },
+      "usage": {
+        "prompt_tokens": 143,
+        "completion_tokens": 16,
+        "cached_tokens": 0,
+        "total_tokens": 159,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:01.506224Z",
+        "message": {
+          "role": "assistant",
+          "content": "The typical number of business days for express shipping is **2 business days**."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 493215208,
+        "load_duration": 11005958,
+        "prompt_eval_count": 143,
+        "prompt_eval_duration": 105693000,
+        "eval_count": 16,
+        "eval_duration": 371979000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You answer customers. You cannot look anything up yourself: give the question to the librarian with the delegate tool, then answer the customer in one sentence."
+        },
+        {
+          "role": "user",
+          "content": "A customer asks: how many business days does express shipping take?"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "delegate",
+              "input": {
+                "agent": "librarian",
+                "task": "Find the typical number of business days for express shipping in the help-center knowledge base."
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"agent\":\"librarian\",\"answer\":\"The typical number of business days for express shipping is **2 business days**.\"}",
+          "name": "delegate",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "delegate",
+          "description": "Give a task to another agent and get its answer. The agents you can give tasks to:\n- librarian: searches the help-center knowledge base",
+          "input_schema": {
+            "properties": {
+              "agent": {
+                "enum": [
+                  "librarian"
+                ],
+                "type": "string"
+              },
+              "task": {
+                "description": "everything the agent needs to know to do the task",
+                "type": "string"
+              }
+            },
+            "required": [
+              "agent",
+              "task"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "Express shipping usually takes **2 business days**. Would you like details on any additional options or tracking?"
+      },
+      "usage": {
+        "prompt_tokens": 208,
+        "completion_tokens": 21,
+        "cached_tokens": 0,
+        "total_tokens": 229,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:02.275608Z",
+        "message": {
+          "role": "assistant",
+          "content": "Express shipping usually takes **2 business days**. Would you like details on any additional options or tracking?"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 768858375,
+        "load_duration": 13303042,
+        "prompt_eval_count": 208,
+        "prompt_eval_duration": 136314000,
+        "eval_count": 21,
+        "eval_duration": 573966000
+      }
+    }
+  }
+]

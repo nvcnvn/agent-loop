@@ -1,0 +1,185 @@
+[
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a team assistant. Look facts up in the team's notes with notes.search before answering."
+        },
+        {
+          "role": "user",
+          "content": "When and where is the Q3 offsite? Answer in one sentence."
+        }
+      ],
+      "tools": [
+        {
+          "name": "notes.search",
+          "description": "Search the team's notes.",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "description": "words to look for",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "notes.search",
+            "input": {
+              "query": "Q3 offsite"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "notes.search",
+          "input": {
+            "query": "Q3 offsite"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 94,
+        "completion_tokens": 14,
+        "cached_tokens": 0,
+        "total_tokens": 108,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:18.4346Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_de9grmi8",
+              "function": {
+                "index": 0,
+                "name": "notes.search",
+                "arguments": {
+                  "query": "Q3 offsite"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 388272917,
+        "load_duration": 9770375,
+        "prompt_eval_count": 94,
+        "prompt_eval_duration": 127445000,
+        "eval_count": 14,
+        "eval_duration": 245883000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "ministral-3:3b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a team assistant. Look facts up in the team's notes with notes.search before answering."
+        },
+        {
+          "role": "user",
+          "content": "When and where is the Q3 offsite? Answer in one sentence."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "notes.search",
+              "input": {
+                "query": "Q3 offsite"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"notes\":[{\"body\":\"The Q3 offsite is on 14 November in Lisbon. Flights are booked by the travel team.\",\"title\":\"Q3 offsite\"}]}",
+          "name": "notes.search",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "notes.search",
+          "description": "Search the team's notes.",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "description": "words to look for",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "The Q3 offsite is on **14 November in Lisbon**."
+      },
+      "usage": {
+        "prompt_tokens": 147,
+        "completion_tokens": 15,
+        "cached_tokens": 0,
+        "total_tokens": 162,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "ministral-3:3b",
+        "created_at": "2026-10-31T12:19:18.906235Z",
+        "message": {
+          "role": "assistant",
+          "content": "The Q3 offsite is on **14 November in Lisbon**."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 469877458,
+        "load_duration": 9319083,
+        "prompt_eval_count": 147,
+        "prompt_eval_duration": 101109000,
+        "eval_count": 15,
+        "eval_duration": 354624000
+      }
+    }
+  }
+]

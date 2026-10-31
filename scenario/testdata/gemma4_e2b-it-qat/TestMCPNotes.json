@@ -1,0 +1,190 @@
+[
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a team assistant. Look facts up in the team's notes with notes.search before answering."
+        },
+        {
+          "role": "user",
+          "content": "When and where is the Q3 offsite? Answer in one sentence."
+        }
+      ],
+      "tools": [
+        {
+          "name": "notes.search",
+          "description": "Search the team's notes.",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "description": "words to look for",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "The user is asking for the date and location of the \"Q3 offsite\".\nI need to search the team's notes to find this information.\nI will use the `notes.search` tool with a relevant query.\nOnce I get the search results, I will extract the date and location to formulate a single-sentence answer.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "notes.search",
+            "input": {
+              "query": "Q3 offsite date and location"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "notes.search",
+          "input": {
+            "query": "Q3 offsite date and location"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 106,
+        "completion_tokens": 96,
+        "cached_tokens": 0,
+        "total_tokens": 202,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:38:29.194751Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user is asking for the date and location of the \"Q3 offsite\".\nI need to search the team's notes to find this information.\nI will use the `notes.search` tool with a relevant query.\nOnce I get the search results, I will extract the date and location to formulate a single-sentence answer.",
+          "tool_calls": [
+            {
+              "id": "call_fmodhggd",
+              "function": {
+                "index": 0,
+                "name": "notes.search",
+                "arguments": {
+                  "query": "Q3 offsite date and location"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1556992542,
+        "load_duration": 7969375,
+        "prompt_eval_count": 106,
+        "prompt_eval_duration": 154575000,
+        "eval_count": 96,
+        "eval_duration": 1392111000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "gemma4:e2b-it-qat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a team assistant. Look facts up in the team's notes with notes.search before answering."
+        },
+        {
+          "role": "user",
+          "content": "When and where is the Q3 offsite? Answer in one sentence."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "The user is asking for the date and location of the \"Q3 offsite\".\nI need to search the team's notes to find this information.\nI will use the `notes.search` tool with a relevant query.\nOnce I get the search results, I will extract the date and location to formulate a single-sentence answer.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "notes.search",
+              "input": {
+                "query": "Q3 offsite date and location"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"notes\":[{\"body\":\"The Q3 offsite is on 14 November in Lisbon. Flights are booked by the travel team.\",\"title\":\"Q3 offsite\"}]}",
+          "name": "notes.search",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "notes.search",
+          "description": "Search the team's notes.",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "description": "words to look for",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "The Q3 offsite is scheduled for November 14th in Lisbon.",
+        "thinking": "The user asked for the date and location of the \"Q3 offsite\" in one sentence.\nThe search results provide the information: \"The Q3 offsite is on 14 November in Lisbon.\"\nI have all the necessary information to answer the request. I will now formulate the one-sentence answer."
+      },
+      "usage": {
+        "prompt_tokens": 254,
+        "completion_tokens": 83,
+        "cached_tokens": 0,
+        "total_tokens": 337,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "gemma4:e2b-it-qat",
+        "created_at": "2026-10-31T12:38:30.426516Z",
+        "message": {
+          "role": "assistant",
+          "content": "The Q3 offsite is scheduled for November 14th in Lisbon.",
+          "thinking": "The user asked for the date and location of the \"Q3 offsite\" in one sentence.\nThe search results provide the information: \"The Q3 offsite is on 14 November in Lisbon.\"\nI have all the necessary information to answer the request. I will now formulate the one-sentence answer."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 1230775917,
+        "load_duration": 5491167,
+        "prompt_eval_count": 254,
+        "prompt_eval_duration": 168800000,
+        "eval_count": 83,
+        "eval_duration": 1053807000
+      }
+    }
+  }
+]

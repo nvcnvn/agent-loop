@@ -1,6 +1,9 @@
 package core
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // IdempotencyHint matches the values in the schema and domain model.
 type IdempotencyHint string
@@ -46,4 +49,6 @@ type ToolDefinition struct {
 	SideEffect       SideEffectLevel  `json:"side_effect"`
 	Concurrency      ConcurrencyClass `json:"concurrency"`
 	RequiresApproval bool             `json:"requires_approval"`
+	// Timeout bounds each call; zero means only the run's deadline does.
+	Timeout time.Duration `json:"timeout,omitempty"`
 }

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -146,5 +147,28 @@ func TestExpiredApprovalCannotBeApproved(t *testing.T) {
 	a, err := s.GetApproval(ctx, core.DefaultTenant, id)
 	if err != nil || a.Status != "expired" || a.ExpiresAt.IsZero() {
 		t.Fatalf("approval=%+v err=%v", a, err)
+	}
+}
+
+func TestUpdateTaskChangesOnlyStatusOutputAndError(t *testing.T) {
+	ctx := context.Background()
+	s := store.NewMemStore()
+	id, err := s.CreateTask(ctx, store.Task{
+		TenantID: core.DefaultTenant, RunID: "run", ParentTaskID: "parent", AgentName: "a",
+		Status: core.TaskRunning, Depth: 2, Attempt: 3, Input: json.RawMessage(`{"prompt":"p"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateTask(ctx, store.Task{ID: id, TenantID: core.DefaultTenant, Status: core.TaskFailed, Error: "boom"}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := s.ListRunTasks(ctx, core.DefaultTenant, "run")
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("tasks=%+v err=%v", tasks, err)
+	}
+	got := tasks[0]
+	if got.Status != core.TaskFailed || got.Error != "boom" || got.ParentTaskID != "parent" || got.Depth != 2 || got.Attempt != 3 || string(got.Input) != `{"prompt":"p"}` {
+		t.Fatalf("task=%+v", got)
 	}
 }

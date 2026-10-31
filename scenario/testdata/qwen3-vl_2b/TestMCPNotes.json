@@ -1,0 +1,190 @@
+[
+  {
+    "request": {
+      "model": "qwen3-vl:2b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a team assistant. Look facts up in the team's notes with notes.search before answering."
+        },
+        {
+          "role": "user",
+          "content": "When and where is the Q3 offsite? Answer in one sentence."
+        }
+      ],
+      "tools": [
+        {
+          "name": "notes.search",
+          "description": "Search the team's notes.",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "description": "words to look for",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "thinking": "Okay, the user is asking when and where the Q3 offsite is. Let me check the team's notes.\n\nFirst, I need to search for the notes related to Q3 offsite. The function available is notes.search with a query parameter. I should look for \"Q3 offsite\" in the notes.\n\nWait, the user mentioned \"Q3 offsite\" but maybe there's a typo. Wait, the actual term might be \"Q3 offsite\" as in the third quarter, but maybe the notes have a different term. Let me check.\n\nWait, the user wrote \"Q3 offsite\". In the notes, maybe it's listed as \"Q3 offsite\" or similar. Let me call the search function with \"Q3 offsite\" as the query.\n\nWait, maybe the notes have a specific term like \"quarter 3 offsite\" or \"Q3 offsite\". Let me see. The function allows me to search by the query string. So I'll set the query to \"Q3 offsite\".\n\nWait, but maybe there's a typo in the user's question. Wait, the user says \"Q3 offsite\". Let me confirm.\n\nWait, the user is asking for the date and location of the Q3 offsite. The notes might have information about the date and location. So I need to search for \"Q3 offsite\" in the team's notes.\n\nLet me call the notes.search function with the query \"Q3 offsite\".\n\nI don't have any notes from the user's perspective, but the tool will help. So the correct approach is to search for \"Q3 offsite\" and then extract the answer from the search results.\n\nWait, but the user's question is \"When and where is the Q3 offsite?\" So the answer should include both date and location.\n\nAfter searching, if the search returns results, I need to parse them. For example, if the note says \"Q3 offsite is on 2023-10-15 at Conference Center A\", then the answer would be \"The Q3 offsite is on October 15, 2023, at Conference Center A.\"\n\nBut since I don't have the actual notes, I need to make a tool call to check the notes.",
+        "tool_calls": [
+          {
+            "id": "call_0",
+            "name": "notes.search",
+            "input": {
+              "query": "Q3 offsite"
+            }
+          }
+        ]
+      },
+      "tool_calls": [
+        {
+          "id": "call_0",
+          "name": "notes.search",
+          "input": {
+            "query": "Q3 offsite"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 191,
+        "completion_tokens": 497,
+        "cached_tokens": 0,
+        "total_tokens": 688,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "qwen3-vl:2b",
+        "created_at": "2026-10-31T12:30:47.557001Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "thinking": "Okay, the user is asking when and where the Q3 offsite is. Let me check the team's notes.\n\nFirst, I need to search for the notes related to Q3 offsite. The function available is notes.search with a query parameter. I should look for \"Q3 offsite\" in the notes.\n\nWait, the user mentioned \"Q3 offsite\" but maybe there's a typo. Wait, the actual term might be \"Q3 offsite\" as in the third quarter, but maybe the notes have a different term. Let me check.\n\nWait, the user wrote \"Q3 offsite\". In the notes, maybe it's listed as \"Q3 offsite\" or similar. Let me call the search function with \"Q3 offsite\" as the query.\n\nWait, maybe the notes have a specific term like \"quarter 3 offsite\" or \"Q3 offsite\". Let me see. The function allows me to search by the query string. So I'll set the query to \"Q3 offsite\".\n\nWait, but maybe there's a typo in the user's question. Wait, the user says \"Q3 offsite\". Let me confirm.\n\nWait, the user is asking for the date and location of the Q3 offsite. The notes might have information about the date and location. So I need to search for \"Q3 offsite\" in the team's notes.\n\nLet me call the notes.search function with the query \"Q3 offsite\".\n\nI don't have any notes from the user's perspective, but the tool will help. So the correct approach is to search for \"Q3 offsite\" and then extract the answer from the search results.\n\nWait, but the user's question is \"When and where is the Q3 offsite?\" So the answer should include both date and location.\n\nAfter searching, if the search returns results, I need to parse them. For example, if the note says \"Q3 offsite is on 2023-10-15 at Conference Center A\", then the answer would be \"The Q3 offsite is on October 15, 2023, at Conference Center A.\"\n\nBut since I don't have the actual notes, I need to make a tool call to check the notes.",
+          "tool_calls": [
+            {
+              "id": "call_y975249b",
+              "function": {
+                "index": 0,
+                "name": "notes.search",
+                "arguments": {
+                  "query": "Q3 offsite"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 5015614334,
+        "load_duration": 5285292,
+        "prompt_eval_count": 191,
+        "prompt_eval_duration": 109611000,
+        "eval_count": 497,
+        "eval_duration": 4892581000
+      }
+    }
+  },
+  {
+    "request": {
+      "model": "qwen3-vl:2b",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a team assistant. Look facts up in the team's notes with notes.search before answering."
+        },
+        {
+          "role": "user",
+          "content": "When and where is the Q3 offsite? Answer in one sentence."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "thinking": "Okay, the user is asking when and where the Q3 offsite is. Let me check the team's notes.\n\nFirst, I need to search for the notes related to Q3 offsite. The function available is notes.search with a query parameter. I should look for \"Q3 offsite\" in the notes.\n\nWait, the user mentioned \"Q3 offsite\" but maybe there's a typo. Wait, the actual term might be \"Q3 offsite\" as in the third quarter, but maybe the notes have a different term. Let me check.\n\nWait, the user wrote \"Q3 offsite\". In the notes, maybe it's listed as \"Q3 offsite\" or similar. Let me call the search function with \"Q3 offsite\" as the query.\n\nWait, maybe the notes have a specific term like \"quarter 3 offsite\" or \"Q3 offsite\". Let me see. The function allows me to search by the query string. So I'll set the query to \"Q3 offsite\".\n\nWait, but maybe there's a typo in the user's question. Wait, the user says \"Q3 offsite\". Let me confirm.\n\nWait, the user is asking for the date and location of the Q3 offsite. The notes might have information about the date and location. So I need to search for \"Q3 offsite\" in the team's notes.\n\nLet me call the notes.search function with the query \"Q3 offsite\".\n\nI don't have any notes from the user's perspective, but the tool will help. So the correct approach is to search for \"Q3 offsite\" and then extract the answer from the search results.\n\nWait, but the user's question is \"When and where is the Q3 offsite?\" So the answer should include both date and location.\n\nAfter searching, if the search returns results, I need to parse them. For example, if the note says \"Q3 offsite is on 2023-10-15 at Conference Center A\", then the answer would be \"The Q3 offsite is on October 15, 2023, at Conference Center A.\"\n\nBut since I don't have the actual notes, I need to make a tool call to check the notes.",
+          "tool_calls": [
+            {
+              "id": "call_0",
+              "name": "notes.search",
+              "input": {
+                "query": "Q3 offsite"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"notes\":[{\"body\":\"The Q3 offsite is on 14 November in Lisbon. Flights are booked by the travel team.\",\"title\":\"Q3 offsite\"}]}",
+          "name": "notes.search",
+          "tool_call_id": "call_0"
+        }
+      ],
+      "tools": [
+        {
+          "name": "notes.search",
+          "description": "Search the team's notes.",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "description": "words to look for",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "response": {
+      "message": {
+        "role": "assistant",
+        "content": "The Q3 offsite is on 14 November in Lisbon.",
+        "thinking": "Okay, let me see. The user asked when and where the Q3 offsite is. I called the notes.search function with \"Q3 offsite\" and got a response. The note says \"The Q3 offsite is on 14 November in Lisbon. Flights are booked by the travel team.\" So the answer should be straightforward. The user wants a one-sentence answer, so I need to put that into the correct format.\n\nWait, the note mentions 14 November in Lisbon. So the answer would be \"The Q3 offsite is on 14 November in Lisbon.\"\n\nWait, the user said \"in one sentence\", so combining the date and location. Let me check the note again. The note says \"on 14 November in Lisbon\". So the answer is \"The Q3 offsite is on 14 November in Lisbon.\"\n\nYes, that's correct. So I'll use that information. Since the tool response has the exact info, I can answer directly."
+      },
+      "usage": {
+        "prompt_tokens": 736,
+        "completion_tokens": 222,
+        "cached_tokens": 0,
+        "total_tokens": 958,
+        "cost_units": 0,
+        "model_calls": 1,
+        "tool_calls": 0,
+        "sub_agents": 0,
+        "runtime": 0
+      },
+      "raw": {
+        "model": "qwen3-vl:2b",
+        "created_at": "2026-10-31T12:30:49.859925Z",
+        "message": {
+          "role": "assistant",
+          "content": "The Q3 offsite is on 14 November in Lisbon.",
+          "thinking": "Okay, let me see. The user asked when and where the Q3 offsite is. I called the notes.search function with \"Q3 offsite\" and got a response. The note says \"The Q3 offsite is on 14 November in Lisbon. Flights are booked by the travel team.\" So the answer should be straightforward. The user wants a one-sentence answer, so I need to put that into the correct format.\n\nWait, the note mentions 14 November in Lisbon. So the answer would be \"The Q3 offsite is on 14 November in Lisbon.\"\n\nWait, the user said \"in one sentence\", so combining the date and location. Let me check the note again. The note says \"on 14 November in Lisbon\". So the answer is \"The Q3 offsite is on 14 November in Lisbon.\"\n\nYes, that's correct. So I'll use that information. Since the tool response has the exact info, I can answer directly."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 2301056167,
+        "load_duration": 4799667,
+        "prompt_eval_count": 736,
+        "prompt_eval_duration": 73535000,
+        "eval_count": 222,
+        "eval_duration": 2218293000
+      }
+    }
+  }
+]
