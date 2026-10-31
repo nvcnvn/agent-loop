@@ -21,7 +21,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/nvcnvn/agent-loop/api"
@@ -36,6 +38,7 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	debug := flag.Bool("debug", false, "serve the debug console and /v1/debug/* (exposes agent instructions)")
+	drain := flag.Duration("shutdown-timeout", 30*time.Second, "on SIGINT/SIGTERM, how long to let requests and runs finish before checkpointing runs")
 	flag.Parse()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
@@ -63,9 +66,26 @@ func main() {
 
 	srv := api.NewServer(orch, persistence)
 	srv.Debug = *debug
+	hs := srv.HTTPServer(*addr)
+	signals, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- hs.ListenAndServe() }()
 	slog.Info("listening", "addr", *addr, "debug", *debug)
-	if err := srv.HTTPServer(*addr).ListenAndServe(); err != nil {
+	select {
+	case err := <-serveErr:
 		fatal("serve", err)
+	case <-signals.Done():
+	}
+
+	slog.Info("shutting down", "timeout", *drain)
+	ctx, cancel := context.WithTimeout(context.Background(), *drain)
+	defer cancel()
+	if err := hs.Shutdown(ctx); err != nil {
+		slog.Error("http shutdown", "err", err)
+	}
+	if err := orch.Shutdown(ctx); err != nil {
+		slog.Warn("runs still executing were checkpointed for the next start", "err", err)
 	}
 }
 

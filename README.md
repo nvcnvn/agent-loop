@@ -36,7 +36,7 @@ The recommended first vertical slice from
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
 | Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
-| HTTP server example, logging JSON (`log/slog`) to stdout | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
+| HTTP server example: JSON logs (`log/slog`) to stdout, resumes unfinished runs at startup, graceful shutdown on SIGINT/SIGTERM (`-shutdown-timeout`) | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
 | Programmatic example: planner -> parallel researchers -> synthesizer + replay | [cmd/example-workflow/main.go](cmd/example-workflow/main.go) |
 
 The MCP client, snapshot/compaction, and pgvector memory are still

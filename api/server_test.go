@@ -114,6 +114,37 @@ func TestReadyzChecksStore(t *testing.T) {
 	}
 }
 
+func TestHTTPShutdownClosesStreams(t *testing.T) {
+	s := store.NewMemStore()
+	gate := gatedProvider{release: make(chan struct{})}
+	defer close(gate.release)
+	orch := runtime.NewOrchestrator(s, tool.NewRegistry(), []runtime.Agent{{Name: "gated", Model: "m", Provider: gate}})
+	hs := api.NewServer(orch, s).HTTPServer("")
+	srv := httptest.NewUnstartedServer(hs.Handler)
+	srv.Config = hs
+	srv.Start()
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/runs/"+string(runID)+"/stream", nil)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if err := hs.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown blocked by an open stream: %v", err)
+	}
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("stream did not end cleanly: %v", err)
+	}
+}
+
 func TestHTTPServerTimeouts(t *testing.T) {
 	s := store.NewMemStore()
 	hs := api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s).HTTPServer("")

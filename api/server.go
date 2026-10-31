@@ -36,6 +36,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
@@ -59,22 +60,31 @@ type Server struct {
 	Log *slog.Logger
 	// Metrics, when set, is served at /metrics and records HTTP requests; NewServer uses Orch.Metrics.
 	Metrics *observe.Metrics
+
+	streamsClosed chan struct{}
+	closeStreams  sync.Once
 }
 
 func NewServer(orch *runtime.Orchestrator, s store.Store) *Server {
-	return &Server{Orch: orch, Store: s, MaxBodyBytes: 1 << 20, Log: slog.Default(), Metrics: orch.Metrics}
+	return &Server{Orch: orch, Store: s, MaxBodyBytes: 1 << 20, Log: slog.Default(), Metrics: orch.Metrics, streamsClosed: make(chan struct{})}
 }
 
 // HTTPServer returns an http.Server for Handler with read and idle timeouts.
 func (s *Server) HTTPServer(addr string) *http.Server {
+	if s.streamsClosed == nil {
+		s.streamsClosed = make(chan struct{})
+	}
 	// No WriteTimeout: SSE streams stay open for the whole run.
-	return &http.Server{
+	hs := &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
+	// Shutdown waits for active requests, which an open SSE stream never stops being.
+	hs.RegisterOnShutdown(func() { s.closeStreams.Do(func() { close(s.streamsClosed) }) })
+	return hs
 }
 
 // Handler returns an http.Handler with all v1 routes wired.
@@ -545,6 +555,8 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-s.streamsClosed:
 			return
 		case ev, ok := <-ch:
 			if !ok {

@@ -645,6 +645,122 @@ func TestRecoverResumesInterruptedRun(t *testing.T) {
 	}
 }
 
+// Acceptance: §Observability and Operations #3 – graceful shutdown drains runs.
+func TestShutdownDrainsRuns(t *testing.T) {
+	release := make(gateProvider)
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "gated", Model: "m", Provider: release}})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	in := runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}}}}}}
+	runID, err := orch.StartRun(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- orch.Shutdown(ctx) }()
+	for {
+		if _, err := orch.StartRun(ctx, in); errors.Is(err, core.ErrOverloaded) {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case err := <-shutdown:
+		t.Fatalf("shutdown returned before the run finished: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-shutdown; err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil || res.Status != core.RunSucceeded {
+		t.Fatalf("drained run status=%s err=%v", res.Status, err)
+	}
+}
+
+// Acceptance: §Observability and Operations #3 – runs left at the deadline resume after restart.
+func TestShutdownCheckpointsRunsForRecovery(t *testing.T) {
+	release := make(gateProvider)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "gated", Model: "m", Provider: release}})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for run, _ := s.GetRun(ctx, core.DefaultTenant, runID); run.Status != core.RunRunning; run, _ = s.GetRun(ctx, core.DefaultTenant, runID) {
+		if ctx.Err() != nil {
+			t.Fatal("run never started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	short, stop := context.WithTimeout(ctx, 30*time.Millisecond)
+	defer stop()
+	if err := orch.Shutdown(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown err=%v want DeadlineExceeded", err)
+	}
+	run, err := s.GetRun(ctx, core.DefaultTenant, runID)
+	if err != nil || run.Status.Terminal() {
+		t.Fatalf("checkpointed run=%+v err=%v; want it left unfinished", run, err)
+	}
+	events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		var p struct{ Status core.RunStatus }
+		if ev.Type == core.EvRunStateChanged && json.Unmarshal(ev.Payload, &p) == nil && p.Status.Terminal() {
+			t.Fatalf("terminal event written for a checkpointed run: %s", ev.Payload)
+		}
+	}
+
+	restarted := runtime.NewOrchestrator(s, orch.Tools, []runtime.Agent{{Name: "gated", Model: "m", Provider: release}})
+	close(release)
+	if n, err := restarted.Recover(ctx); err != nil || n != 1 {
+		t.Fatalf("recovered %d err=%v", n, err)
+	}
+	if res, err := restarted.Wait(ctx, core.DefaultTenant, runID); err != nil || res.Status != core.RunSucceeded {
+		t.Fatalf("recovered run status=%s err=%v", res.Status, err)
+	}
+}
+
+func TestShutdownLeavesQueuedRunQueued(t *testing.T) {
+	release := make(gateProvider)
+	defer close(release)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "gated", Model: "m", Provider: release}})
+	orch.MaxActiveRuns = 1
+	ctx, cancel := waitCtx()
+	defer cancel()
+	in := runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}}}}}}
+	first, _ := orch.StartRun(ctx, in)
+	for run, _ := s.GetRun(ctx, core.DefaultTenant, first); run.Status != core.RunRunning; run, _ = s.GetRun(ctx, core.DefaultTenant, first) {
+		if ctx.Err() != nil {
+			t.Fatal("run never started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	queued, err := orch.StartRun(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, stop := context.WithTimeout(ctx, 30*time.Millisecond)
+	defer stop()
+	if err := orch.Shutdown(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown err=%v", err)
+	}
+	for id, want := range map[core.RunID]core.RunStatus{first: core.RunRunning, queued: core.RunQueued} {
+		if run, err := s.GetRun(ctx, core.DefaultTenant, id); err != nil || run.Status != want {
+			t.Fatalf("run status=%s err=%v want %s", run.Status, err, want)
+		}
+	}
+	unfinished, _ := s.ListUnfinishedRuns(ctx)
+	if len(unfinished) != 2 {
+		t.Fatalf("unfinished runs=%d want 2", len(unfinished))
+	}
+}
+
 func TestResumeParallelStageAndPendingApproval(t *testing.T) {
 	b, c := model.NewMockProvider(), model.NewMockProvider()
 	orch, s, sid := setup(t, []runtime.Agent{

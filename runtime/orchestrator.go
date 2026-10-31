@@ -134,7 +134,11 @@ type Orchestrator struct {
 
 	mu        sync.Mutex
 	runs      map[core.RunID]*runState
-	inflight  int // admitted runs, from admit until queueAndExecute returns
+	inflight  int            // admitted runs, from admit until queueAndExecute returns
+	admitted  sync.WaitGroup // counts the same runs, for Shutdown
+	closing   bool
+	base      context.Context // parent of every run context; Shutdown cancels it
+	stopRuns  context.CancelCauseFunc
 	capacity  int // MaxActiveRuns+MaxQueuedRuns when slots was made
 	slots     chan struct{}
 	queued    atomic.Int64
@@ -148,7 +152,7 @@ type runState struct {
 	lastEvent string
 
 	tenant  core.TenantID
-	cancel  context.CancelFunc
+	cancel  context.CancelCauseFunc
 	done    chan struct{}
 	result  *Result
 	outputs map[string]string
@@ -196,6 +200,7 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		},
 		runs: map[core.RunID]*runState{},
 	}
+	o.base, o.stopRuns = context.WithCancelCause(context.Background())
 	o.Metrics.Gauge("agentloop_runs_queued", func() float64 { return float64(o.QueuedRuns()) })
 	o.Metrics.Gauge("agentloop_runs_executing", func() float64 { return float64(o.executing.Load()) })
 	return o
@@ -221,7 +226,7 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		}
 	}
 
-	if err := o.admit(); err != nil {
+	if err := o.admit(false); err != nil {
 		return "", err
 	}
 	started := false
@@ -268,12 +273,16 @@ func (o *Orchestrator) launch(runID core.RunID, in StartRunInput) error {
 // claim registers the run as executing in this process, or returns
 // core.ErrConflict if it already is.
 func (o *Orchestrator) claim(runID core.RunID, tenant core.TenantID) (context.Context, *runState, error) {
-	runCtx, cancel := context.WithCancel(context.Background())
+	parent := o.base
+	if parent == nil {
+		parent = context.Background()
+	}
+	runCtx, cancel := context.WithCancelCause(parent)
 	st := &runState{lastAt: time.Now(), tenant: tenant, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if _, running := o.runs[runID]; running {
-		cancel()
+		cancel(nil)
 		return nil, nil, fmt.Errorf("run %s is already executing: %w", runID, core.ErrConflict)
 	}
 	o.runs[runID] = st
@@ -282,7 +291,7 @@ func (o *Orchestrator) claim(runID core.RunID, tenant core.TenantID) (context.Co
 
 // unclaim undoes a claim whose run never started.
 func (o *Orchestrator) unclaim(runID core.RunID, st *runState) {
-	st.cancel()
+	st.cancel(nil)
 	o.mu.Lock()
 	delete(o.runs, runID)
 	o.mu.Unlock()
@@ -352,11 +361,7 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 	if err := o.Approvals.CancelRunApprovals(ctx, run.TenantID, run.ID); err != nil {
 		return err
 	}
-	if force {
-		o.mu.Lock()
-		o.inflight++
-		o.mu.Unlock()
-	} else if err := o.admit(); err != nil {
+	if err := o.admit(force); err != nil {
 		return err
 	}
 	usage := run.Usage
@@ -459,18 +464,23 @@ func (c *completedTasks) count() int {
 }
 
 // admit reserves room for one more executing or queued run, or returns
-// core.ErrOverloaded. release gives the room back.
-func (o *Orchestrator) admit() error {
+// core.ErrOverloaded when the queue is full (unless force) or the
+// orchestrator is shutting down. release gives the room back.
+func (o *Orchestrator) admit(force bool) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.closing {
+		return fmt.Errorf("%w: shutting down", core.ErrOverloaded)
+	}
 	if o.slots == nil && o.MaxActiveRuns > 0 {
 		o.slots = make(chan struct{}, o.MaxActiveRuns)
 		o.capacity = o.MaxActiveRuns + o.MaxQueuedRuns
 	}
-	if o.slots != nil && o.inflight >= o.capacity {
+	if !force && o.slots != nil && o.inflight >= o.capacity {
 		return fmt.Errorf("%w: %d runs executing or queued", core.ErrOverloaded, o.capacity)
 	}
 	o.inflight++
+	o.admitted.Add(1)
 	return nil
 }
 
@@ -478,6 +488,34 @@ func (o *Orchestrator) release() {
 	o.mu.Lock()
 	o.inflight--
 	o.mu.Unlock()
+	o.admitted.Done()
+}
+
+// errShutdown is the cancellation cause of runs that Shutdown checkpoints.
+var errShutdown = errors.New("orchestrator shutting down")
+
+// Shutdown stops admitting runs and waits for admitted ones to finish. When
+// ctx ends first, it stops the remaining runs without recording a terminal
+// status, so Recover resumes them in the next process, and returns ctx.Err().
+// Wait on such a run returns core.ErrNotFound. It needs an orchestrator made
+// by NewOrchestrator.
+func (o *Orchestrator) Shutdown(ctx context.Context) error {
+	o.mu.Lock()
+	o.closing = true
+	o.mu.Unlock()
+	drained := make(chan struct{})
+	go func() {
+		o.admitted.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		return nil
+	case <-ctx.Done():
+	}
+	o.stopRuns(errShutdown)
+	<-drained
+	return ctx.Err()
 }
 
 // queueAndExecute waits for the run's tenant, workflow and global slots, then
@@ -601,7 +639,7 @@ func (o *Orchestrator) Cancel(ctx context.Context, tenant core.TenantID, runID c
 	st, ok := o.runs[runID]
 	o.mu.Unlock()
 	if ok && st.tenant == tenant {
-		st.cancel()
+		st.cancel(nil)
 		return nil
 	}
 	run, err := o.Store.GetRun(ctx, tenant, runID)
@@ -679,6 +717,17 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	usage.Runtime += time.Since(startedAt)
 
 	stopIdleWatch()
+
+	if finalStatus == core.RunCanceled && errors.Is(context.Cause(ctx), errShutdown) {
+		o.logErr(ctx, "update run usage", o.Store.UpdateRunUsage(context.Background(), in.TenantID, runID, usage), "run_id", runID)
+		o.LoopDet.Reset(runID)
+		o.Budget.Forget(runID)
+		o.mu.Lock()
+		delete(o.runs, runID)
+		o.mu.Unlock()
+		log.InfoContext(ctx, "run checkpointed for shutdown", "status_left", finalStatus)
+		return
+	}
 
 	cur, err := o.Store.GetRun(context.Background(), in.TenantID, runID)
 	if err == nil {

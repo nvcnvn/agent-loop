@@ -315,7 +315,9 @@ Requirements:
 - [x] Run timeline view data model (events, tasks, and the debug console).
 
 Operational requirements:
-- [ ] **Blocker:** Graceful shutdown: stop accepting work, drain or checkpoint in-flight runs.
+- [x] Graceful shutdown: on SIGINT/SIGTERM `cmd/agent-loop` stops accepting requests and runs, closes
+  SSE streams, lets runs drain for `-shutdown-timeout`, then checkpoints the rest (left unfinished
+  for `Recover`).
 - [x] Job recovery after process restart: `cmd/agent-loop` calls `Orchestrator.Recover`, which resumes
   every unfinished run. It assumes one process executes runs (see run ownership by lease below).
 - [x] Liveness endpoint (`/healthz`).
