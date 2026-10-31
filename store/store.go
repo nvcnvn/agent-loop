@@ -160,6 +160,8 @@ type ArtifactStore interface {
 // Both MemStore (in this package) and the PostgreSQL driver (subpackage pg)
 // satisfy it.
 type Store interface {
+	// Ping reports whether the backing database is reachable.
+	Ping(ctx context.Context) error
 	EventStore
 	SessionStore
 	RunStore
@@ -207,6 +209,9 @@ func NewMemStore() *MemStore {
 		subsByRun:  map[core.RunID]map[int]chan core.Event{},
 	}
 }
+
+// Ping always succeeds; there is no database to reach.
+func (m *MemStore) Ping(context.Context) error { return nil }
 
 // ---- Session ----
 

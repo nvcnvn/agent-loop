@@ -12,6 +12,8 @@
 //	GET    /v1/runs/{rid}/stream     (SSE; honours Last-Event-ID)
 //	POST   /v1/runs/{rid}/cancel
 //	POST   /v1/approvals/{aid}
+//	GET    /healthz                  (liveness)
+//	GET    /readyz                   (readiness: the store answers a ping)
 //
 // With Server.Debug set it also serves the debug console at / and /ui/, and:
 //
@@ -27,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -96,12 +99,24 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("GET /readyz", s.readyz)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.MaxBodyBytes > 0 {
 			r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.Store.Ping(ctx); err != nil {
+		slog.ErrorContext(ctx, "readiness ping failed", "err", err)
+		writeErr(w, http.StatusServiceUnavailable, "not_ready", "store unreachable")
+		return
+	}
+	_, _ = w.Write([]byte("ok"))
 }
 
 func (s *Server) debugConsole(w http.ResponseWriter, r *http.Request) {

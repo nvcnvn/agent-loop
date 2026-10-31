@@ -56,6 +56,9 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 // NewFromPool wraps an existing pool (useful in tests).
 func NewFromPool(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
+// Ping checks that PostgreSQL answers.
+func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+
 // Close releases the underlying pool.
 func (s *Store) Close() { s.pool.Close() }
 

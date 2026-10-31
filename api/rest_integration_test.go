@@ -131,7 +131,7 @@ func waitForHealth(ctx context.Context, t *testing.T, client *http.Client, baseU
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/healthz", nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/readyz", nil)
 		resp, err := client.Do(req)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			_ = resp.Body.Close()

@@ -33,7 +33,7 @@ The recommended first vertical slice from
 | Loop / stall detector | [policy/loop.go](policy/loop.go) |
 | Orchestrator with sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`), parallel tool calls for read-safe tools, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
-| REST + SSE API with `Last-Event-ID` resume and heartbeats; read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
+| REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
 | Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
 | HTTP server example | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
 | Programmatic example: planner -> parallel researchers -> synthesizer + replay | [cmd/example-workflow/main.go](cmd/example-workflow/main.go) |

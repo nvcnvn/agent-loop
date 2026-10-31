@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -46,6 +47,33 @@ func TestOversizedBodyRejected(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status=%d want 413", resp.StatusCode)
+	}
+}
+
+type downStore struct{ *store.MemStore }
+
+func (downStore) Ping(context.Context) error { return errors.New("database unreachable") }
+
+func TestReadyzChecksStore(t *testing.T) {
+	for _, tc := range []struct {
+		store    store.Store
+		want     int
+		wantBody string
+	}{
+		{store.NewMemStore(), http.StatusOK, "ok"},
+		{downStore{store.NewMemStore()}, http.StatusServiceUnavailable, "store unreachable"},
+	} {
+		srv := httptest.NewServer(api.NewServer(runtime.NewOrchestrator(tc.store, tool.NewRegistry(), nil), tc.store).Handler())
+		resp, err := srv.Client().Get(srv.URL + "/readyz")
+		srv.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != tc.want || !strings.Contains(string(body), tc.wantBody) {
+			t.Fatalf("%T: status=%d body=%s want %d %q", tc.store, resp.StatusCode, body, tc.want, tc.wantBody)
+		}
 	}
 }
 

@@ -234,6 +234,17 @@ type MemoryStore interface {
     WriteMemory(ctx context.Context, item MemoryItem) error
     SearchMemory(ctx context.Context, query MemoryQuery) ([]MemoryMatch, error)
 }
+
+// Store is what runtime and api take; /readyz calls Ping.
+type Store interface {
+    Ping(ctx context.Context) error
+    EventStore
+    SessionStore
+    RunStore
+    TaskStore
+    ApprovalStore
+    ArtifactStore
+}
 ```
 
 ## Model Provider Contract

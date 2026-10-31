@@ -307,7 +307,7 @@ Operational requirements:
 - [ ] **Blocker:** Graceful shutdown: stop accepting work, drain or checkpoint in-flight runs.
 - [ ] **Blocker:** Job recovery after process restart (runs left `running` stay that way forever).
 - [x] Liveness endpoint (`/healthz`).
-- [ ] **Blocker:** Readiness endpoint that checks the database.
+- [x] Readiness endpoint that checks the database (`/readyz`).
 - [ ] **Blocker:** Backpressure handling (every run starts its own goroutine at once).
 - [ ] Configurable worker pool and queueing model.
 - [x] Server timeouts (read header, read, idle) and request body size limits (`api.Server.HTTPServer`,

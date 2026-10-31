@@ -65,7 +65,7 @@ services:
       ollama-pull:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz | grep -q ok"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/readyz | grep -q ok"]
       interval: 5s
       timeout: 5s
       retries: 30

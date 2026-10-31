@@ -66,6 +66,22 @@ func freshStore(t *testing.T) *pg.Store {
 	return s
 }
 
+func TestPg_Ping(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := pg.NewFromPool(pool)
+	if err := s.Ping(ctx); err != nil {
+		t.Fatalf("ping open store: %v", err)
+	}
+	s.Close()
+	if err := s.Ping(ctx); err == nil {
+		t.Fatal("ping after Close succeeded")
+	}
+}
+
 func TestPg_SequenceMonotonicUnderConcurrency(t *testing.T) {
 	s := freshStore(t)
 	ctx := context.Background()
