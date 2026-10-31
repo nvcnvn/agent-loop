@@ -6,6 +6,7 @@ const state = {
   agents: [],
   tools: [],
   events: [],
+  pendingApprovals: new Map(),
   requests: [],
   activeRunID: "",
   eventSource: null,
@@ -175,6 +176,7 @@ async function selectSession(id) {
     const session = state.sessions.find((item) => sessionID(item) === id) || await api(`/v1/sessions/${id}`);
     state.selectedSession = session;
     state.events = [];
+    state.pendingApprovals.clear();
     state.lastEventID = "";
     state.activeRunID = "";
     closeStream();
@@ -308,6 +310,7 @@ function handleSSEEvent(type, event) {
   const item = { type, id: event.lastEventId, at: new Date().toISOString(), data };
   state.events.push(item);
   state.events = state.events.slice(-200);
+  trackApprovalEvent(type, data);
   updateAgentActivity(type, data);
   maybeAppendAssistantMessage(type, data);
   renderEvents();
@@ -323,6 +326,65 @@ function handleSSEEvent(type, event) {
     loadMessages().catch(showError);
     closeStream();
     state.activeRunID = "";
+  }
+}
+
+function trackApprovalEvent(type, data) {
+  const payload = data?.payload || {};
+  const approvalID = payload.approval_id || payload.ApprovalID || payload.approvalId;
+  if (!approvalID) return;
+  if (type === "approval_requested") {
+    state.pendingApprovals.set(approvalID, {
+      approvalID,
+      runID: data?.run_id || data?.runID || state.activeRunID,
+      tool: payload.tool || payload.Tool || "tool",
+      reason: payload.reason || payload.Reason || "Approval required",
+      payload,
+      status: "requested",
+      busy: false,
+    });
+    setAgentStatus("Approval required", `${payload.tool || payload.Tool || "tool"} is waiting`);
+    return;
+  }
+  if (type === "approval_resolved") {
+    const pending = state.pendingApprovals.get(approvalID);
+    if (pending) {
+      pending.status = payload.status || payload.Status || "resolved";
+      pending.busy = false;
+      state.pendingApprovals.set(approvalID, pending);
+    }
+  }
+}
+
+async function resolveApproval(approvalID, decision) {
+  const pending = state.pendingApprovals.get(approvalID);
+  if (!pending || pending.busy || pending.status !== "requested") return;
+  pending.busy = true;
+  pending.pendingDecision = decision;
+  state.pendingApprovals.set(approvalID, pending);
+  renderEvents();
+  try {
+    await api(`/v1/approvals/${approvalID}`, {
+      method: "POST",
+      body: {
+        decision,
+        payload: {
+          source: "debug_console",
+          tool: pending.tool,
+        },
+      },
+    });
+    pending.status = decision;
+    pending.busy = false;
+    state.pendingApprovals.set(approvalID, pending);
+    setAgentStatus(decision === "approved" ? "Approval submitted" : "Rejection submitted", pending.tool);
+  } catch (error) {
+    pending.busy = false;
+    delete pending.pendingDecision;
+    state.pendingApprovals.set(approvalID, pending);
+    throw error;
+  } finally {
+    renderEvents();
   }
 }
 
@@ -401,6 +463,12 @@ function updateAgentActivity(type, data) {
       break;
     case "tool_call_completed":
       setAgentStatus(`${agent} finished a tool call`, payload.tool || payload.Tool || `stage ${stage}`);
+      break;
+    case "approval_requested":
+      setAgentStatus("Approval required", `${payload.tool || payload.Tool || "tool"} is waiting`);
+      break;
+    case "approval_resolved":
+      setAgentStatus("Approval resolved", payload.status || payload.Status || "resolved");
       break;
     case "model_call_completed":
       setAgentStatus(`${agent} is composing a response`, `stage ${stage}`);
@@ -523,12 +591,59 @@ function renderEvents() {
   }
   [...state.events].reverse().forEach((event) => {
     const item = document.createElement("div");
-    item.className = "debug-item";
-    item.innerHTML = `<strong></strong><div class="debug-meta"></div><pre></pre>`;
+    const approval = approvalForEvent(event);
+    item.className = approval ? "debug-item approval-card" : "debug-item";
+    item.innerHTML = approval ? approvalTemplate() : `<strong></strong><div class="debug-meta"></div><pre></pre>`;
     item.querySelector("strong").textContent = event.type;
     item.querySelector(".debug-meta").textContent = `${event.id || "local"} ${formatTime(event.at)}`;
     item.querySelector("pre").textContent = pretty(event.data);
+    if (approval) hydrateApprovalCard(item, approval);
     els.eventList.append(item);
+  });
+}
+
+function approvalForEvent(event) {
+  if (event.type !== "approval_requested") return null;
+  const payload = event.data?.payload || {};
+  const approvalID = payload.approval_id || payload.ApprovalID || payload.approvalId;
+  if (!approvalID) return null;
+  return state.pendingApprovals.get(approvalID) || {
+    approvalID,
+    tool: payload.tool || payload.Tool || "tool",
+    reason: payload.reason || payload.Reason || "Approval required",
+    status: "requested",
+    busy: false,
+  };
+}
+
+function approvalTemplate() {
+  return `
+    <strong></strong>
+    <div class="debug-meta"></div>
+    <div class="approval-summary">
+      <span class="approval-tool"></span>
+      <span class="approval-status"></span>
+    </div>
+    <div class="approval-reason"></div>
+    <div class="approval-actions">
+      <button type="button" class="approve-action" data-decision="approved">Approve</button>
+      <button type="button" class="reject-action" data-decision="rejected">Reject</button>
+    </div>
+    <pre></pre>
+  `;
+}
+
+function hydrateApprovalCard(item, approval) {
+  const isRequested = approval.status === "requested";
+  item.querySelector(".approval-tool").textContent = approval.tool;
+  item.querySelector(".approval-status").textContent = approval.busy ? `submitting ${approval.pendingDecision}` : approval.status;
+  item.querySelector(".approval-status").classList.toggle("resolved", !isRequested);
+  item.querySelector(".approval-reason").textContent = approval.reason;
+  item.querySelectorAll("button[data-decision]").forEach((button) => {
+    button.disabled = approval.busy || !isRequested;
+    button.addEventListener("click", () => {
+      resolveApproval(approval.approvalID, button.dataset.decision).catch(showError);
+    });
   });
 }
 

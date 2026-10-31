@@ -33,25 +33,26 @@ services:
 
   ollama-pull:
     image: ollama/ollama:latest
-    depends_on:
-      ollama:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:latest}
     entrypoint:
       - /bin/sh
       - -c
-      - 'echo "pulling $${OLLAMA_MODEL} for REST integration tests" && ollama pull "$${OLLAMA_MODEL}"'
+      - 'until ollama list >/dev/null 2>&1; do echo "waiting for Ollama at $${OLLAMA_HOST}"; sleep 2; done; echo "pulling $${OLLAMA_MODEL} for REST integration tests from $${OLLAMA_HOST}" && ollama pull "$${OLLAMA_MODEL}"'
 
   api:
     build:
       context: .
       target: app
     command: ["-addr", ":8080"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       AGENT_LOOP_PG_DSN: postgres://postgres:postgres@postgres:5432/agentloop?sslmode=disable
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:latest}
       OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-900}
     ports:

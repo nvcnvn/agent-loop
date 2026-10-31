@@ -111,6 +111,10 @@ skip cleanly.
 
 Docker Compose REST integration stack:
 
+Quick shortcuts are available in [Makefile](Makefile): `make api-local-docker-ollama`,
+`make api-local-host-ollama`, `make test-local`,
+`make test-stack-docker-ollama`, and `make test-stack-host-ollama`.
+
 ```sh
 # Host ports are prefixed with 4 to avoid common local conflicts:
 # API http://localhost:48080, Postgres localhost:45432, Ollama localhost:41434
@@ -126,11 +130,37 @@ If `docker compose ps` does not show `api` immediately, check
 stays in `Created` until `ollama-pull` exits successfully. Pulling
 `gemma4:latest` can download a multi-GB model layer on first run.
 
-The compose stack starts PostgreSQL 18, `ollama/ollama:latest` CPU mode,
-pulls the configured model, runs the API against Postgres and Ollama, and
-then executes the REST integration test with the `rest` build tag. The API
-server also understands these local testing environment variables outside
-Compose:
+The compose stack starts PostgreSQL 18, can talk to either the bundled
+`ollama/ollama:latest` service or an external Ollama endpoint, pulls the
+configured model, runs the API against Postgres and Ollama, and then
+executes the REST integration test with the `rest` build tag.
+
+Default bundled Ollama flow:
+
+```sh
+OLLAMA_MODEL=gemma4:latest \
+   docker compose -f docker-compose.test.yml up --build \
+   --abort-on-container-exit --exit-code-from rest-test ollama rest-test
+```
+
+On macOS, the bundled Dockerized Ollama instance runs inside Docker's Linux
+VM and does not use Apple GPU acceleration. For faster local testing, run
+Ollama natively on the host so it can use Metal, then point the test stack
+at `host.docker.internal`:
+
+```sh
+ollama serve
+ollama pull gemma4:latest
+
+OLLAMA_MODEL=gemma4:latest \
+OLLAMA_HOST=http://host.docker.internal:11434 \
+OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+   docker compose -f docker-compose.test.yml up --build \
+   --abort-on-container-exit --exit-code-from rest-test postgres ollama-pull rest-test
+```
+
+The API server also understands these local testing environment variables
+outside Compose:
 
 ```sh
 AGENT_LOOP_PG_DSN='postgres://postgres:postgres@localhost:45432/agentloop?sslmode=disable' \

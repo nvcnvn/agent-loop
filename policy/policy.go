@@ -71,43 +71,68 @@ func (b *BudgetManager) Init(run core.RunID, limits core.Limits) {
 	b.limits[run] = limits.Defaults()
 }
 
-// CheckToolCall returns ErrBudgetExceeded if scheduling another tool call
-// would exceed limits.
-func (b *BudgetManager) CheckToolCall(run core.RunID) error {
+// ReserveToolCall reserves capacity before scheduling a tool call.
+func (b *BudgetManager) ReserveToolCall(run core.RunID) error {
+	return b.Reserve(run, core.Usage{ToolCalls: 1})
+}
+
+// ReserveToolCalls reserves capacity before scheduling a tool-call group.
+func (b *BudgetManager) ReserveToolCalls(run core.RunID, count int) error {
+	if count <= 0 {
+		return nil
+	}
+	return b.Reserve(run, core.Usage{ToolCalls: int64(count)})
+}
+
+// ReserveModelCall reserves capacity before invoking a model provider.
+func (b *BudgetManager) ReserveModelCall(run core.RunID) error {
+	return b.Reserve(run, core.Usage{ModelCalls: 1})
+}
+
+// ReserveSubAgent reserves capacity before spawning a sub-agent task.
+func (b *BudgetManager) ReserveSubAgent(run core.RunID) error {
+	return b.Reserve(run, core.Usage{SubAgents: 1})
+}
+
+// Reserve records usage before execution starts. If the reservation would
+// exceed a limit, usage is left unchanged.
+func (b *BudgetManager) Reserve(run core.RunID, used core.Usage) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	u := b.usage[run]
-	l := b.limits[run]
-	if u != nil && l.MaxToolCalls > 0 && u.ToolCalls >= int64(l.MaxToolCalls) {
-		return fmt.Errorf("%w: tool calls", core.ErrBudgetExceeded)
+	if u == nil {
+		u = &core.Usage{}
+		b.usage[run] = u
 	}
+	next := *u
+	next.Add(used)
+	if err := checkLimits(next, b.limits[run]); err != nil {
+		return err
+	}
+	*u = next
 	return nil
 }
 
-// CheckModelCall returns ErrBudgetExceeded if scheduling another model call
-// would exceed limits.
-func (b *BudgetManager) CheckModelCall(run core.RunID) error {
+// Release rolls back a reservation that did not start execution.
+func (b *BudgetManager) Release(run core.RunID, used core.Usage) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	u := b.usage[run]
-	l := b.limits[run]
-	if u != nil && l.MaxModelCalls > 0 && u.ModelCalls >= int64(l.MaxModelCalls) {
-		return fmt.Errorf("%w: model calls", core.ErrBudgetExceeded)
+	if u == nil {
+		return
 	}
-	return nil
-}
-
-// CheckSubAgent returns ErrBudgetExceeded if spawning another sub-agent
-// would exceed limits.
-func (b *BudgetManager) CheckSubAgent(run core.RunID) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	u := b.usage[run]
-	l := b.limits[run]
-	if u != nil && l.MaxSubAgents > 0 && u.SubAgents >= int64(l.MaxSubAgents) {
-		return fmt.Errorf("%w: sub agents", core.ErrBudgetExceeded)
+	u.PromptTokens = maxInt64(0, u.PromptTokens-used.PromptTokens)
+	u.CompletionTokens = maxInt64(0, u.CompletionTokens-used.CompletionTokens)
+	u.CachedTokens = maxInt64(0, u.CachedTokens-used.CachedTokens)
+	u.TotalTokens = maxInt64(0, u.TotalTokens-used.TotalTokens)
+	u.CostUnits = maxInt64(0, u.CostUnits-used.CostUnits)
+	u.ModelCalls = maxInt64(0, u.ModelCalls-used.ModelCalls)
+	u.ToolCalls = maxInt64(0, u.ToolCalls-used.ToolCalls)
+	u.SubAgents = maxInt64(0, u.SubAgents-used.SubAgents)
+	u.Runtime -= used.Runtime
+	if u.Runtime < 0 {
+		u.Runtime = 0
 	}
-	return nil
 }
 
 // Commit records actual usage after a successful call.
@@ -120,7 +145,29 @@ func (b *BudgetManager) Commit(run core.RunID, used core.Usage) error {
 		b.usage[run] = u
 	}
 	u.Add(used)
-	l := b.limits[run]
+	return checkLimits(*u, b.limits[run])
+}
+
+// Snapshot returns the current accumulated usage.
+func (b *BudgetManager) Snapshot(run core.RunID) core.Usage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if u := b.usage[run]; u != nil {
+		return *u
+	}
+	return core.Usage{}
+}
+
+func checkLimits(u core.Usage, l core.Limits) error {
+	if l.MaxToolCalls > 0 && u.ToolCalls > int64(l.MaxToolCalls) {
+		return fmt.Errorf("%w: tool calls", core.ErrBudgetExceeded)
+	}
+	if l.MaxModelCalls > 0 && u.ModelCalls > int64(l.MaxModelCalls) {
+		return fmt.Errorf("%w: model calls", core.ErrBudgetExceeded)
+	}
+	if l.MaxSubAgents > 0 && u.SubAgents > int64(l.MaxSubAgents) {
+		return fmt.Errorf("%w: sub agents", core.ErrBudgetExceeded)
+	}
 	if l.MaxPromptTokens > 0 && u.PromptTokens > l.MaxPromptTokens {
 		return fmt.Errorf("%w: prompt tokens", core.ErrBudgetExceeded)
 	}
@@ -133,12 +180,9 @@ func (b *BudgetManager) Commit(run core.RunID, used core.Usage) error {
 	return nil
 }
 
-// Snapshot returns the current accumulated usage.
-func (b *BudgetManager) Snapshot(run core.RunID) core.Usage {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if u := b.usage[run]; u != nil {
-		return *u
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
 	}
-	return core.Usage{}
+	return b
 }

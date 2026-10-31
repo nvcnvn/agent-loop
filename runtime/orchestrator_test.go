@@ -148,6 +148,47 @@ func TestParallelStageWaitAll(t *testing.T) {
 	}
 }
 
+// Acceptance: §Budget and Safety #2 – parallel sub-agent fan-out reserves as one group.
+func TestParallelSubAgentBudgetReservesWholeStage(t *testing.T) {
+	pa := model.NewMockProvider(model.MockResponse{Content: "A"})
+	pb := model.NewMockProvider(model.MockResponse{Content: "B"})
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "a", Model: "m", Provider: pa},
+		{Name: "b", Model: "m", Provider: pb},
+	})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name: "fan",
+			Kind: runtime.StageParallel,
+			Agents: []runtime.AgentStep{
+				{Name: "a", Prompt: "x"},
+				{Name: "b", Prompt: "y"},
+			},
+		}}},
+		Limits: core.Limits{MaxSubAgents: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := orch.Wait(ctx, runID)
+	if err == nil {
+		t.Fatalf("expected sub-agent budget failure, got status=%s", res.Status)
+	}
+	if !strings.Contains(err.Error(), "sub agents") {
+		t.Fatalf("expected sub-agent budget message, got %v", err)
+	}
+	tasks, err := s.ListRunTasks(ctx, core.DefaultTenant, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected no child tasks after failed group reservation, got %d", len(tasks))
+	}
+}
+
 // Acceptance: §Tool Calling #4 – parallel read-only tool calls fan in.
 func TestParallelToolCalls(t *testing.T) {
 	// Model first asks for two parallel echo calls, then returns final answer.
@@ -224,6 +265,98 @@ func TestToolDeniedByPolicy(t *testing.T) {
 	}
 }
 
+// Acceptance: §Human-in-the-Loop – approval-required tools pause before execution.
+func TestApprovalRequiredToolWaitsForResolution(t *testing.T) {
+	echoCall := func(text, id string) model.ToolCall {
+		raw, _ := json.Marshal(map[string]string{"text": text})
+		return model.ToolCall{ID: id, Name: "echo", Input: raw}
+	}
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{echoCall("approve me", "1")}},
+		model.MockResponse{Content: "done"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "ag", Model: "m", Provider: prov, Tools: []string{"echo"}},
+	})
+	orch.Policy.ApprovalRequired = []string{"echo"}
+
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name:   "s",
+			Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var approvalID core.ApprovalID
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range events {
+			if ev.Type != core.EvApprovalReq {
+				continue
+			}
+			var payload struct {
+				ApprovalID core.ApprovalID `json:"approval_id"`
+			}
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			approvalID = payload.ApprovalID
+			break
+		}
+		if approvalID != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if approvalID == "" {
+		t.Fatal("approval request was not emitted")
+	}
+	run, err := s.GetRun(ctx, core.DefaultTenant, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != core.RunAwaitingApproval {
+		t.Fatalf("status=%s want awaiting_approval", run.Status)
+	}
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "approved", json.RawMessage(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	res, err := orch.Wait(ctx, runID)
+	if err != nil {
+		t.Fatalf("wait: %v (status=%s reason=%s)", err, res.Status, res.FailureReason)
+	}
+	if res.Status != core.RunSucceeded {
+		t.Fatalf("status=%s reason=%s", res.Status, res.FailureReason)
+	}
+	if res.Usage.ToolCalls != 1 {
+		t.Fatalf("tool calls=%d want 1", res.Usage.ToolCalls)
+	}
+	events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundResolution := false
+	for _, ev := range events {
+		if ev.Type == core.EvApprovalRes {
+			foundResolution = true
+			break
+		}
+	}
+	if !foundResolution {
+		t.Fatal("approval resolution event was not emitted")
+	}
+}
+
 // Acceptance: §Persistence and Replay #2 – strict replay reconstructs status.
 func TestStrictReplay(t *testing.T) {
 	prov := model.NewMockProvider(model.MockResponse{Content: "hi"})
@@ -284,6 +417,50 @@ func TestBudgetExceededStopsRun(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "tool calls") {
 		t.Fatalf("expected tool-call budget message, got %v", err)
+	}
+}
+
+// Acceptance: §Policy and Budget Contract – tool-call groups reserve before execution.
+func TestToolCallBudgetReservesWholeGroup(t *testing.T) {
+	echoCall := func(text, id string) model.ToolCall {
+		raw, _ := json.Marshal(map[string]string{"text": text})
+		return model.ToolCall{ID: id, Name: "echo", Input: raw}
+	}
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{echoCall("a", "1"), echoCall("b", "2"), echoCall("c", "3")}},
+		model.MockResponse{Content: "never reached"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "ag", Model: "m", Provider: prov, Tools: []string{"echo"}},
+	})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name:   "s",
+			Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}},
+		}}},
+		Limits: core.Limits{MaxToolCalls: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := orch.Wait(ctx, runID)
+	if err == nil {
+		t.Fatalf("expected budget-exceeded failure, got %s", res.Status)
+	}
+	if res.Usage.ToolCalls != 0 {
+		t.Fatalf("tool calls=%d want 0 because group reservation failed before scheduling", res.Usage.ToolCalls)
+	}
+	events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if ev.Type == core.EvToolScheduled || ev.Type == core.EvToolStarted || ev.Type == core.EvToolCompleted {
+			t.Fatalf("unexpected tool event after failed group reservation: %s", ev.Type)
+		}
 	}
 }
 

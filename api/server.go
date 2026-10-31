@@ -299,7 +299,7 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	// internal scope would use a different handler.
 	visible := events[:0]
 	for _, e := range events {
-		if e.Visibility == core.VisibilityHiddenReasoning || e.Visibility == core.VisibilityAudit {
+		if !externallyVisible(e.Visibility) {
 			continue
 		}
 		visible = append(visible, e)
@@ -441,7 +441,7 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeSSE(w http.ResponseWriter, ev core.Event) {
-	if ev.Visibility == core.VisibilityHiddenReasoning || ev.Visibility == core.VisibilityAudit {
+	if !externallyVisible(ev.Visibility) {
 		// Hidden + audit events stay out of public SSE per requirements §5.2.
 		return
 	}
@@ -457,6 +457,15 @@ func writeSSE(w http.ResponseWriter, ev core.Event) {
 	}
 	body, _ := json.Marshal(envelope)
 	_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Sequence, ev.Type, body)
+}
+
+func externallyVisible(v core.Visibility) bool {
+	switch v {
+	case core.VisibilityHiddenReasoning, core.VisibilityAudit, core.VisibilityInternal:
+		return false
+	default:
+		return true
+	}
 }
 
 func mustJSON(v any) json.RawMessage {

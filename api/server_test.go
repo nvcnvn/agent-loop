@@ -166,6 +166,9 @@ func TestSSEStream(t *testing.T) {
 		n, err := r.Body.Read(buf)
 		if n > 0 {
 			chunk := string(buf[:n])
+			if strings.Contains(chunk, core.EvModelStarted) || strings.Contains(chunk, core.EvTaskSpawned) {
+				t.Fatalf("SSE exposed internal event: %s", chunk)
+			}
 			if strings.Contains(chunk, "run_state_changed") && strings.Contains(chunk, "succeeded") {
 				gotTerminal = true
 			}
@@ -179,6 +182,95 @@ func TestSSEStream(t *testing.T) {
 	}
 	if !gotTerminal {
 		t.Fatal("did not see terminal succeeded event over SSE")
+	}
+}
+
+func TestListRunEventsFiltersInternalVisibility(t *testing.T) {
+	srv, _, s := newTestServer(t)
+	defer srv.Close()
+	ctx := context.Background()
+	sid, err := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rid, err := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Append(ctx, []core.Event{
+		{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvModelStarted, Visibility: core.VisibilityInternal},
+		{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvApprovalReq, Visibility: core.VisibilityParticipant},
+		{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvSystem, Visibility: core.VisibilityAudit},
+		{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvAgentTrace, Visibility: core.VisibilityHiddenReasoning},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := srv.Client().Get(srv.URL + "/v1/runs/" + string(rid) + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	var body struct {
+		Events []core.Event `json:"events"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Events) != 1 {
+		t.Fatalf("events=%d want 1: %+v", len(body.Events), body.Events)
+	}
+	if body.Events[0].Type != core.EvApprovalReq || body.Events[0].Visibility != core.VisibilityParticipant {
+		t.Fatalf("unexpected event returned: %+v", body.Events[0])
+	}
+}
+
+func TestResolveApprovalEndpoint(t *testing.T) {
+	srv, _, s := newTestServer(t)
+	defer srv.Close()
+	ctx := context.Background()
+	aid, err := s.CreateApproval(ctx, store.Approval{
+		TenantID: core.DefaultTenant,
+		RunID:    core.RunID("run-api-approval"),
+		Reason:   "debug console gate",
+		Request:  json.RawMessage(`{"tool":"echo"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/approvals/"+string(aid), "application/json", strings.NewReader(`{"decision":"maybe"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid decision status=%d", resp.StatusCode)
+	}
+
+	body := strings.NewReader(`{"decision":"approved","payload":{"source":"debug_console"}}`)
+	resp, err = srv.Client().Post(srv.URL+"/v1/approvals/"+string(aid), "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resolve status=%d", resp.StatusCode)
+	}
+
+	approval, err := s.GetApproval(ctx, core.DefaultTenant, aid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approval.Status != "approved" {
+		t.Fatalf("status=%s want approved", approval.Status)
+	}
+	if string(approval.Resolution) != `{"source":"debug_console"}` {
+		t.Fatalf("resolution=%s", approval.Resolution)
+	}
+	if approval.ResolvedAt.IsZero() {
+		t.Fatal("resolved_at was not set")
 	}
 }
 

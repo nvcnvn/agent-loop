@@ -439,6 +439,66 @@ select:focus {
   white-space: pre-wrap;
 }
 
+.approval-card {
+  border-color: #d8b34c;
+  background: #fffaf0;
+}
+
+.approval-summary,
+.approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.approval-summary {
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.approval-tool {
+  font-weight: 700;
+}
+
+.approval-status {
+  border: 1px solid #d8b34c;
+  border-radius: 999px;
+  color: var(--warn);
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.approval-status.resolved {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.approval-reason {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.approval-actions {
+  margin-top: 10px;
+}
+
+.approval-actions button {
+  flex: 1;
+}
+
+.approve-action {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.reject-action {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .debug-meta {
   color: var(--muted);
   font-size: 12px;

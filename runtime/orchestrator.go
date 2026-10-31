@@ -117,6 +117,12 @@ type runState struct {
 	outputs map[string]string
 }
 
+type allowedTool struct {
+	def              tool.Definition
+	requiresApproval bool
+	approvalReason   string
+}
+
 // NewOrchestrator wires sensible defaults around the provided store.
 func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchestrator {
 	am := map[string]Agent{}
@@ -312,9 +318,15 @@ func (o *Orchestrator) runStage(ctx context.Context, runID core.RunID, in StartR
 }
 
 func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, in StartRunInput, stage Stage, prior map[string]string) (string, error) {
-	if err := o.Budget.CheckSubAgent(runID); err != nil {
+	for _, ag := range stage.Agents {
+		if _, ok := o.Agents[ag.Name]; !ok {
+			return "", fmt.Errorf("unknown agent: %s", ag.Name)
+		}
+	}
+	if err := o.Budget.Reserve(runID, core.Usage{SubAgents: int64(len(stage.Agents))}); err != nil {
 		return "", err
 	}
+
 	type result struct {
 		idx int
 		out string
@@ -342,7 +354,7 @@ func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, i
 				return
 			}
 			defer func() { <-sem }()
-			out, err := o.runAgentStep(gctx, runID, in, stage.Name, ag, priorCopy)
+			out, err := o.runAgentStepReserved(gctx, runID, in, stage.Name, ag, priorCopy, false)
 			results <- result{idx: idx, out: out, err: err}
 		}(i, ag)
 	}
@@ -404,12 +416,20 @@ func joinParts(parts []string) string {
 }
 
 func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in StartRunInput, stageName string, step AgentStep, prior map[string]string) (string, error) {
+	return o.runAgentStepReserved(ctx, runID, in, stageName, step, prior, true)
+}
+
+func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunID, in StartRunInput, stageName string, step AgentStep, prior map[string]string, reserveBudget bool) (string, error) {
 	agent, ok := o.Agents[step.Name]
 	if !ok {
 		return "", fmt.Errorf("unknown agent: %s", step.Name)
 	}
-	if err := o.Budget.CheckSubAgent(runID); err != nil {
-		return "", err
+	reserved := false
+	if reserveBudget {
+		if err := o.Budget.ReserveSubAgent(runID); err != nil {
+			return "", err
+		}
+		reserved = true
 	}
 
 	prompt := renderTemplate(step.Prompt, in.Input, prior)
@@ -422,6 +442,9 @@ func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in St
 		Input:     mustJSON(map[string]any{"prompt": prompt, "stage": stageName}),
 	})
 	if err != nil {
+		if reserved {
+			o.Budget.Release(runID, core.Usage{SubAgents: 1})
+		}
 		return "", err
 	}
 	o.emit(ctx, core.Event{
@@ -433,8 +456,6 @@ func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in St
 		Visibility: core.VisibilityInternal,
 		Payload:    mustJSON(map[string]any{"agent": agent.Name, "stage": stageName, "prompt": prompt}),
 	})
-	_ = o.Budget.Commit(runID, core.Usage{SubAgents: 1})
-
 	// Build initial messages.
 	messages := []model.Message{}
 	if agent.Instructions != "" {
@@ -444,13 +465,13 @@ func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in St
 
 	// Tool specs the model is allowed to call.
 	toolSpecs := []model.ToolSpec{}
-	allowed := map[string]tool.Definition{}
+	allowed := map[string]allowedTool{}
 	for _, name := range agent.Tools {
 		def, _, ok := o.Tools.Get(name)
 		if !ok {
 			continue
 		}
-		ok2, _, reason := o.Policy.Authorize(def)
+		ok2, requiresApproval, reason := o.Policy.Authorize(def)
 		if !ok2 {
 			o.emit(ctx, core.Event{
 				TenantID:   in.TenantID,
@@ -463,7 +484,7 @@ func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in St
 			})
 			continue
 		}
-		allowed[def.Name] = def
+		allowed[def.Name] = allowedTool{def: def, requiresApproval: requiresApproval, approvalReason: reason}
 		toolSpecs = append(toolSpecs, model.ToolSpec{
 			Name:        def.Name,
 			Description: def.Description,
@@ -473,7 +494,7 @@ func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in St
 
 	maxLoops := agent.MaxToolLoops
 	for loop := 0; loop < maxLoops; loop++ {
-		if err := o.Budget.CheckModelCall(runID); err != nil {
+		if err := o.Budget.ReserveModelCall(runID); err != nil {
 			return "", o.failTask(ctx, in.TenantID, taskID, err)
 		}
 		stepID := core.StepID(core.NewID())
@@ -500,7 +521,8 @@ func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in St
 		if err != nil {
 			return "", o.failTask(ctx, in.TenantID, taskID, fmt.Errorf("model: %w", err))
 		}
-		_ = o.Budget.Commit(runID, resp.Usage)
+		usage := resp.Usage
+		usage.ModelCalls = 0
 		o.emit(ctx, core.Event{
 			TenantID:      in.TenantID,
 			SessionID:     in.SessionID,
@@ -512,6 +534,9 @@ func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in St
 			Payload:       mustJSON(map[string]any{"usage": resp.Usage, "tool_calls": len(resp.ToolCalls)}),
 			HiddenPayload: mustJSON(map[string]any{"content": resp.Message.Content}),
 		})
+		if err := o.Budget.Commit(runID, usage); err != nil {
+			return "", o.failTask(ctx, in.TenantID, taskID, err)
+		}
 
 		if len(resp.ToolCalls) == 0 {
 			// Final answer.
@@ -577,27 +602,40 @@ func (o *Orchestrator) failTask(ctx context.Context, tenant core.TenantID, taskI
 	return err
 }
 
-func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, calls []model.ToolCall, allowed map[string]tool.Definition) ([]model.Message, error) {
+func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, calls []model.ToolCall, allowed map[string]allowedTool) ([]model.Message, error) {
 	type toolOut struct {
 		idx int
 		msg model.Message
 		err error
 	}
-	results := make(chan toolOut, len(calls))
-	gctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var wg sync.WaitGroup
+	type plannedTool struct {
+		idx              int
+		tc               model.ToolCall
+		call             tool.Call
+		exec             tool.Executor
+		requiresApproval bool
+		approvalReason   string
+		runParallel      bool
+	}
+
+	if err := o.Budget.ReserveToolCalls(runID, len(calls)); err != nil {
+		return nil, err
+	}
+	reserved := core.Usage{ToolCalls: int64(len(calls))}
+	plans := make([]plannedTool, 0, len(calls))
+	preflightOK := false
+	defer func() {
+		if !preflightOK {
+			o.Budget.Release(runID, reserved)
+		}
+	}()
 
 	for i, tc := range calls {
-		def, ok := allowed[tc.Name]
+		allowedTool, ok := allowed[tc.Name]
 		if !ok {
-			results <- toolOut{idx: i, err: fmt.Errorf("tool not allowed: %s", tc.Name)}
-			continue
+			return nil, fmt.Errorf("tool not allowed: %s", tc.Name)
 		}
-		if err := o.Budget.CheckToolCall(runID); err != nil {
-			return nil, err
-		}
-		// Loop detection.
+		def := allowedTool.def
 		if stalled, count := o.LoopDet.Observe(runID, tc.Name, hashInput(tc.Input)); stalled {
 			o.emit(ctx, core.Event{
 				TenantID:   tenant,
@@ -611,7 +649,10 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			return nil, fmt.Errorf("loop detected on tool %s after %d identical calls", tc.Name, count)
 		}
 
-		_, exec, _ := o.Tools.Get(tc.Name)
+		_, exec, ok := o.Tools.Get(tc.Name)
+		if !ok {
+			return nil, fmt.Errorf("tool not found: %s", tc.Name)
+		}
 		callRec := tool.Call{
 			TenantID: tenant,
 			RunID:    runID,
@@ -620,30 +661,55 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			Tool:     def,
 			Input:    tc.Input,
 		}
+		plans = append(plans, plannedTool{
+			idx:              i,
+			tc:               tc,
+			call:             callRec,
+			exec:             exec,
+			requiresApproval: allowedTool.requiresApproval,
+			approvalReason:   allowedTool.approvalReason,
+			runParallel:      def.Concurrency == tool.ConcurrencyParallelRead || def.Concurrency == tool.ConcurrencyParallelIsolatedWrite,
+		})
+	}
+	preflightOK = true
 
-		_ = o.Budget.Commit(runID, core.Usage{ToolCalls: 1})
+	results := make(chan toolOut, len(calls))
+	gctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var wg sync.WaitGroup
+
+	for _, plan := range plans {
 		o.emit(ctx, core.Event{
 			TenantID:   tenant,
 			SessionID:  session,
 			RunID:      runID,
 			TaskID:     taskID,
-			StepID:     callRec.StepID,
+			StepID:     plan.call.StepID,
 			Type:       core.EvToolScheduled,
 			Visibility: core.VisibilityInternal,
-			Payload:    mustJSON(map[string]any{"tool": def.Name, "input": json.RawMessage(tc.Input)}),
+			Payload:    mustJSON(map[string]any{"tool": plan.call.Tool.Name, "input": json.RawMessage(plan.tc.Input)}),
 		})
+	}
 
-		runParallel := def.Concurrency == tool.ConcurrencyParallelRead || def.Concurrency == tool.ConcurrencyParallelIsolatedWrite
-		if runParallel {
+	for _, plan := range plans {
+		if plan.requiresApproval {
+			if err := o.awaitToolApproval(gctx, tenant, session, runID, taskID, plan.call, plan.approvalReason); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	for _, plan := range plans {
+		if plan.runParallel {
 			wg.Add(1)
-			go func(idx int, tc model.ToolCall, rec tool.Call) {
+			go func(plan plannedTool) {
 				defer wg.Done()
-				msg, err := o.invokeTool(gctx, exec, rec, tc, tenant, session, runID, taskID)
-				results <- toolOut{idx: idx, msg: msg, err: err}
-			}(i, tc, callRec)
+				msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, tenant, session, runID, taskID)
+				results <- toolOut{idx: plan.idx, msg: msg, err: err}
+			}(plan)
 		} else {
-			msg, err := o.invokeTool(gctx, exec, callRec, tc, tenant, session, runID, taskID)
-			results <- toolOut{idx: i, msg: msg, err: err}
+			msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, tenant, session, runID, taskID)
+			results <- toolOut{idx: plan.idx, msg: msg, err: err}
 		}
 	}
 	wg.Wait()
@@ -663,6 +729,64 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 		out = append(out, r.msg)
 	}
 	return out, nil
+}
+
+func (o *Orchestrator) awaitToolApproval(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, reason string) error {
+	if reason == "" {
+		reason = "tool requires approval"
+	}
+	approvalID, err := o.Approvals.CreateApproval(ctx, store.Approval{
+		TenantID: tenant,
+		RunID:    runID,
+		StepID:   call.StepID,
+		Reason:   reason,
+		Request: mustJSON(map[string]any{
+			"tool":  call.Tool.Name,
+			"input": json.RawMessage(call.Input),
+		}),
+	})
+	if err != nil {
+		return err
+	}
+	o.transitionRun(ctx, runID, tenant, core.RunAwaitingApproval, reason)
+	o.emit(ctx, core.Event{
+		TenantID:   tenant,
+		SessionID:  session,
+		RunID:      runID,
+		TaskID:     taskID,
+		StepID:     call.StepID,
+		Type:       core.EvApprovalReq,
+		Visibility: core.VisibilityParticipant,
+		Payload: mustJSON(map[string]any{
+			"approval_id": approvalID,
+			"tool":        call.Tool.Name,
+			"reason":      reason,
+		}),
+	})
+
+	approval, err := o.Approvals.WaitForApproval(ctx, approvalID)
+	if err != nil {
+		return fmt.Errorf("approval %s: %w", approvalID, err)
+	}
+	o.emit(ctx, core.Event{
+		TenantID:   tenant,
+		SessionID:  session,
+		RunID:      runID,
+		TaskID:     taskID,
+		StepID:     call.StepID,
+		Type:       core.EvApprovalRes,
+		Visibility: core.VisibilityParticipant,
+		Payload: mustJSON(map[string]any{
+			"approval_id": approvalID,
+			"tool":        call.Tool.Name,
+			"status":      approval.Status,
+		}),
+	})
+	if approval.Status != "approved" {
+		return fmt.Errorf("%w: tool %s %s", core.ErrApprovalRequired, call.Tool.Name, approval.Status)
+	}
+	o.transitionRun(ctx, runID, tenant, core.RunRunning, "")
+	return nil
 }
 
 func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call tool.Call, tc model.ToolCall, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (model.Message, error) {

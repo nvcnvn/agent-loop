@@ -1,5 +1,10 @@
 # Agent Loop Requirements
 
+`[x]` marks a requirement the code meets today, `[ ]` one it does not. A requirement that is only
+partly met is split into the part that is done and the part that is not.
+
+**Blocker:** marks an unmet requirement that must be done before a production deployment.
+
 ## 1. Goal
 
 Build a Go-native multi-agent framework for long-running, tool-using, stateful AI workflows. The framework should support both chat-style sessions and structured agent workflows, with strong persistence, observability, and control over agent execution.
@@ -32,90 +37,111 @@ Primary goals:
 ### 4.1 Multi-Agent Orchestration
 
 The framework must:
-- Spawn sub-agents from a parent agent.
-- Support sequential execution, concurrent execution, and mixed graph-style execution.
-- Allow workflow templates such as:
+- [x] Run several agents in one run as workflow stages.
+- [ ] Spawn sub-agents from a parent agent at runtime (no task has a parent task or depth today).
+- [x] Support sequential and concurrent execution (sequential and parallel stages).
+- [ ] Support mixed graph-style execution (stages with dependencies instead of a linear list).
+- [x] Allow workflow templates such as:
   - requirements -> code -> review -> test
   - planner -> multiple research agents in parallel -> synthesizer
-- Allow an agent to hand work back to a previous stage when validation fails.
-- Allow system-level limits on recursion depth, total spawned agents, concurrency, tokens, runtime, and tool calls.
-- Allow per-workflow limits that override defaults within safe bounds.
+- [ ] Allow an agent to hand work back to a previous stage when validation fails.
+- [x] Enforce per-run limits on total spawned agents, sub-agent concurrency, tokens, runtime, model calls, and tool calls.
+- [ ] Enforce the recursion depth limit (`MaxDepth` is defined but nothing recurses yet).
+- [x] Allow per-run limits that override the defaults.
+- [ ] **Blocker:** Cap per-run limits at server-side maximums so a client cannot raise them without bound.
 
 The framework should define a clear execution model:
 - `session`: long-lived collaboration container.
 - `run`: one execution attempt inside a session.
 - `agent`: a configured reasoning unit with model, tools, and policy.
 - `task`: a unit of delegated work assigned to an agent.
-- `step`: one atomic action within a run, such as model response, tool call, approval wait, or sub-agent spawn.
+- `step`: one atomic action within a run, such as model response, tool call, approval wait, or sub-agent spawn. Today a step is only a `step_id` on events; it has no stored record of its own.
 
 ### 4.2 Workflow Definition
 
 The framework must support two ways to define behavior:
-- Dynamic delegation at runtime by an agent.
-- Predefined workflow templates declared in configuration.
+- [ ] Dynamic delegation at runtime by an agent.
+- [x] Predefined workflows, sent as JSON with each run or built in Go.
+- [ ] Named workflow templates stored in configuration and started by name.
 
 Workflow definitions should support:
-- Agent role and instruction.
-- Allowed tools.
-- Allowed child agents.
-- Retry policy.
-- Timeout and deadline.
-- Stop conditions.
-- Human approval gates.
-- Input and output schema.
+- [x] Agent role and instruction (agents are registered in Go at startup).
+- [ ] Agent definitions loaded from configuration or the API.
+- [x] Allowed tools per agent.
+- [ ] Allowed child agents.
+- [ ] Retry policy.
+- [x] Run timeout (`MaxRuntime`).
+- [ ] Timeouts and deadlines per stage, agent, and tool.
+- [x] Stop after a maximum number of tool loops per agent.
+- [ ] Declared stop conditions.
+- [x] Human approval gates on tools.
+- [ ] Human approval gates on stages and final outputs.
+- [ ] Input and output schema (input is a flat string map; output is free text).
 
 ## 5. State, Persistence, and Replay
 
 ### 5.1 Session Model
 
 A session is a shared container that may include:
-- Multiple human users.
-- Multiple agents.
-- Multiple runs over time.
-- Full event history.
+- [x] Human messages attributed to the principal that posted them.
+- [ ] Session participants and membership.
+- [x] Multiple agents.
+- [x] Multiple runs over time.
+- [x] Full event history.
 
 Each session must preserve:
-- Ordered message history.
-- Agent state transitions.
-- Tool invocations and results.
-- Workflow graph and parent-child relationships.
-- Artifacts produced during execution.
+- [x] Ordered message history.
+- [x] Agent state transitions.
+- [x] Tool invocations and results.
+- [x] Run-to-task relationships.
+- [ ] Task-to-child-task relationships.
+- [ ] Artifacts produced during execution.
+
+Chat-style sessions require:
+- [ ] **Blocker:** Runs pass the session's prior messages to the model; today an agent sees only its instructions and stage prompt.
+- [ ] Posting a human message can start or continue a run.
 
 ### 5.2 Message Model
 
 Support at least these message and event types:
-- Human message.
-- Agent visible message.
-- Agent internal reasoning or hidden trace.
-- System event.
-- Tool call.
-- Tool result.
-- Approval request and approval result.
-- Snapshot.
-- Error event.
+- [x] Human message.
+- [x] Agent visible message.
+- [x] Agent internal reasoning or hidden trace.
+- [x] System event.
+- [x] Tool call.
+- [x] Tool result.
+- [x] Approval request and approval result.
+- [ ] Snapshot.
+- [ ] Error event (failures appear only as a reason on the run state change).
 
 Requirements:
-- Hidden reasoning must be stored separately from user-visible messages.
-- Visibility rules must be explicit and configurable.
-- Every event must include timestamps, actor identity, correlation IDs, and parent references.
+- [x] Hidden reasoning is stored separately from user-visible messages (`hidden_payload`).
+- [x] Every event has an explicit visibility.
+- [ ] Visibility rules are configurable, with an internal-scope reader for operators.
+- [x] Every event includes timestamps.
+- [ ] Every event includes actor identity (only human messages set it).
+- [ ] Events in one run share a correlation ID (each event gets a fresh random one).
+- [ ] Events carry parent and causation references.
 
 ### 5.3 Snapshot and Compaction
 
 Support snapshots that summarize earlier context to control token growth.
 
 Requirements:
-- Trigger snapshots by message count, token count, or workflow boundary.
-- Preserve the raw history even when summarized.
-- Make snapshot generation auditable.
-- Allow replay from raw history or from snapshot plus tail events.
+- [ ] Trigger snapshots by message count, token count, or workflow boundary.
+- [ ] Preserve the raw history even when summarized.
+- [ ] Make snapshot generation auditable.
+- [ ] Allow replay from raw history or from snapshot plus tail events.
 
 ### 5.4 Resumability and Replay
 
 The framework must:
-- Resume interrupted runs.
-- Retry failed steps safely.
-- Replay a run for debugging.
-- Support deterministic replay mode where possible by storing model inputs, tool inputs, outputs, and configuration.
+- [ ] **Blocker:** Resume interrupted runs.
+- [ ] Retry failed steps safely.
+- [x] Replay a run for debugging by rebuilding its terminal state from stored events.
+- [x] Store the workflow, input, limits, tool inputs and outputs, and model output for each run.
+- [ ] Store model requests (messages, tools, parameters).
+- [ ] Re-execute a run deterministically using recorded model and tool outputs.
 
 ## 6. Tool Calling
 
@@ -124,200 +150,222 @@ The framework must:
 Support tools implemented as normal Go functions with a defined registration contract.
 
 Requirements:
-- Strongly typed input and output schema.
-- Validation before execution.
-- Context propagation for timeout and cancellation.
-- Structured error handling.
-- Tool metadata: name, description, version, idempotency hint, side-effect level.
+- [x] Registration contract.
+- [x] Input and output JSON schema declared on each tool.
+- [ ] Input validated against the schema before execution.
+- [x] Context propagation for run timeout and cancellation.
+- [ ] Per-tool timeout.
+- [ ] **Blocker:** Structured error handling: a tool error goes back to the model as a result; today it fails the task.
+- [x] Tool metadata: name, description, version, idempotency hint, side-effect level.
 
 ### 6.2 MCP Tools
 
 Support MCP-based tools and remote MCP servers.
 
 Requirements:
-- Tool discovery.
-- Schema translation into the framework's internal tool model.
-- Authentication and connection lifecycle handling.
-- Timeout, retry, and circuit-breaker support.
+- [ ] Tool discovery.
+- [ ] Schema translation into the framework's internal tool model.
+- [ ] Authentication and connection lifecycle handling.
+- [ ] Timeout, retry, and circuit-breaker support.
 
 ### 6.3 Tool Policy Layer
 
 The framework should support policy enforcement per agent or workflow:
-- Allowlist and denylist of tools.
-- Read-only vs mutating tool classes.
-- Approval required before dangerous tools.
-- Max tool calls per run.
-- Max cost or time budget per tool.
+- [x] Allowlist per agent; allowlist and denylist per orchestrator.
+- [ ] Tool policy set per workflow or run.
+- [x] Read-only vs mutating tool classes declared on each tool.
+- [ ] Policy acts on the class (for example, approval for every `write_external` or `dangerous` tool).
+- [x] Approval required before tools flagged or listed as needing it.
+- [x] Max tool calls per run.
+- [ ] Max cost or time budget per tool.
 
 ### 6.4 Concurrent Tool Execution
 
 The framework should support concurrent tool calls when the workflow and tool policy allow it.
 
 Requirements:
-- Allow an agent step to schedule multiple tool calls in parallel.
-- Allow the scheduler to serialize tool calls when ordering is required.
-- Mark each tool with concurrency characteristics such as:
+- [x] Allow an agent step to schedule multiple tool calls in parallel.
+- [x] Run serial tools one at a time, in call order.
+- [ ] **Blocker:** Keep exclusive and serial tools from overlapping parallel tools started earlier in the same batch.
+- [x] Mark each tool with concurrency characteristics such as:
   - safe for parallel read operations
   - safe for parallel isolated writes
   - requires exclusive execution
   - non-idempotent or externally side-effecting
-- Support fan-out and fan-in patterns where multiple tool results are collected before the next reasoning step.
-- Support partial failure handling for parallel tool groups: fail-fast, wait-all, quorum, or best-effort.
-- Enforce concurrency limits globally, per tenant, per workflow, per agent, and per tool.
-- Preserve deterministic event ordering in persisted run history even when execution is concurrent.
-- Propagate cancellation, timeout, and budget exhaustion to all in-flight tool calls.
+- [x] Support fan-out and fan-in patterns where multiple tool results are collected before the next reasoning step.
+- [x] Partial failure handling for parallel sub-agent stages: fail-fast, wait-all, best-effort.
+- [ ] Quorum failure handling for parallel sub-agent stages.
+- [ ] Partial failure handling for parallel tool groups (any tool error fails the step).
+- [x] Concurrency limit per run for parallel sub-agents.
+- [ ] **Blocker:** Concurrency limits globally, per tenant, per workflow, per agent, and per tool; parallel tool calls in one step are unbounded.
+- [x] Preserve deterministic event ordering in persisted run history even when execution is concurrent.
+- [x] Propagate cancellation, timeout, and budget exhaustion to all in-flight tool calls.
 
 Design rule:
-- Concurrent tool execution should be opt-in by policy, not assumed safe by default.
+- [x] Concurrent tool execution is opt-in by policy, not assumed safe by default (tools default to `serial`).
 
 ## 7. Model Abstraction Layer
 
 Start with Ollama, but the API must be provider-agnostic.
 
 Requirements:
-- Unified interface for chat completion, streaming, tool calling, embeddings, and structured output.
-- Provider capability detection.
-- Model-specific parameter mapping.
-- Retry and backoff.
-- Token accounting for prompt, completion, cached, and total usage when available.
+- [x] Unified interface for chat completion and tool calling.
+- [ ] Streaming.
+- [ ] Embeddings.
+- [ ] Structured output used by the runtime (the Ollama adapter maps `ResponseSchema`, but nothing sets it).
+- [ ] Provider capability detection (capabilities are static).
+- [ ] Model-specific parameter mapping.
+- [ ] Retry and backoff.
+- [x] Token accounting for prompt, completion, and total usage.
+- [ ] Token accounting for cached tokens and cost.
 
 Future providers may include hosted APIs, but the first production implementation only needs one production-ready adapter.
+- [ ] A production-ready adapter (Ollama today is non-streaming, with no retry).
 
 ## 8. API and Protocols
 
 ### 8.1 External API
 
 Expose HTTP APIs for:
-- Create session.
-- Post human message.
-- Start run.
-- Resume run.
-- List runs, events, and artifacts.
-- Approve or reject gated actions.
-- Subscribe to run events.
+- [x] Create session.
+- [x] Post human message.
+- [x] Start run.
+- [ ] Resume run.
+- [x] List runs and events.
+- [ ] List and download artifacts.
+- [x] Approve or reject gated actions.
+- [ ] List pending approvals (clients learn approval IDs only from the event stream).
+- [x] Subscribe to run events.
 
 ### 8.2 Real-Time Delivery
 
 Support HTTP SSE for streaming updates.
 
 SSE requirements:
-- Ordered event delivery per run.
-- Event IDs for resume.
-- Heartbeats.
-- Delivery acknowledgement strategy or reconnect-safe resume.
-- Separation of public events and internal events.
+- [x] Ordered event delivery per run.
+- [x] Event IDs for resume.
+- [x] Heartbeats.
+- [x] Reconnect-safe resume (`Last-Event-ID`).
+- [x] Separation of public events and internal events.
+- [ ] Push-based delivery from PostgreSQL (`LISTEN/NOTIFY` instead of polling).
 
 ### 8.3 Compatibility Targets
 
-- Provide a clean REST API first.
+- [x] Provide a clean REST API first.
 - Keep room for future ADK-compatible inbound or outbound integration.
-- Document which parts are stable public API versus internal runtime contracts.
+- [ ] Document which parts are stable public API versus internal runtime contracts (OpenAPI).
 
 ## 9. Safety and Control
 
 ### 9.1 Loop and Stall Detection
 
 The framework must detect runaway behavior such as:
-- Repeated identical tool calls.
-- Repeated near-identical messages.
-- Excessive delegation without progress.
-- Retry storms.
-- Long idle waits.
+- [x] Repeated identical tool calls.
+- [ ] Repeated near-identical messages.
+- [ ] Excessive delegation without progress.
+- [ ] Retry storms.
+- [ ] **Blocker:** Long idle waits, including approvals that are never resolved.
 
 Responses may include:
-- Warn.
-- Pause run.
-- Request human approval.
-- Fail run with diagnostic reason.
+- [ ] Warn.
+- [ ] Pause run.
+- [ ] Request human approval.
+- [x] Fail run with diagnostic reason.
 
 ### 9.2 Budget Enforcement
 
 Track and enforce:
-- Token budget.
-- Time budget.
-- Cost budget.
-- Tool-call budget.
-- Sub-agent budget.
+- [x] Token budget.
+- [x] Time budget.
+- [x] Cost budget, when the provider reports cost.
+- [ ] Cost reported by providers (none do today).
+- [x] Tool-call budget.
+- [x] Sub-agent budget.
+- [ ] **Blocker:** Budget usage persisted so it survives a restart and is released when a run ends.
 
 ### 9.3 Human-in-the-Loop
 
 Support approval checkpoints for:
-- High-cost actions.
-- External side effects.
-- Dangerous tools.
-- Final answer publication in selected workflows.
+- [x] Dangerous tools and tools with external side effects, when flagged.
+- [ ] High-cost actions.
+- [ ] Final answer publication in selected workflows.
+- [ ] **Blocker:** Approval expiry.
+- [ ] **Blocker:** A rejection returned to the agent as a result instead of failing the run.
 
 ## 10. Observability and Operations
 
-This is currently missing and should be treated as first-class.
-
 Requirements:
-- Structured logs.
-- Traces across model calls, tool calls, and sub-agent boundaries.
-- Metrics for latency, token use, cost, queue depth, failures, retries, and tool usage.
-- Audit log for user actions and approvals.
-- Run timeline view data model.
+- [ ] **Blocker:** Structured logs.
+- [ ] Traces across model calls, tool calls, and sub-agent boundaries.
+- [ ] **Blocker:** Metrics for latency, token use, cost, queue depth, failures, retries, and tool usage.
+- [x] Audit trail of human messages and approvals in the event history.
+- [ ] Audit of run cancellations and of who resolved each approval.
+- [x] Run timeline view data model (events, tasks, and the debug console).
 
 Operational requirements:
-- Graceful shutdown.
-- Job recovery after process restart.
-- Health endpoints.
-- Backpressure handling.
-- Configurable worker pool and queueing model.
+- [ ] **Blocker:** Graceful shutdown: stop accepting work, drain or checkpoint in-flight runs.
+- [ ] **Blocker:** Job recovery after process restart (runs left `running` stay that way forever).
+- [x] Liveness endpoint (`/healthz`).
+- [ ] **Blocker:** Readiness endpoint that checks the database.
+- [ ] **Blocker:** Backpressure handling (every run starts its own goroutine at once).
+- [ ] Configurable worker pool and queueing model.
+- [ ] **Blocker:** Server timeouts (read header, read, idle) and request body size limits.
+- [ ] **Blocker:** Versioned schema migrations (`EnsureSchema` only creates missing objects).
+- [ ] **Blocker:** In-process state for finished runs is released (the run and budget maps grow without bound).
+- [ ] Run ownership by lease, so several API replicas can share one database.
+- [ ] Deployment configuration for agents, tools, policy, and limits from file or environment.
 
 ## 11. Security and Multi-Tenancy
 
-This is another missing area that should be explicit.
-
 Requirements:
-- Tenant isolation for sessions, runs, tools, and artifacts.
-- Authentication and authorization.
-- Secret management for tool credentials.
-- Redaction support for logs and traces.
-- Data retention policy.
-- Optional encryption at rest for sensitive fields.
-
-If multi-tenancy is not part of the initial implementation, explicitly state single-tenant deployment as the initial scope.
+- [x] Tenant-scoped reads and writes in both stores.
+- [ ] **Blocker:** Tenant isolation for run cancellation (`Cancel` ignores the tenant).
+- [ ] Tenant-scoped tool registries.
+- [ ] **Blocker:** Authentication and authorization (`X-Tenant-ID` and `X-Principal-ID` are trusted as sent).
+- [ ] Secret management for tool credentials.
+- [ ] Redaction support for logs and traces.
+- [ ] Data retention policy.
+- [ ] Optional encryption at rest for sensitive fields.
+- [ ] **Blocker:** Debug console and `/v1/debug/*` endpoints can be disabled; they expose agent instructions.
+- [x] Single-tenant deployment is the initial scope (see §17).
 
 ## 12. Memory and Retrieval
 
 Since PostgreSQL and pgvector are part of the stack, define memory behavior explicitly.
 
 Requirements:
-- Store long-term memory separate from transient conversation state.
-- Support embeddings for retrieval over prior sessions, documents, and artifacts.
-- Scope retrieval by tenant, project, session, or workflow.
-- Allow memory write policies so not every message becomes permanent memory.
-- Track provenance for retrieved memories.
+- [ ] Store long-term memory separate from transient conversation state.
+- [ ] Support embeddings for retrieval over prior sessions, documents, and artifacts.
+- [ ] Scope retrieval by tenant, project, session, or workflow.
+- [ ] Allow memory write policies so not every message becomes permanent memory.
+- [ ] Track provenance for retrieved memories.
 
 ## 13. Artifacts and Outputs
 
 Agents will often produce outputs beyond messages.
 
 Support artifact storage for:
-- Files.
-- Structured JSON outputs.
-- Reports.
-- Code patches.
-- Test results.
+- [x] Files, structured JSON outputs, reports, code patches, and test results, stored with a kind, MIME type, and metadata.
+- [ ] Agents and tools producing artifacts during a run (nothing writes to the artifact store yet).
 
 Requirements:
-- Artifact versioning.
-- MIME type and metadata.
-- Link artifacts to run, step, and producer.
+- [ ] Artifact versioning.
+- [x] MIME type and metadata.
+- [x] Link artifacts to run and task.
+- [ ] Link artifacts to step and producer.
 
 ## 14. Testing Strategy
 
-Testing should be expanded beyond the current note.
-
 Requirements:
-- Unit tests for workflow engine, persistence, budget enforcement, and policy checks.
-- Acceptance tests with mock LLM adapters.
-- Integration tests with Ollama in a controlled test environment.
-- Contract tests for tool registration and MCP integration.
-- Replay tests using recorded runs.
-- Concurrency tests for fan-out and cancellation.
-- Failure injection tests for network loss, tool timeout, and process restart.
+- [x] Unit tests for workflow engine, persistence, budget enforcement, and policy checks.
+- [x] Acceptance tests with mock LLM adapters.
+- [x] Integration tests with Ollama in a controlled test environment.
+- [ ] Contract tests for tool registration and MCP integration.
+- [x] Replay tests on runs produced in the test.
+- [ ] Replay tests using recorded run fixtures.
+- [x] Concurrency tests for fan-out and cancellation.
+- [ ] Failure injection tests for network loss, tool timeout, and process restart.
+- [ ] Fuzz tests for every decoder of external input (model responses, tool arguments, REST bodies).
 
 ## 15. End-State Goals
 
@@ -343,41 +391,55 @@ The framework should be considered powerful when it can act as:
 ## 16. Success Criteria
 
 The product vision is met when the framework can:
-- Accept human requests through an API and stream real-time execution events.
-- Execute workflows that combine planning, delegation, tool use, review, and retry.
-- Spawn multiple agents concurrently and merge their outputs safely.
-- Schedule multiple tool calls concurrently when policy permits.
-- Persist enough state to resume, inspect, replay, and audit any run.
-- Apply budgets, limits, and approval gates without relying on prompt discipline alone.
-- Support long-term memory and retrieval with clear provenance.
-- Expose operational telemetry sufficient for debugging and production monitoring.
-- Remain provider-agnostic at the model layer and protocol-agnostic at the tool layer.
-- Pass deterministic or replay-based test scenarios for important workflows.
+- [x] Accept human requests through an API and stream real-time execution events.
+- [ ] Execute workflows that combine planning, delegation, tool use, review, and retry.
+- [x] Spawn multiple agents concurrently and merge their outputs safely.
+- [x] Schedule multiple tool calls concurrently when policy permits.
+- [x] Persist enough state to inspect and audit any run.
+- [ ] Persist enough state to resume and deterministically replay any run.
+- [x] Apply budgets, limits, and approval gates without relying on prompt discipline alone.
+- [ ] Support long-term memory and retrieval with clear provenance.
+- [ ] Expose operational telemetry sufficient for debugging and production monitoring.
+- [x] Remain provider-agnostic at the model layer.
+- [ ] Remain protocol-agnostic at the tool layer (native tools only; no MCP).
+- [x] Pass deterministic or replay-based test scenarios for important workflows.
 
-## 17. Open Design Questions
+## 17. Design Decisions
 
-These should be answered before implementation starts:
-- Is the initial implementation single-tenant or multi-tenant?
-- Are hidden agent reasoning traces persisted by default, optionally, or never?
-- Should workflow definitions be code-first, config-first, or both?
-- Is deterministic replay a hard requirement or a best-effort debugging feature?
-- Will tools run in-process only, or also via remote workers?
-- What approval model is required: synchronous blocking, asynchronous callback, or both?
-- Do sessions need branching history, or only linear history?
-- What is the storage strategy for large artifacts?
-- Which tool classes are eligible for concurrent execution by default?
-- Should concurrent tool groups be modeled explicitly in the workflow definition, or inferred by the scheduler?
+- Tenancy: the initial deployment is single-tenant. Every record carries a `tenant_id`, and requests
+  without `X-Tenant-ID` use `core.DefaultTenant`.
+- Hidden reasoning: persisted by default in `hidden_payload` and never served by the public REST or
+  SSE endpoints.
+- Workflow definitions: both. Agents and tools are registered in Go; workflows are JSON sent with
+  each run or Go structs.
+- Replay: a best-effort debugging feature that rebuilds state from stored events, not a hard
+  determinism guarantee.
+- Tools run in-process only.
+- Approvals are asynchronous: the run waits in `awaiting_approval` until a client resolves the
+  approval over REST.
+- Session history is linear.
+- Tools default to `serial`; `parallel_read` and `parallel_isolated_write` tools run concurrently.
+- Concurrent tool groups are inferred by the scheduler from each tool's concurrency class, not
+  declared in the workflow.
+
+Still open:
+- What is the storage strategy for large artifacts? (Today they are stored inline in PostgreSQL.)
+- What does resuming a run after a restart replay: the whole interrupted task, or from the last
+  completed step? This decides whether steps need stored records.
 
 ## 18. First Implementation Milestones
 
 The first implementation is viable when the framework can:
-- Accept a human request through REST.
-- Start a run and stream events through SSE.
-- Spawn sub-agents sequentially and concurrently.
-- Persist all major run events in PostgreSQL.
-- Call native Go tools and MCP tools.
-- Execute safe tool calls concurrently with limits and cancellation.
-- Enforce limits and stop runaway runs.
-- Resume or replay a failed run.
-- Produce observable logs, metrics, and traceable diagnostics.
-- Pass acceptance and integration test suites.
+- [x] Accept a human request through REST.
+- [x] Start a run and stream events through SSE.
+- [x] Spawn sub-agents sequentially and concurrently.
+- [x] Persist all major run events in PostgreSQL.
+- [x] Call native Go tools.
+- [ ] Call MCP tools.
+- [x] Execute safe tool calls concurrently with cancellation.
+- [ ] Bound concurrent tool calls with limits.
+- [x] Enforce limits and stop runaway runs.
+- [x] Replay a failed run.
+- [ ] Resume a failed run.
+- [ ] Produce observable logs, metrics, and traceable diagnostics.
+- [x] Pass acceptance and integration test suites.
