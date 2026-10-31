@@ -7,7 +7,9 @@ description: How to test agent-loop. Covers which tier a test belongs in (unit, 
 
 Default `go test ./...` must never touch the network. Real model behaviour
 reaches it as recorded fixtures; live services are opt-in through build tags
-or the `-record` flag.
+or the `-record` flag. Tests that call a paid API are named `TestLive*` and
+skip unless `ALLOW_PAID_LLM=1` (`make test-paid` sets it and loads `.env`);
+keep them few and short, since every run costs money.
 
 ## Pick the tier
 
@@ -38,6 +40,7 @@ make fuzz FUZZTIME=1m      # fuzz every Fuzz* target in turn
 make record-docker-ollama  # start Dockerized Ollama, pull the model, record scenarios
 make record-host-ollama    # same against host Ollama (Metal on macOS, much faster)
 make record-openai         # record the LLM_MODEL scenarios against LLM_BASE_URL from .env (paid)
+make test-paid             # TestLive* tests against LLM_* from .env (paid; ALLOW_PAID_LLM=1)
 make pg-up && AGENT_LOOP_PG_DSN=postgres://postgres:postgres@localhost:45432/agentloop?sslmode=disable go test -tags=pg ./store/pg
 make test-stack-docker-ollama   # REST suite against API + Postgres + Ollama in Compose
 ```

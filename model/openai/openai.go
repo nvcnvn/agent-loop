@@ -3,13 +3,16 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -82,6 +85,139 @@ func answerInReasoning(resp *model.ChatResponse, req model.ChatRequest) {
 	if len(req.ResponseSchema) > 0 && m.Content == "" && len(m.ToolCalls) == 0 && json.Valid([]byte(m.Thinking)) {
 		m.Content, m.Thinking = strings.TrimSpace(m.Thinking), ""
 	}
+}
+
+// ChatStream streams the reply over server-sent events.
+func (p *Provider) ChatStream(ctx context.Context, req model.ChatRequest, onDelta func(model.Delta)) (model.ChatResponse, error) {
+	body, err := p.encodeRequest(req)
+	if err != nil {
+		return model.ChatResponse{}, err
+	}
+	body = append(body[:len(body)-1], `,"stream":true,"stream_options":{"include_usage":true}}`...)
+	httpResp, err := p.do(ctx, "/chat/completions", body)
+	if err != nil {
+		return model.ChatResponse{}, err
+	}
+	defer httpResp.Body.Close()
+	resp, err := readStream(httpResp.Body, onDelta)
+	if err != nil {
+		return resp, err
+	}
+	restoreToolNames(&resp, req.Tools)
+	answerInReasoning(&resp, req)
+	resp.Usage.CostUnits = p.cost(resp.Usage)
+	return resp, nil
+}
+
+type chunk struct {
+	Choices []struct {
+		Delta struct {
+			Content          string     `json:"content"`
+			ReasoningContent string     `json:"reasoning_content"`
+			ToolCalls        []toolCall `json:"tool_calls"`
+		} `json:"delta"`
+	} `json:"choices"`
+	Usage *usage `json:"usage"`
+}
+
+func readStream(r io.Reader, onDelta func(model.Delta)) (model.ChatResponse, error) {
+	var (
+		content, reasoning strings.Builder
+		lead               leadingThink
+		calls              = map[int]*toolCall{}
+		u                  *usage
+	)
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64<<10), 4<<20)
+	for sc.Scan() {
+		data, ok := strings.CutPrefix(sc.Text(), "data:")
+		if !ok {
+			continue
+		}
+		data = strings.TrimSpace(data)
+		if data == "[DONE]" {
+			break
+		}
+		var c chunk
+		if err := json.Unmarshal([]byte(data), &c); err != nil {
+			return model.ChatResponse{}, fmt.Errorf("openai: stream: %w", err)
+		}
+		if c.Usage != nil {
+			u = c.Usage
+		}
+		for _, ch := range c.Choices {
+			d := ch.Delta
+			content.WriteString(d.Content)
+			reasoning.WriteString(d.ReasoningContent)
+			text, thought := lead.push(d.Content)
+			if thought += d.ReasoningContent; text != "" || thought != "" {
+				onDelta(model.Delta{Content: text, Thinking: thought})
+			}
+			for _, tc := range d.ToolCalls {
+				acc, ok := calls[tc.Index]
+				if !ok {
+					acc = &toolCall{Index: tc.Index}
+					calls[tc.Index] = acc
+				}
+				acc.ID = cmp.Or(acc.ID, tc.ID)
+				acc.Function.Name = cmp.Or(acc.Function.Name, tc.Function.Name)
+				acc.Function.Arguments += tc.Function.Arguments
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return model.ChatResponse{}, fmt.Errorf("openai: stream: %w", err)
+	}
+	if rest := lead.flush(); rest != "" {
+		onDelta(model.Delta{Content: rest})
+	}
+	ordered := make([]toolCall, 0, len(calls))
+	for _, tc := range calls {
+		ordered = append(ordered, *tc)
+	}
+	slices.SortFunc(ordered, func(a, b toolCall) int { return a.Index - b.Index })
+	out := assemble(content.String(), reasoning.String(), ordered)
+	if u != nil {
+		out.Usage = u.core()
+	}
+	return out, nil
+}
+
+// leadingThink holds content deltas back until it is clear whether the reply
+// opens with inline reasoning, so the deltas add up to the final content.
+type leadingThink struct {
+	held    strings.Builder
+	decided bool
+}
+
+func (l *leadingThink) push(s string) (content, thinking string) {
+	if l.decided {
+		return s, ""
+	}
+	l.held.WriteString(s)
+	t := strings.TrimLeft(l.held.String(), " \t\r\n")
+	switch {
+	case t == "" || strings.HasPrefix("<think>", t) || strings.HasPrefix("</think>", t):
+		return "", ""
+	case strings.HasPrefix(t, "<think>") || strings.HasPrefix(t, "</think>"):
+		before, after, found := strings.Cut(t, "</think>")
+		if !found {
+			return "", ""
+		}
+		l.decided = true
+		return strings.TrimLeft(after, " \t\r\n"), strings.TrimSpace(strings.TrimPrefix(before, "<think>"))
+	default:
+		l.decided = true
+		return l.held.String(), ""
+	}
+}
+
+func (l *leadingThink) flush() string {
+	if l.decided {
+		return ""
+	}
+	l.decided = true
+	return l.held.String()
 }
 
 // wireName makes a tool name match ^[a-zA-Z0-9_-]+$, which strict servers

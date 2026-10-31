@@ -97,3 +97,17 @@ type Provider interface {
 	Capabilities(ctx context.Context, model string) (Capabilities, error)
 	Chat(ctx context.Context, req ChatRequest) (ChatResponse, error)
 }
+
+// Delta is a fragment of a reply as the model generates it.
+type Delta struct {
+	Content  string
+	Thinking string
+}
+
+// Streamer is a Provider that reports a reply while generating it. ChatStream
+// calls onDelta in order from the calling goroutine and returns the same
+// response Chat would.
+type Streamer interface {
+	Provider
+	ChatStream(ctx context.Context, req ChatRequest, onDelta func(Delta)) (ChatResponse, error)
+}

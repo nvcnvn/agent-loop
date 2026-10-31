@@ -14,11 +14,12 @@ HOST_DOCKER_OLLAMA_URL ?= http://host.docker.internal:11434
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test fuzz record-docker-ollama record-host-ollama record-openai pg-up pg-down ollama-up ollama-down stack-down api-local-docker-ollama api-local-host-ollama test-local test-stack-docker-ollama test-stack-host-ollama
+.PHONY: help test test-paid fuzz record-docker-ollama record-host-ollama record-openai pg-up pg-down ollama-up ollama-down stack-down api-local-docker-ollama api-local-host-ollama test-local test-stack-docker-ollama test-stack-host-ollama
 
 help:
 	@printf '%s\n' \
 	  'test                     Unit tests, fuzz seeds and fixture-replayed scenarios; no network' \
+	  'test-paid                Live tests against LLM_* from .env (ALLOW_PAID_LLM=1; costs money)' \
 	  'fuzz                     Fuzz every Fuzz* target for $(FUZZTIME) each' \
 	  'record-docker-ollama     Run ./scenario live against Dockerized Ollama and rewrite its fixtures' \
 	  'record-host-ollama       Run ./scenario live against host Ollama on localhost:11434 and rewrite the fixtures of OLLAMA_MODEL' \
@@ -50,6 +51,10 @@ record-host-ollama:
 	ollama pull '$(OLLAMA_MODEL)'
 	OLLAMA_BASE_URL='$(HOST_OLLAMA_URL)' OLLAMA_MODEL='$(OLLAMA_MODEL)' \
 	go test -count=1 -v ./scenario -args -record
+
+test-paid:
+	set -a && . ./.env && set +a && \
+	ALLOW_PAID_LLM=1 go test -count=1 -v -run '^TestLive' ./...
 
 record-openai:
 	set -a && . ./.env && set +a && \

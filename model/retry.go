@@ -60,14 +60,35 @@ func WithRetry(p Provider) *Retry {
 }
 
 func (r *Retry) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
-	return retry(ctx, r, func() (ChatResponse, error) { return r.Provider.Chat(ctx, req) })
+	return retry(ctx, r, func() (ChatResponse, bool, error) {
+		resp, err := r.Provider.Chat(ctx, req)
+		return resp, true, err
+	})
 }
 
-func retry[T any](ctx context.Context, r *Retry, call func() (T, error)) (T, error) {
+// ChatStream streams when the wrapped provider can, and otherwise calls Chat.
+// A stream that fails after its first delta is not retried, since the
+// caller has already seen part of the reply.
+func (r *Retry) ChatStream(ctx context.Context, req ChatRequest, onDelta func(Delta)) (ChatResponse, error) {
+	s, ok := r.Provider.(Streamer)
+	if !ok {
+		return r.Chat(ctx, req)
+	}
+	return retry(ctx, r, func() (ChatResponse, bool, error) {
+		started := false
+		resp, err := s.ChatStream(ctx, req, func(d Delta) {
+			started = true
+			onDelta(d)
+		})
+		return resp, !started, err
+	})
+}
+
+func retry[T any](ctx context.Context, r *Retry, call func() (T, bool, error)) (T, error) {
 	backoff := r.Base
 	for attempt := 1; ; attempt++ {
-		out, err := call()
-		if err == nil || attempt >= r.Attempts || ctx.Err() != nil || !Transient(err) {
+		out, retryable, err := call()
+		if err == nil || !retryable || attempt >= r.Attempts || ctx.Err() != nil || !Transient(err) {
 			return out, err
 		}
 		wait := backoff/2 + rand.N(backoff/2+1)

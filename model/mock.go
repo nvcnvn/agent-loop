@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/nvcnvn/agent-loop/core"
@@ -79,4 +80,18 @@ func (m *MockProvider) Chat(_ context.Context, req ChatRequest) (ChatResponse, e
 		Usage:     usage,
 		Raw:       raw,
 	}, nil
+}
+
+// ChatStream answers like Chat and streams the content one word at a time.
+func (m *MockProvider) ChatStream(ctx context.Context, req ChatRequest, onDelta func(Delta)) (ChatResponse, error) {
+	resp, err := m.Chat(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+	for _, w := range strings.SplitAfter(resp.Message.Content, " ") {
+		if w != "" {
+			onDelta(Delta{Content: w})
+		}
+	}
+	return resp, nil
 }

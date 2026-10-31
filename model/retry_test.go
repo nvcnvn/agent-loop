@@ -62,3 +62,31 @@ func TestRetryStopsWhenContextEnds(t *testing.T) {
 		t.Fatalf("calls=%d err=%v", f.calls, err)
 	}
 }
+
+type flakyStream struct {
+	flaky
+	deltasBeforeErr int
+}
+
+func (f *flakyStream) ChatStream(ctx context.Context, req ChatRequest, onDelta func(Delta)) (ChatResponse, error) {
+	if len(f.errs) > 0 {
+		for range f.deltasBeforeErr {
+			onDelta(Delta{Content: "x"})
+		}
+	}
+	return f.Chat(ctx, req)
+}
+
+func TestRetryStreamOnlyBeforeFirstDelta(t *testing.T) {
+	for _, c := range []struct {
+		deltas    int
+		wantCalls int
+	}{{0, 2}, {1, 1}} {
+		f := &flakyStream{flaky: flaky{errs: []error{&StatusError{Code: 503}}}, deltasBeforeErr: c.deltas}
+		r := &Retry{Provider: f, Attempts: 3, Base: time.Millisecond, Max: time.Millisecond}
+		_, err := r.ChatStream(context.Background(), ChatRequest{}, func(Delta) {})
+		if f.calls != c.wantCalls || (err != nil) != (c.deltas > 0) {
+			t.Fatalf("deltas=%d calls=%d err=%v", c.deltas, f.calls, err)
+		}
+	}
+}

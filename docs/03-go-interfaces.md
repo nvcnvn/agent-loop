@@ -271,9 +271,30 @@ type Provider interface {
     Name() string
     Capabilities(ctx context.Context, model string) (Capabilities, error)
     Chat(ctx context.Context, request ChatRequest) (ChatResponse, error)
-    StreamChat(ctx context.Context, request ChatRequest) (ChatStream, error)
-    Embed(ctx context.Context, request EmbedRequest) (EmbedResponse, error)
 }
+
+// Streamer is a Provider that reports the reply while generating it; both
+// adapters and MockProvider implement it. The runtime streams when it can.
+type Streamer interface {
+    Provider
+    ChatStream(ctx context.Context, request ChatRequest, onDelta func(Delta)) (ChatResponse, error)
+}
+
+type Delta struct {
+    Content  string
+    Thinking string
+}
+
+// StatusError is a non-2xx provider response. WithRetry wraps a Provider and
+// retries transient errors (Transient), and a stream only before its first delta.
+type StatusError struct {
+    Provider   string
+    Code       int
+    Body       string
+    RetryAfter time.Duration
+}
+func Transient(err error) bool
+func WithRetry(p Provider) *Retry
 
 type ToolCallMode string
 const (
@@ -327,11 +348,6 @@ type ChatResponse struct {
     ToolCalls  []ToolCall
     Usage      core.Usage
     Raw        json.RawMessage
-}
-
-type ChatStream interface {
-    Recv() (StreamEvent, error)
-    Close() error
 }
 
 // Recorder wraps a live Provider and saves its successful exchanges as a

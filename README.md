@@ -29,6 +29,7 @@ The recommended first vertical slice from
 | Ollama provider (`/api/chat`) | [model/ollama/ollama.go](model/ollama/ollama.go) |
 | OpenAI-compatible provider (`/chat/completions`; GLM, OpenAI, vLLM): tool-name mapping, reasoning, cached tokens, cost from configured prices | [model/openai/openai.go](model/openai/openai.go) |
 | Retry with jittered backoff and `Retry-After` for transient provider errors | [model/retry.go](model/retry.go) |
+| Streaming replies from both adapters; SSE `agent_message_delta` events with `?deltas=1` | [runtime/deltas.go](runtime/deltas.go), [api/server.go](api/server.go) |
 | Native Go tool registry + builtin demo tools (`echo`, `uppercase`, `math.add`) | [tool/tool.go](tool/tool.go) |
 | Tool policy (allow / deny / approval) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost) | [policy/policy.go](policy/policy.go) |

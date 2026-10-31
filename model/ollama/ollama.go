@@ -75,23 +75,68 @@ func (p *Provider) Chat(ctx context.Context, req model.ChatRequest) (model.ChatR
 	return decodeResponse(raw)
 }
 
-func (p *Provider) post(ctx context.Context, path string, body []byte, out any) error {
+// ChatStream streams the reply as Ollama's newline-delimited JSON chunks.
+func (p *Provider) ChatStream(ctx context.Context, req model.ChatRequest, onDelta func(model.Delta)) (model.ChatResponse, error) {
+	buf, err := encodeRequest(req)
+	if err != nil {
+		return model.ChatResponse{}, err
+	}
+	buf = bytes.Replace(buf, []byte(`"stream":false`), []byte(`"stream":true`), 1)
+	resp, err := p.do(ctx, "/api/chat", buf)
+	if err != nil {
+		return model.ChatResponse{}, err
+	}
+	defer resp.Body.Close()
+	var acc chatResponse
+	dec := json.NewDecoder(resp.Body)
+	for {
+		var c chatResponse
+		if err := dec.Decode(&c); err == io.EOF {
+			break
+		} else if err != nil {
+			return model.ChatResponse{}, fmt.Errorf("ollama: stream: %w", err)
+		}
+		if c.Message.Content != "" || c.Message.Thinking != "" {
+			onDelta(model.Delta{Content: c.Message.Content, Thinking: c.Message.Thinking})
+		}
+		acc.Message.Content += c.Message.Content
+		acc.Message.Thinking += c.Message.Thinking
+		acc.Message.ToolCalls = append(acc.Message.ToolCalls, c.Message.ToolCalls...)
+		if c.Done {
+			acc.PromptEvalCount, acc.EvalCount = c.PromptEvalCount, c.EvalCount
+		}
+	}
+	raw, _ := json.Marshal(acc)
+	return decodeResponse(raw)
+}
+
+func (p *Provider) do(ctx context.Context, path string, body []byte) (*http.Response, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.BaseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := p.HTTP.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("ollama: %w", err)
+		return nil, fmt.Errorf("ollama: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		return nil, model.NewStatusError("ollama "+path, resp, raw)
+	}
+	return resp, nil
+}
+
+func (p *Provider) post(ctx context.Context, path string, body []byte, out any) error {
+	resp, err := p.do(ctx, path, body)
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return model.NewStatusError("ollama "+path, resp, raw)
 	}
 	if r, ok := out.(*json.RawMessage); ok {
 		*r = raw
@@ -130,6 +175,7 @@ type toolCall struct {
 }
 
 type chatResponse struct {
+	Done            bool    `json:"done"`
 	PromptEvalCount int64   `json:"prompt_eval_count"`
 	EvalCount       int64   `json:"eval_count"`
 	Message         message `json:"message"`

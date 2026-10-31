@@ -171,3 +171,29 @@ func TestThinkingRoundTrips(t *testing.T) {
 		t.Fatalf("thinking not sent back: %s err=%v", buf, err)
 	}
 }
+
+func TestChatStream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"stream":true`) {
+			t.Errorf("not streaming: %s", body)
+		}
+		_, _ = io.WriteString(w, `{"message":{"role":"assistant","thinking":"hm"},"done":false}
+{"message":{"role":"assistant","content":"4"},"done":false}
+{"message":{"role":"assistant","content":"2","tool_calls":[{"function":{"name":"echo","arguments":{"x":1}}}]},"done":false}
+{"message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":7,"eval_count":3}
+`)
+	}))
+	defer srv.Close()
+	var deltas []model.Delta
+	resp, err := New(srv.URL, nil).ChatStream(context.Background(), model.ChatRequest{Model: "m"}, func(d model.Delta) { deltas = append(deltas, d) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Message.Content != "42" || resp.Message.Thinking != "hm" || len(resp.ToolCalls) != 1 || resp.Usage.TotalTokens != 10 {
+		t.Fatalf("resp=%+v", resp)
+	}
+	if len(deltas) != 3 || deltas[0].Thinking != "hm" || deltas[1].Content != "4" {
+		t.Fatalf("deltas=%+v", deltas)
+	}
+}

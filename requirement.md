@@ -221,7 +221,7 @@ Start with Ollama, but the API must be provider-agnostic.
 
 Requirements:
 - [x] Unified interface for chat completion and tool calling.
-- [ ] Streaming.
+- [x] Streaming (both adapters; reply deltas reach SSE clients that ask with `?deltas=1`).
 - [ ] Embeddings.
 - [x] Structured output used by the runtime (a stage's `output_schema` is sent as `ResponseSchema`).
 - [x] Provider capability detection: the Ollama adapter asks the server what each model supports, and
@@ -234,7 +234,7 @@ Requirements:
 - [x] Token accounting for cached tokens and cost (cost from configured per-token prices).
 
 Adapters: Ollama, and any OpenAI-compatible hosted API (tested on GLM 5.3).
-- [ ] A production-ready adapter (both are non-streaming).
+- [x] A production-ready adapter: streaming, retries with backoff, cost, tested on GLM 5.3.
 
 ## 8. API and Protocols
 
@@ -261,6 +261,7 @@ SSE requirements:
 - [x] Heartbeats.
 - [x] Reconnect-safe resume (`Last-Event-ID`).
 - [x] Separation of public events and internal events.
+- [x] Reply deltas while a model writes (`?deltas=1`, not stored).
 - [ ] Push-based delivery from PostgreSQL (`LISTEN/NOTIFY` instead of polling).
 
 ### 8.3 Compatibility Targets

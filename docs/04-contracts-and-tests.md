@@ -54,6 +54,12 @@ Required behavior:
   attempt of a run that was resumed afterwards, and does not close the stream.
 - Public streams exclude `internal`, `hidden_reasoning`, and `audit` visibility.
 - Heartbeats do not advance run sequence.
+- With `?deltas=1` the stream also carries `agent_message_delta` events while a model writes a
+  reply: `{"run_id", "task_id", "step_id", "agent", "content"}`, without an `id`. They are not
+  stored, carry no reasoning, and may be dropped for a slow client or across a reconnect. Each
+  model call has its own `step_id`; a reply that ends in tool calls or is rejected by the output
+  schema is superseded by the next step, and the finished reply is `agent_message_created`, which
+  follows its deltas.
 - Event names are backward-compatible or versioned.
 
 ### 3. Workflow Definition Contract
@@ -356,7 +362,8 @@ Each error should include:
 1. Run a workflow through a mock provider with deterministic responses.
 2. Verify unsupported capabilities fail before model invocation.
 3. Verify token accounting updates the budget ledger.
-4. Stream model tokens and convert them into public SSE events.
+4. Stream model tokens into `agent_message_delta` SSE events (`TestSSEStreamDeltas`), and never
+   retry a stream after its first delta (`TestRetryStreamOnlyBeforeFirstDelta`).
 
 ### Persistence and Replay
 

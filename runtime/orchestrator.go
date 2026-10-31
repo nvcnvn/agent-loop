@@ -115,6 +115,7 @@ type Orchestrator struct {
 	queued    atomic.Int64
 	executing atomic.Int64
 	sems      policy.Semaphores
+	deltas    deltaHub
 }
 
 type runState struct {
@@ -1126,7 +1127,7 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			attribute.String("gen_ai.operation.name", "chat"),
 			attribute.String("gen_ai.request.model", agent.Model),
 			attribute.String("agentloop.step_id", string(stepID)))
-		resp, err := agent.Provider.Chat(cctx, req)
+		resp, err := o.chat(cctx, agent, req, Delta{RunID: runID, TaskID: taskID, StepID: stepID, Agent: agent.Name})
 		span.SetAttributes(
 			attribute.Int64("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
 			attribute.Int64("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
@@ -1185,6 +1186,20 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 		return content, nil
 	}
 	return "", fmt.Errorf("agent %s exceeded MaxToolLoops=%d", agent.Name, agent.MaxToolLoops)
+}
+
+// chat streams the reply to delta subscribers when the provider can stream.
+func (o *Orchestrator) chat(ctx context.Context, agent Agent, req model.ChatRequest, d Delta) (model.ChatResponse, error) {
+	s, ok := agent.Provider.(model.Streamer)
+	if !ok {
+		return agent.Provider.Chat(ctx, req)
+	}
+	return s.ChatStream(ctx, req, func(md model.Delta) {
+		if md.Content != "" {
+			d.Content = md.Content
+			o.deltas.publish(d)
+		}
+	})
 }
 
 func (o *Orchestrator) completeTask(ctx context.Context, in StartRunInput, runID core.RunID, taskID core.TaskID, agent, content string) {

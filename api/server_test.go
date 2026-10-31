@@ -305,6 +305,58 @@ func TestSSEStream(t *testing.T) {
 	if !strings.Contains(string(stream), `"status":"succeeded"`) {
 		t.Fatalf("did not see terminal succeeded event over SSE: %s", stream)
 	}
+	if strings.Contains(string(stream), "agent_message_delta") {
+		t.Fatalf("deltas sent without ?deltas=1: %s", stream)
+	}
+}
+
+// gatedStreamer streams "done" as two deltas once released.
+type gatedStreamer struct{ gatedProvider }
+
+func (g gatedStreamer) ChatStream(ctx context.Context, req model.ChatRequest, onDelta func(model.Delta)) (model.ChatResponse, error) {
+	resp, err := g.Chat(ctx, req)
+	if err == nil {
+		onDelta(model.Delta{Content: "do"})
+		onDelta(model.Delta{Content: "ne", Thinking: "secret"})
+	}
+	return resp, err
+}
+
+func TestSSEStreamDeltas(t *testing.T) {
+	s := store.NewMemStore()
+	gate := gatedStreamer{gatedProvider{release: make(chan struct{})}}
+	orch := runtime.NewOrchestrator(s, tool.NewRegistry(), []runtime.Agent{{Name: "gated", Model: "m", Provider: gate}})
+	srv := httptest.NewServer(api.NewServer(orch, s).Handler())
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/runs/"+string(runID)+"/stream?deltas=1", nil)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	close(gate.release)
+	body, _ := io.ReadAll(resp.Body)
+	stream := string(body)
+
+	first := strings.Index(stream, "event: agent_message_delta\ndata: ")
+	second := strings.Index(stream, `"content":"ne"`)
+	final := strings.Index(stream, "event: "+core.EvAgentMessage)
+	if first < 0 || !strings.Contains(stream, `"content":"do"`) || second < 0 || final < second {
+		t.Fatalf("want deltas do, ne before %s:\n%s", core.EvAgentMessage, stream)
+	}
+	if strings.Contains(stream, "secret") {
+		t.Fatalf("thinking leaked into deltas:\n%s", stream)
+	}
 }
 
 type gatedProvider struct{ release chan struct{} }

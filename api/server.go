@@ -9,7 +9,7 @@
 //	POST   /v1/runs
 //	GET    /v1/runs/{rid}
 //	GET    /v1/runs/{rid}/events?after=<seq>
-//	GET    /v1/runs/{rid}/stream     (SSE; honours Last-Event-ID)
+//	GET    /v1/runs/{rid}/stream     (SSE; honours Last-Event-ID; ?deltas=1 adds reply deltas)
 //	POST   /v1/runs/{rid}/cancel
 //	POST   /v1/runs/{rid}/resume
 //	POST   /v1/approvals/{aid}
@@ -541,6 +541,12 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
+	var deltas <-chan runtime.Delta
+	if r.URL.Query().Get("deltas") == "1" {
+		var stop func()
+		deltas, stop = s.Orch.SubscribeDeltas(rid)
+		defer stop()
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -590,17 +596,37 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 			if ev.Sequence <= afterSeq {
 				continue
 			}
+			for drained := false; !drained; {
+				select {
+				case d := <-deltas:
+					writeDelta(w, d)
+				default:
+					drained = true
+				}
+			}
 			writeSSE(w, ev)
 			afterSeq = ev.Sequence
 			flusher.Flush()
 			if endsRun(ev) {
 				return
 			}
+		case d := <-deltas:
+			writeDelta(w, d)
+			flusher.Flush()
 		case <-heartbeat.C:
 			_, _ = fmt.Fprintf(w, ": heartbeat\n\n")
 			flusher.Flush()
 		}
 	}
+}
+
+// deltaEvent is the SSE event of a reply delta. It has no id, so it does not
+// move Last-Event-ID; a reconnecting client misses deltas, not events.
+const deltaEvent = "agent_message_delta"
+
+func writeDelta(w http.ResponseWriter, d runtime.Delta) {
+	body, _ := json.Marshal(d)
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", deltaEvent, body)
 }
 
 func endsRun(ev core.Event) bool {

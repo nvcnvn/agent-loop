@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/nvcnvn/agent-loop/model"
@@ -148,6 +149,93 @@ func TestChatSendsKeyPricesAndReportsStatus(t *testing.T) {
 	if !errors.As(err, &se) || se.Code != 429 || se.RetryAfter.Seconds() != 7 || !model.Transient(err) {
 		t.Fatalf("err=%v", err)
 	}
+}
+
+// glmStream mirrors GLM 5.3's chunks: a stray "</think>" split across
+// deltas, reasoning, a tool call whose arguments arrive in pieces, then usage.
+const glmStream = `data: {"choices":[{"delta":{"role":"assistant","content":"</th"}}]}
+
+data: {"choices":[{"delta":{"content":"ink>"}}]}
+
+data: {"choices":[{"delta":{"reasoning_content":"add them"}}]}
+
+data: {"choices":[{"delta":{"content":"Sum "}}]}
+
+data: {"choices":[{"delta":{"content":"coming."}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"math_add","arguments":"{\"a\": "}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"17}"}}]}}]}
+
+data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}
+
+data: [DONE]
+`
+
+func TestStreamAssemblesDeltasLikeChat(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["stream"] != true || body["stream_options"] == nil {
+			t.Errorf("not a streaming request: %v", body)
+		}
+		_, _ = io.WriteString(w, glmStream)
+	}))
+	defer srv.Close()
+	var content, thinking strings.Builder
+	resp, err := New(srv.URL, "").ChatStream(context.Background(), model.ChatRequest{Tools: []model.ToolSpec{{Name: "math.add"}}}, func(d model.Delta) {
+		content.WriteString(d.Content)
+		thinking.WriteString(d.Thinking)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Message.Content != "Sum coming." || content.String() != resp.Message.Content {
+		t.Fatalf("content=%q deltas=%q", resp.Message.Content, content.String())
+	}
+	if resp.Message.Thinking != "add them" || thinking.String() != "add them" {
+		t.Fatalf("thinking=%q deltas=%q", resp.Message.Thinking, thinking.String())
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_1" || resp.ToolCalls[0].Name != "math.add" || string(resp.ToolCalls[0].Input) != `{"a": 17}` {
+		t.Fatalf("calls=%+v", resp.ToolCalls)
+	}
+	if resp.Usage.TotalTokens != 15 {
+		t.Fatalf("usage=%+v", resp.Usage)
+	}
+}
+
+func TestLeadingThinkPassesOrdinaryContentThrough(t *testing.T) {
+	var l leadingThink
+	if c, _ := l.push("<"); c != "" {
+		t.Fatalf("held back nothing: %q", c)
+	}
+	if c, _ := l.push("b>bold"); c != "<b>bold" {
+		t.Fatalf("content=%q", c)
+	}
+	if c, _ := l.push(" more"); c != " more" {
+		t.Fatalf("content=%q", c)
+	}
+}
+
+func FuzzReadStream(f *testing.F) {
+	f.Add([]byte(glmStream))
+	f.Add([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"<think>x\"}}]}\n"))
+	f.Add([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":-1}]}}]}\n"))
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		var content strings.Builder
+		resp, err := readStream(strings.NewReader(string(raw)), func(d model.Delta) { content.WriteString(d.Content) })
+		if err != nil {
+			return
+		}
+		if strings.TrimSpace(content.String()) != strings.TrimSpace(resp.Message.Content) && !strings.Contains(content.String(), "</think>") {
+			t.Fatalf("deltas %q do not add up to %q", content.String(), resp.Message.Content)
+		}
+		for _, tc := range resp.ToolCalls {
+			if !json.Valid(tc.Input) {
+				t.Fatalf("invalid tool input %q", tc.Input)
+			}
+		}
+	})
 }
 
 func FuzzDecodeResponse(f *testing.F) {
