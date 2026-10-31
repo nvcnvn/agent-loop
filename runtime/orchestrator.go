@@ -110,6 +110,7 @@ type Orchestrator struct {
 }
 
 type runState struct {
+	tenant  core.TenantID
 	cancel  context.CancelFunc
 	done    chan struct{}
 	result  *Result
@@ -185,7 +186,7 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		runCtx, cancel = context.WithTimeout(runCtx, d)
 	}
 
-	st := &runState{cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
+	st := &runState{tenant: in.TenantID, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
 	o.mu.Lock()
 	o.runs[runID] = st
 	o.mu.Unlock()
@@ -213,13 +214,13 @@ func (o *Orchestrator) Wait(ctx context.Context, runID core.RunID) (Result, erro
 	}
 }
 
-// Cancel signals the run to stop. It returns immediately; Wait observes the
-// terminal status.
-func (o *Orchestrator) Cancel(_ context.Context, runID core.RunID, _ string) error {
+// Cancel signals the tenant's run to stop. It returns immediately; Wait
+// observes the terminal status.
+func (o *Orchestrator) Cancel(_ context.Context, tenant core.TenantID, runID core.RunID, _ string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	st, ok := o.runs[runID]
-	if !ok {
+	if !ok || st.tenant != tenant {
 		return core.ErrNotFound
 	}
 	st.cancel()

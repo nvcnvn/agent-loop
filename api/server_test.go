@@ -169,6 +169,59 @@ func TestSSEStream(t *testing.T) {
 	}
 }
 
+type gatedProvider struct{ release chan struct{} }
+
+func (g gatedProvider) Name() string { return "gated" }
+func (g gatedProvider) Capabilities(context.Context, string) (model.Capabilities, error) {
+	return model.Capabilities{}, nil
+}
+func (g gatedProvider) Chat(ctx context.Context, _ model.ChatRequest) (model.ChatResponse, error) {
+	select {
+	case <-ctx.Done():
+		return model.ChatResponse{}, ctx.Err()
+	case <-g.release:
+		return model.ChatResponse{Message: model.Message{Role: model.RoleAssistant, Content: "done"}}, nil
+	}
+}
+
+// Acceptance: §Security #1 – cross-tenant run cancellation.
+func TestCancelRunRejectsOtherTenant(t *testing.T) {
+	s := store.NewMemStore()
+	gate := gatedProvider{release: make(chan struct{})}
+	orch := runtime.NewOrchestrator(s, tool.NewRegistry(), []runtime.Agent{{Name: "gated", Model: "m", Provider: gate}})
+	srv := httptest.NewServer(api.NewServer(orch, s).Handler())
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name:   "s",
+			Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/runs/"+string(runID)+"/cancel", nil)
+	req.Header.Set("X-Tenant-ID", "00000000-0000-0000-0000-0000000000bb")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-tenant cancel status=%d want 404", resp.StatusCode)
+	}
+	close(gate.release)
+	res, err := orch.Wait(ctx, runID)
+	if err != nil || res.Status != core.RunSucceeded {
+		t.Fatalf("status=%s err=%v want succeeded", res.Status, err)
+	}
+}
+
 func TestSSEStreamOfFinishedRunCloses(t *testing.T) {
 	srv, orch, s := newTestServer(t)
 	defer srv.Close()

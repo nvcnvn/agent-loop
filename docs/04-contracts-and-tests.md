@@ -288,7 +288,8 @@ Each error should include:
 
 ### Security
 
-1. Prevent cross-tenant reads for sessions, runs, events, tools, artifacts, and memory.
+1. Prevent cross-tenant reads for sessions, runs, events, tools, artifacts, and memory, and
+   cross-tenant run cancellation.
 2. Redact secrets from logs and traces.
 3. Verify audit records for user actions and approval decisions.
 4. Enforce artifact retention policy.

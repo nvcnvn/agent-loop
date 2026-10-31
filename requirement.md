@@ -319,7 +319,7 @@ Operational requirements:
 
 Requirements:
 - [x] Tenant-scoped reads and writes in both stores.
-- [ ] **Blocker:** Tenant isolation for run cancellation (`Cancel` ignores the tenant).
+- [x] Tenant-scoped run cancellation.
 - [ ] Tenant-scoped tool registries.
 - [ ] **Blocker:** Authentication and authorization (`X-Tenant-ID` and `X-Principal-ID` are trusted as sent).
 - [ ] Secret management for tool credentials.

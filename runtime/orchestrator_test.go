@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -516,11 +517,38 @@ func TestCancelStopsRun(t *testing.T) {
 	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		_ = orch.Cancel(context.Background(), runID, "test")
+		if err := orch.Cancel(context.Background(), core.DefaultTenant, runID, "test"); err != nil {
+			t.Error(err)
+		}
 	}()
 	res, _ := orch.Wait(ctx, runID)
 	if res.Status != core.RunCanceled && res.Status != core.RunFailed {
 		t.Fatalf("expected canceled/failed, got %s", res.Status)
+	}
+}
+
+// Acceptance: §Security #1 – cross-tenant run cancellation.
+func TestCancelIgnoresOtherTenant(t *testing.T) {
+	slow := &slowProvider{delay: 200 * time.Millisecond}
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "slow", Model: "m", Provider: slow}})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name:   "s",
+			Agents: []runtime.AgentStep{{Name: "slow", Prompt: "x"}},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orch.Cancel(ctx, "other-tenant", runID, "test"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("cross-tenant cancel err=%v want ErrNotFound", err)
+	}
+	res, err := orch.Wait(ctx, runID)
+	if err != nil || res.Status != core.RunSucceeded {
+		t.Fatalf("status=%s err=%v want succeeded", res.Status, err)
 	}
 }
 
