@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -106,6 +107,8 @@ type Orchestrator struct {
 	Approvals store.ApprovalStore // typically the same Store
 	// MaxLimits caps the limits a caller may request for a run.
 	MaxLimits core.Limits
+	// Log receives run lifecycle and error logs; NewOrchestrator sets slog.Default().
+	Log *slog.Logger
 
 	mu   sync.Mutex
 	runs map[core.RunID]*runState
@@ -142,6 +145,7 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		Budget:    policy.NewBudgetManager(),
 		LoopDet:   policy.NewLoopDetector(5),
 		Approvals: s,
+		Log:       slog.Default(),
 		MaxLimits: core.Limits{
 			MaxDepth:      8,
 			MaxSubAgents:  64,
@@ -243,6 +247,8 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	defer close(st.done)
 
 	startedAt := time.Now().UTC()
+	log := o.Log.With("run_id", runID, "tenant_id", in.TenantID, "session_id", in.SessionID)
+	log.InfoContext(ctx, "run started", "workflow", in.Workflow.Name)
 	o.transitionRun(ctx, runID, in.TenantID, core.RunRunning, "")
 
 	stageOutputs := map[string]string{}
@@ -286,7 +292,7 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		cur.EndedAt = time.Now().UTC()
 		out, _ := json.Marshal(stageOutputs)
 		cur.Output = out
-		_ = o.Store.UpdateRun(context.Background(), cur)
+		o.logErr(ctx, "update run", o.Store.UpdateRun(context.Background(), cur), "run_id", runID)
 	}
 	o.emit(context.Background(), core.Event{
 		TenantID:   in.TenantID,
@@ -297,6 +303,19 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		Payload:    mustJSON(map[string]any{"status": finalStatus, "failure_reason": failureReason}),
 	})
 	o.LoopDet.Reset(runID)
+	level := slog.LevelInfo
+	if finalStatus == core.RunFailed {
+		level = slog.LevelWarn
+	}
+	log.Log(ctx, level, "run finished",
+		"status", finalStatus,
+		"failure_reason", failureReason,
+		"duration", usage.Runtime,
+		"prompt_tokens", usage.PromptTokens,
+		"completion_tokens", usage.CompletionTokens,
+		"model_calls", usage.ModelCalls,
+		"tool_calls", usage.ToolCalls,
+	)
 
 	st.result = &Result{
 		RunID:         runID,
@@ -561,15 +580,13 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 				Visibility: core.VisibilityPublic,
 				Payload:    mustJSON(map[string]any{"agent": agent.Name, "content": content}),
 			})
-			_ = o.Store.AddMessage(ctx, store.MessageProjection{
+			o.logErr(ctx, "add message", o.Store.AddMessage(ctx, store.MessageProjection{
 				SessionID:  in.SessionID,
 				RunID:      runID,
 				Role:       "assistant:" + agent.Name,
 				Visibility: core.VisibilityPublic,
 				Content:    content,
-			})
-			t, _ := o.Store.GetRun(ctx, in.TenantID, runID)
-			_ = t // silence unused if compiler complains
+			}), "run_id", runID)
 			task := store.Task{
 				ID:        taskID,
 				TenantID:  in.TenantID,
@@ -578,7 +595,7 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 				Status:    core.TaskCompleted,
 				Output:    mustJSON(map[string]any{"content": content}),
 			}
-			_ = o.Store.UpdateTask(ctx, task)
+			o.logErr(ctx, "update task", o.Store.UpdateTask(ctx, task), "run_id", runID, "task_id", taskID)
 			o.emit(ctx, core.Event{
 				TenantID:   in.TenantID,
 				SessionID:  in.SessionID,
@@ -604,13 +621,19 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 }
 
 func (o *Orchestrator) failTask(ctx context.Context, tenant core.TenantID, taskID core.TaskID, err error) error {
-	_ = o.Store.UpdateTask(ctx, store.Task{
+	o.logErr(ctx, "update task", o.Store.UpdateTask(ctx, store.Task{
 		ID:       taskID,
 		TenantID: tenant,
 		Status:   core.TaskFailed,
 		Error:    err.Error(),
-	})
+	}), "task_id", taskID)
 	return err
+}
+
+func (o *Orchestrator) logErr(ctx context.Context, op string, err error, attrs ...any) {
+	if err != nil {
+		o.Log.ErrorContext(ctx, op+" failed", append(attrs, "err", err)...)
+	}
 }
 
 func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, calls []model.ToolCall, allowed map[string]allowedTool) ([]model.Message, error) {
@@ -813,6 +836,7 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 	})
 	res, err := exec.Execute(ctx, call)
 	if err != nil {
+		o.Log.WarnContext(ctx, "tool call failed", "run_id", runID, "task_id", taskID, "tool", call.Tool.Name, "err", err)
 		o.emit(ctx, core.Event{
 			TenantID:   tenant,
 			SessionID:  session,
@@ -853,7 +877,7 @@ func (o *Orchestrator) transitionRun(ctx context.Context, runID core.RunID, tena
 		r.StartedAt = time.Now().UTC()
 	}
 	r.FailureReason = reason
-	_ = o.Store.UpdateRun(ctx, r)
+	o.logErr(ctx, "update run", o.Store.UpdateRun(ctx, r), "run_id", runID)
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
 		SessionID:  r.SessionID,
@@ -868,7 +892,8 @@ func (o *Orchestrator) emit(ctx context.Context, ev core.Event) {
 	if ev.OccurredAt.IsZero() {
 		ev.OccurredAt = time.Now().UTC()
 	}
-	_, _ = o.Store.Append(ctx, []core.Event{ev})
+	_, err := o.Store.Append(ctx, []core.Event{ev})
+	o.logErr(ctx, "append event", err, "run_id", ev.RunID, "type", ev.Type)
 }
 
 func mustJSON(v any) json.RawMessage {

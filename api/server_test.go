@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +35,22 @@ func newTestServer(t *testing.T) (*httptest.Server, *runtime.Orchestrator, store
 	srv := api.NewServer(orch, s)
 	srv.Debug = true
 	return httptest.NewServer(srv.Handler()), orch, s
+}
+
+func TestRequestsAreLogged(t *testing.T) {
+	s := store.NewMemStore()
+	srv := api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s)
+	var buf bytes.Buffer
+	srv.Log = slog.New(slog.NewJSONHandler(&buf, nil))
+	req := httptest.NewRequest(http.MethodPost, "/v1/sessions", strings.NewReader(`{}`))
+	srv.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("log is not one JSON record: %q", buf.String())
+	}
+	if rec["msg"] != "http request" || rec["method"] != "POST" || rec["path"] != "/v1/sessions" || rec["status"] != float64(http.StatusCreated) {
+		t.Fatalf("unexpected record: %v", rec)
+	}
 }
 
 func TestOversizedBodyRejected(t *testing.T) {

@@ -17,7 +17,8 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -36,11 +37,12 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	debug := flag.Bool("debug", false, "serve the debug console and /v1/debug/* (exposes agent instructions)")
 	flag.Parse()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	persistence := openStore()
 	reg := tool.NewRegistry()
 	if err := tool.RegisterBuiltins(reg); err != nil {
-		log.Fatal(err)
+		fatal("register tools", err)
 	}
 
 	prov, modelName := openProvider()
@@ -56,28 +58,33 @@ func main() {
 
 	srv := api.NewServer(orch, persistence)
 	srv.Debug = *debug
-	log.Printf("agent-loop listening on %s", *addr)
+	slog.Info("listening", "addr", *addr, "debug", *debug)
 	if err := srv.HTTPServer(*addr).ListenAndServe(); err != nil {
-		log.Fatal(err)
+		fatal("serve", err)
 	}
+}
+
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err)
+	os.Exit(1)
 }
 
 func openStore() store.Store {
 	dsn := os.Getenv("AGENT_LOOP_PG_DSN")
 	if dsn == "" {
-		log.Print("using in-memory store")
+		slog.Info("using in-memory store")
 		return store.NewMemStore()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	persistence, err := pgstore.New(ctx, dsn)
 	if err != nil {
-		log.Fatalf("postgres: %v", err)
+		fatal("postgres connect", err)
 	}
 	if err := persistence.Migrate(ctx); err != nil {
-		log.Fatalf("postgres migrate: %v", err)
+		fatal("postgres migrate", err)
 	}
-	log.Print("using PostgreSQL store")
+	slog.Info("using PostgreSQL store")
 	return persistence
 }
 
@@ -94,10 +101,10 @@ func openProvider() (model.Provider, string) {
 	if raw := os.Getenv("OLLAMA_TIMEOUT_SECONDS"); raw != "" {
 		seconds, err := strconv.Atoi(raw)
 		if err != nil || seconds <= 0 {
-			log.Fatalf("invalid OLLAMA_TIMEOUT_SECONDS=%q", raw)
+			fatal("invalid OLLAMA_TIMEOUT_SECONDS", fmt.Errorf("%q", raw))
 		}
 		timeout = time.Duration(seconds) * time.Second
 	}
-	log.Printf("using Ollama model %s with timeout %s", modelName, timeout)
+	slog.Info("using Ollama", "model", modelName, "timeout", timeout)
 	return ollama.New(baseURL, &http.Client{Timeout: timeout}), modelName
 }

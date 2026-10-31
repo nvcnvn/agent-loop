@@ -296,7 +296,8 @@ Support approval checkpoints for:
 ## 10. Observability and Operations
 
 Requirements:
-- [ ] **Blocker:** Structured logs.
+- [x] Structured logs (`log/slog`; `cmd/agent-loop` writes JSON to stdout): HTTP requests, run start and
+  finish with usage, failed tool calls, and store writes that fail.
 - [ ] Traces across model calls, tool calls, and sub-agent boundaries.
 - [ ] **Blocker:** Metrics for latency, token use, cost, queue depth, failures, retries, and tool usage.
 - [x] Audit trail of human messages and approvals in the event history.

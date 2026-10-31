@@ -442,6 +442,9 @@ type Subscription interface {
 
 ## Observability
 
+Logs go to the `log/slog` loggers in `runtime.Orchestrator.Log` and `api.Server.Log`.
+`observe.Recorder` is the planned port for metrics and traces:
+
 ```go
 package observe
 

@@ -1,9 +1,11 @@
 package runtime_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +70,38 @@ func TestSequentialRunSucceeds(t *testing.T) {
 	}
 	if got := res.Outputs["reply"]; got != "hi" {
 		t.Fatalf("output=%q", got)
+	}
+}
+
+func TestRunLifecycleIsLogged(t *testing.T) {
+	prov := model.NewMockProvider(model.MockResponse{Content: "hi"})
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "echo", Model: "mock", Provider: prov}})
+	var buf bytes.Buffer
+	orch.Log = slog.New(slog.NewJSONHandler(&buf, nil))
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "echo", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orch.Wait(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	var finished map[string]any
+	for line := range strings.Lines(buf.String()) {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("log line is not JSON: %q", line)
+		}
+		if rec["msg"] == "run finished" {
+			finished = rec
+		}
+	}
+	if finished == nil || finished["run_id"] != string(runID) || finished["status"] != string(core.RunSucceeded) {
+		t.Fatalf("missing run finished record: %s", buf.String())
 	}
 }
 

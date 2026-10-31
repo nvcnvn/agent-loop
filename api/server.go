@@ -52,10 +52,12 @@ type Server struct {
 	Debug bool
 	// MaxBodyBytes caps request bodies (zero means no cap); larger ones get 413.
 	MaxBodyBytes int64
+	// Log receives request and error logs; NewServer sets slog.Default().
+	Log *slog.Logger
 }
 
 func NewServer(orch *runtime.Orchestrator, s store.Store) *Server {
-	return &Server{Orch: orch, Store: s, MaxBodyBytes: 1 << 20}
+	return &Server{Orch: orch, Store: s, MaxBodyBytes: 1 << 20, Log: slog.Default()}
 }
 
 // HTTPServer returns an http.Server for Handler with read and idle timeouts.
@@ -104,15 +106,40 @@ func (s *Server) Handler() http.Handler {
 		if s.MaxBodyBytes > 0 {
 			r.Body = http.MaxBytesReader(w, r.Body, s.MaxBodyBytes)
 		}
-		mux.ServeHTTP(w, r)
+		started := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		mux.ServeHTTP(rec, r)
+		s.Log.InfoContext(r.Context(), "http request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.status,
+			"duration", time.Since(started),
+			"tenant_id", tenantOf(r),
+		)
 	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	if err := s.Store.Ping(ctx); err != nil {
-		slog.ErrorContext(ctx, "readiness ping failed", "err", err)
+		s.Log.ErrorContext(ctx, "readiness ping failed", "err", err)
 		writeErr(w, http.StatusServiceUnavailable, "not_ready", "store unreachable")
 		return
 	}
@@ -282,13 +309,15 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(out) == 1 {
-		_ = s.Store.AddMessage(r.Context(), store.MessageProjection{
+		if err := s.Store.AddMessage(r.Context(), store.MessageProjection{
 			SessionID:  sid,
 			EventID:    out[0].ID,
 			Role:       req.Role,
 			Visibility: core.VisibilityParticipant,
 			Content:    req.Content,
-		})
+		}); err != nil {
+			s.Log.ErrorContext(r.Context(), "add message failed", "session_id", sid, "err", err)
+		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"event": out[0]})
 }
