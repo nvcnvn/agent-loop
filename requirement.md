@@ -287,7 +287,8 @@ Track and enforce:
 - [ ] Cost reported by providers (none do today).
 - [x] Tool-call budget.
 - [x] Sub-agent budget.
-- [ ] **Blocker:** Budget usage persisted so it survives a restart and is released when a run ends.
+- [x] Budget usage persisted on the run (`usage_totals`) after every model call and tool reservation, and
+  dropped from memory when the run ends.
 
 ### 9.3 Human-in-the-Loop
 
@@ -320,7 +321,7 @@ Operational requirements:
 - [x] Server timeouts (read header, read, idle) and request body size limits (`api.Server.HTTPServer`,
   `MaxBodyBytes`).
 - [x] Versioned schema migrations (`store/pg/migrations`, applied by `pg.Store.Migrate`).
-- [ ] **Blocker:** In-process state for finished runs is released (the run and budget maps grow without bound).
+- [x] In-process state for finished runs is released; `Wait` answers finished runs from the store.
 - [ ] Run ownership by lease, so several API replicas can share one database.
 - [ ] Deployment configuration for agents, tools, policy, and limits from file or environment.
 

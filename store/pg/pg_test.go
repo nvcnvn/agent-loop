@@ -249,6 +249,34 @@ func TestPg_ApprovalResolveRoundtrip(t *testing.T) {
 	}
 }
 
+func TestPg_UpdateRunStatusAndUsage(t *testing.T) {
+	s := freshStore(t)
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	rid, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunQueued})
+	if err := s.UpdateRunStatus(ctx, core.DefaultTenant, rid, core.RunRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	want := core.Usage{ModelCalls: 2, ToolCalls: 3, PromptTokens: 40}
+	if err := s.UpdateRunUsage(ctx, core.DefaultTenant, rid, want); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.GetRun(ctx, core.DefaultTenant, rid)
+	if err != nil || run.Usage != want || run.Status != core.RunRunning {
+		t.Fatalf("run=%+v err=%v", run, err)
+	}
+	if err := s.UpdateRunUsage(ctx, "00000000-0000-0000-0000-0000000000bb", rid, want); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("cross-tenant update err=%v", err)
+	}
+	if err := s.UpdateRunStatus(ctx, core.DefaultTenant, rid, core.RunAwaitingApproval, "gate"); err != nil {
+		t.Fatal(err)
+	}
+	run, err = s.GetRun(ctx, core.DefaultTenant, rid)
+	if err != nil || run.Usage != want || run.Status != core.RunAwaitingApproval || run.FailureReason != "gate" || run.StartedAt.IsZero() {
+		t.Fatalf("after status update run=%+v err=%v", run, err)
+	}
+}
+
 func TestPg_ExpiredApprovalCannotBeApproved(t *testing.T) {
 	s := freshStore(t)
 	ctx := context.Background()
@@ -316,7 +344,7 @@ func TestPg_EndToEndRunOverREST(t *testing.T) {
 	// Wait via orchestrator.
 	wctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	res, err := orch.Wait(wctx, rresp.RunID)
+	res, err := orch.Wait(wctx, core.DefaultTenant, rresp.RunID)
 	if err != nil {
 		t.Fatalf("wait: %v", err)
 	}

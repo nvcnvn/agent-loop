@@ -287,6 +287,35 @@ func (s *Store) UpdateRun(ctx context.Context, r store.Run) error {
 	return nil
 }
 
+func (s *Store) UpdateRunStatus(ctx context.Context, tenant core.TenantID, id core.RunID, status core.RunStatus, reason string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE runs SET status=$3, failure_reason=$4,
+		                started_at=CASE WHEN $3='running' THEN coalesce(started_at, now()) ELSE started_at END,
+		                updated_at=now()
+		WHERE run_id=$1 AND tenant_id=$2`,
+		string(id), string(tenant), string(status), reason)
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return core.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) UpdateRunUsage(ctx context.Context, tenant core.TenantID, id core.RunID, usage core.Usage) error {
+	raw, _ := json.Marshal(usage)
+	tag, err := s.pool.Exec(ctx, `UPDATE runs SET usage_totals=$3, updated_at=now() WHERE run_id=$1 AND tenant_id=$2`,
+		string(id), string(tenant), raw)
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return core.ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListRuns(ctx context.Context, tenant core.TenantID, sessionID core.SessionID) ([]store.Run, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT run_id, tenant_id, session_id, parent_run_id, status, limits, usage_totals,

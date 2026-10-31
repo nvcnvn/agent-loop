@@ -89,7 +89,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil {
 		log.Fatalf("run failed: %v (status=%s reason=%s)", err, res.Status, res.FailureReason)
 	}

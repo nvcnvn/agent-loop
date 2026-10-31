@@ -131,7 +131,6 @@ type runState struct {
 	cancel  context.CancelFunc
 	done    chan struct{}
 	result  *Result
-	err     error
 	outputs map[string]string
 }
 
@@ -225,36 +224,78 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 	return runID, nil
 }
 
-// Wait blocks until the run reaches a terminal state.
-func (o *Orchestrator) Wait(ctx context.Context, runID core.RunID) (Result, error) {
+// Wait blocks until the tenant's run reaches a terminal state. A run this
+// orchestrator is not executing is answered from the store.
+func (o *Orchestrator) Wait(ctx context.Context, tenant core.TenantID, runID core.RunID) (Result, error) {
 	o.mu.Lock()
 	st := o.runs[runID]
 	o.mu.Unlock()
-	if st == nil {
-		return Result{}, core.ErrNotFound
+	if st == nil || st.tenant != tenant {
+		return o.storedResult(ctx, tenant, runID)
 	}
 	select {
 	case <-ctx.Done():
 		return Result{}, ctx.Err()
 	case <-st.done:
-		if st.err != nil {
-			return *st.result, st.err
-		}
-		return *st.result, nil
+		return *st.result, runError(st.result.Status, st.result.FailureReason)
 	}
 }
 
-// Cancel signals the tenant's run to stop. It returns immediately; Wait
-// observes the terminal status.
-func (o *Orchestrator) Cancel(_ context.Context, tenant core.TenantID, runID core.RunID, _ string) error {
+func (o *Orchestrator) storedResult(ctx context.Context, tenant core.TenantID, runID core.RunID) (Result, error) {
+	run, err := o.Store.GetRun(ctx, tenant, runID)
+	if err != nil {
+		return Result{}, err
+	}
+	if !run.Status.Terminal() {
+		return Result{}, fmt.Errorf("run %s is %s but not executing here: %w", runID, run.Status, core.ErrNotFound)
+	}
+	res := Result{RunID: runID, Status: run.Status, Usage: run.Usage, FailureReason: run.FailureReason}
+	if len(run.Output) > 0 {
+		if err := json.Unmarshal(run.Output, &res.Outputs); err != nil {
+			return Result{}, fmt.Errorf("run %s output: %w", runID, err)
+		}
+	}
+	return res, runError(run.Status, run.FailureReason)
+}
+
+func runError(status core.RunStatus, reason string) error {
+	switch status {
+	case core.RunSucceeded:
+		return nil
+	case core.RunCanceled:
+		return fmt.Errorf("%s: %w", reason, context.Canceled)
+	case core.RunTimedOut:
+		return fmt.Errorf("%s: %w", reason, context.DeadlineExceeded)
+	default:
+		return errors.New(reason)
+	}
+}
+
+// ActiveRuns returns how many runs this orchestrator is executing.
+func (o *Orchestrator) ActiveRuns() int {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	return len(o.runs)
+}
+
+// Cancel signals the tenant's run to stop. It returns immediately; Wait
+// observes the terminal status. A run that already ended gives core.ErrConflict.
+func (o *Orchestrator) Cancel(ctx context.Context, tenant core.TenantID, runID core.RunID, _ string) error {
+	o.mu.Lock()
 	st, ok := o.runs[runID]
-	if !ok || st.tenant != tenant {
-		return core.ErrNotFound
+	o.mu.Unlock()
+	if ok && st.tenant == tenant {
+		st.cancel()
+		return nil
 	}
-	st.cancel()
-	return nil
+	run, err := o.Store.GetRun(ctx, tenant, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status.Terminal() {
+		return fmt.Errorf("run %s already %s: %w", runID, run.Status, core.ErrConflict)
+	}
+	return fmt.Errorf("run %s is not executing here: %w", runID, core.ErrNotFound)
 }
 
 // execute is the main run loop.
@@ -267,15 +308,13 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	o.transitionRun(ctx, runID, in.TenantID, core.RunRunning, "")
 
 	stageOutputs := map[string]string{}
-	var finalErr error
 	var finalStatus core.RunStatus = core.RunSucceeded
 	var failureReason string
 
 	stages := in.Workflow.Stages
 	if history, err := o.sessionHistory(ctx, in.TenantID, in.SessionID, runID); err != nil {
-		finalErr = fmt.Errorf("session history: %w", err)
 		finalStatus = core.RunFailed
-		failureReason = finalErr.Error()
+		failureReason = "session history: " + err.Error()
 		stages = nil
 	} else {
 		in.history = history
@@ -290,15 +329,13 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	}
 
 	for _, stage := range stages {
-		if err := ctx.Err(); err != nil {
-			finalErr = err
+		if ctx.Err() != nil {
 			finalStatus = core.RunCanceled
 			failureReason = "context canceled"
 			break
 		}
 		out, err := o.runStage(ctx, runID, in, stage, stageOutputs)
 		if err != nil {
-			finalErr = err
 			if errors.Is(err, context.Canceled) {
 				finalStatus = core.RunCanceled
 				failureReason = "canceled"
@@ -319,16 +356,17 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 
 	stopIdleWatch()
 
-	// Persist final state.
-	if cur, err := o.Store.GetRun(context.Background(), in.TenantID, runID); err == nil {
+	cur, err := o.Store.GetRun(context.Background(), in.TenantID, runID)
+	if err == nil {
 		cur.Status = finalStatus
 		cur.Usage = usage
 		cur.FailureReason = failureReason
 		cur.EndedAt = time.Now().UTC()
-		out, _ := json.Marshal(stageOutputs)
-		cur.Output = out
-		o.logErr(ctx, "update run", o.Store.UpdateRun(context.Background(), cur), "run_id", runID)
+		cur.Output, _ = json.Marshal(stageOutputs)
+		err = o.Store.UpdateRun(context.Background(), cur)
 	}
+	o.logErr(ctx, "persist final run state", err, "run_id", runID)
+	finalStored := err == nil
 	o.emit(context.Background(), core.Event{
 		TenantID:   in.TenantID,
 		SessionID:  in.SessionID,
@@ -338,6 +376,13 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		Payload:    mustJSON(map[string]any{"status": finalStatus, "failure_reason": failureReason}),
 	})
 	o.LoopDet.Reset(runID)
+	o.Budget.Forget(runID)
+	// Wait answers released runs from the store, so keep the state when the final write failed.
+	if finalStored {
+		o.mu.Lock()
+		delete(o.runs, runID)
+		o.mu.Unlock()
+	}
 	level := slog.LevelInfo
 	if finalStatus == core.RunFailed {
 		level = slog.LevelWarn
@@ -359,7 +404,6 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		Usage:         usage,
 		FailureReason: failureReason,
 	}
-	st.err = finalErr
 }
 
 // runStage runs one stage and returns its aggregated output.
@@ -600,8 +644,10 @@ func (o *Orchestrator) runAgentStepReserved(ctx context.Context, runID core.RunI
 			Payload:       mustJSON(map[string]any{"usage": resp.Usage, "tool_calls": len(resp.ToolCalls)}),
 			HiddenPayload: mustJSON(map[string]any{"content": resp.Message.Content}),
 		})
-		if err := o.Budget.Commit(runID, usage); err != nil {
-			return "", o.failTask(ctx, in.TenantID, taskID, err)
+		commitErr := o.Budget.Commit(runID, usage)
+		o.persistUsage(ctx, in.TenantID, runID)
+		if commitErr != nil {
+			return "", o.failTask(ctx, in.TenantID, taskID, commitErr)
 		}
 
 		if len(resp.ToolCalls) == 0 {
@@ -692,6 +738,10 @@ func (o *Orchestrator) failTask(ctx context.Context, tenant core.TenantID, taskI
 	return err
 }
 
+func (o *Orchestrator) persistUsage(ctx context.Context, tenant core.TenantID, runID core.RunID) {
+	o.logErr(ctx, "update run usage", o.Store.UpdateRunUsage(ctx, tenant, runID, o.Budget.Snapshot(runID)), "run_id", runID)
+}
+
 func (o *Orchestrator) logErr(ctx context.Context, op string, err error, attrs ...any) {
 	if err != nil {
 		o.Log.ErrorContext(ctx, op+" failed", append(attrs, "err", err)...)
@@ -771,6 +821,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 		})
 	}
 	preflightOK = true
+	o.persistUsage(ctx, tenant, runID)
 
 	results := make(chan toolOut, len(calls))
 	gctx, cancel := context.WithCancel(ctx)
@@ -995,14 +1046,10 @@ func (o *Orchestrator) toolFailed(ctx context.Context, tenant core.TenantID, ses
 func (o *Orchestrator) transitionRun(ctx context.Context, runID core.RunID, tenant core.TenantID, status core.RunStatus, reason string) {
 	r, err := o.Store.GetRun(ctx, tenant, runID)
 	if err != nil {
+		o.logErr(ctx, "read run", err, "run_id", runID)
 		return
 	}
-	r.Status = status
-	if status == core.RunRunning && r.StartedAt.IsZero() {
-		r.StartedAt = time.Now().UTC()
-	}
-	r.FailureReason = reason
-	o.logErr(ctx, "update run", o.Store.UpdateRun(ctx, r), "run_id", runID)
+	o.logErr(ctx, "update run status", o.Store.UpdateRunStatus(ctx, tenant, runID, status, reason), "run_id", runID)
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
 		SessionID:  r.SessionID,

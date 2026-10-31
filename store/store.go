@@ -133,6 +133,11 @@ type RunStore interface {
 	CreateRun(ctx context.Context, r Run) (core.RunID, error)
 	GetRun(ctx context.Context, tenant core.TenantID, id core.RunID) (Run, error)
 	UpdateRun(ctx context.Context, r Run) error
+	// UpdateRunStatus and UpdateRunUsage each write only their own columns, so
+	// concurrent callers cannot undo each other. Moving to running sets
+	// StartedAt if it is unset.
+	UpdateRunStatus(ctx context.Context, tenant core.TenantID, id core.RunID, status core.RunStatus, reason string) error
+	UpdateRunUsage(ctx context.Context, tenant core.TenantID, id core.RunID, usage core.Usage) error
 	ListRuns(ctx context.Context, tenant core.TenantID, sessionID core.SessionID) ([]Run, error)
 	FindByIdempotency(ctx context.Context, tenant core.TenantID, key string) (Run, error)
 }
@@ -328,6 +333,33 @@ func (m *MemStore) UpdateRun(_ context.Context, r Run) error {
 		return core.ErrNotFound
 	}
 	m.runs[r.ID] = r
+	return nil
+}
+
+func (m *MemStore) UpdateRunStatus(_ context.Context, tenant core.TenantID, id core.RunID, status core.RunStatus, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.TenantID != tenant {
+		return core.ErrNotFound
+	}
+	r.Status, r.FailureReason = status, reason
+	if status == core.RunRunning && r.StartedAt.IsZero() {
+		r.StartedAt = time.Now().UTC()
+	}
+	m.runs[id] = r
+	return nil
+}
+
+func (m *MemStore) UpdateRunUsage(_ context.Context, tenant core.TenantID, id core.RunID, usage core.Usage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.TenantID != tenant {
+		return core.ErrNotFound
+	}
+	r.Usage = usage
+	m.runs[id] = r
 	return nil
 }
 

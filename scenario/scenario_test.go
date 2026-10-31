@@ -85,7 +85,7 @@ func run(t *testing.T, agents []runtime.Agent, stages ...runtime.Stage) (runtime
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil || res.Status != core.RunSucceeded {
 		t.Fatalf("run: err=%v status=%s reason=%s", err, res.Status, res.FailureReason)
 	}

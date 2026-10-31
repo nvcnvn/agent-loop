@@ -61,7 +61,7 @@ func TestSequentialRunSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil {
 		t.Fatalf("wait: %v (status=%s reason=%s)", err, res.Status, res.FailureReason)
 	}
@@ -87,7 +87,7 @@ func TestRunLifecycleIsLogged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orch.Wait(ctx, runID); err != nil {
+	if _, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
 		t.Fatal(err)
 	}
 	var finished map[string]any
@@ -133,7 +133,7 @@ func TestRunSeesEarlierSessionMessages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if res, err := orch.Wait(ctx, runID); err != nil {
+		if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
 			t.Fatalf("status=%s err=%v", res.Status, err)
 		}
 	}
@@ -160,6 +160,73 @@ func TestRunSeesEarlierSessionMessages(t *testing.T) {
 		if got := render(calls[i].Messages); got != want {
 			t.Fatalf("call %d messages:\n got %s\nwant %s", i, got, want)
 		}
+	}
+}
+
+func TestUsagePersistedDuringRunAndStateReleased(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "probe", Input: json.RawMessage(`{}`)}}},
+		model.MockResponse{Content: "done"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"probe"}}})
+	var midRun core.Usage
+	_ = orch.Tools.Register(core.ToolDefinition{Name: "probe"}, tool.ExecutorFunc(func(ctx context.Context, c tool.Call) (tool.Result, error) {
+		run, err := s.GetRun(ctx, c.TenantID, c.RunID)
+		midRun = run.Usage
+		return tool.Result{Output: json.RawMessage(`{}`)}, err
+	}))
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatal(err)
+	}
+	if midRun.ModelCalls != 1 || midRun.ToolCalls != 1 || midRun.SubAgents != 1 {
+		t.Fatalf("usage stored mid-run=%+v", midRun)
+	}
+	if orch.ActiveRuns() != 0 {
+		t.Fatalf("active runs=%d after the run ended", orch.ActiveRuns())
+	}
+	if u := orch.Budget.Snapshot(runID); u != (core.Usage{}) {
+		t.Fatalf("budget still tracks the finished run: %+v", u)
+	}
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
+	if err != nil || res.Status != core.RunSucceeded || res.Outputs["s"] != "done" || res.Usage.ModelCalls != 2 {
+		t.Fatalf("Wait on finished run: %+v err=%v", res, err)
+	}
+	if _, err := orch.Wait(ctx, "other-tenant", runID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("cross-tenant Wait err=%v", err)
+	}
+}
+
+func TestWaitOnReleasedFailedRunMatchesLiveResult(t *testing.T) {
+	prov := model.NewMockProvider(model.MockResponse{Err: errors.New("provider down")})
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov}})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, liveErr := orch.Wait(ctx, core.DefaultTenant, runID)
+	for orch.ActiveRuns() != 0 {
+		time.Sleep(time.Millisecond)
+	}
+	stored, storedErr := orch.Wait(ctx, core.DefaultTenant, runID)
+	if live.Status != core.RunFailed || stored.Status != live.Status || stored.FailureReason != live.FailureReason {
+		t.Fatalf("live=%+v stored=%+v", live, stored)
+	}
+	if liveErr == nil || storedErr == nil || liveErr.Error() != storedErr.Error() || !strings.Contains(storedErr.Error(), "provider down") {
+		t.Fatalf("liveErr=%v storedErr=%v", liveErr, storedErr)
 	}
 }
 
@@ -224,7 +291,7 @@ func TestParallelStageWaitAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +333,7 @@ func TestParallelSubAgentBudgetReservesWholeStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err == nil {
 		t.Fatalf("expected sub-agent budget failure, got status=%s", res.Status)
 	}
@@ -304,7 +371,7 @@ func TestStartRunCapsClientLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res, err := orch.Wait(ctx, runID); err != nil || res.Status != core.RunSucceeded {
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil || res.Status != core.RunSucceeded {
 		t.Fatalf("status=%s err=%v", res.Status, err)
 	}
 	run, err := s.GetRun(ctx, core.DefaultTenant, runID)
@@ -342,7 +409,7 @@ func TestParallelToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +448,7 @@ func TestToolDeniedByPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil || res.Outputs["s"] != "fallback" {
 		t.Fatalf("status=%s err=%v outputs=%v; want the model to answer after the refusal", res.Status, err, res.Outputs)
 	}
@@ -427,7 +494,7 @@ func TestToolErrorsReturnToModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil || res.Outputs["s"] != "recovered" {
 		t.Fatalf("status=%s err=%v reason=%s", res.Status, err, res.FailureReason)
 	}
@@ -477,7 +544,7 @@ func TestExclusiveToolWaitsForEarlierParallelTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res, err := orch.Wait(ctx, runID); err != nil {
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
 		t.Fatalf("status=%s err=%v", res.Status, err)
 	}
 
@@ -531,7 +598,7 @@ func TestToolErrorAfterCancelFailsTask(t *testing.T) {
 	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "test"); err != nil {
 		t.Fatal(err)
 	}
-	res, _ := orch.Wait(ctx, runID)
+	res, _ := orch.Wait(ctx, core.DefaultTenant, runID)
 	if res.Status != core.RunCanceled || len(prov.Calls()) != 1 {
 		t.Fatalf("status=%s model calls=%d; want canceled after 1 call", res.Status, len(prov.Calls()))
 	}
@@ -576,7 +643,7 @@ func TestApprovalRequiredToolWaitsForResolution(t *testing.T) {
 	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "approved", json.RawMessage(`{"ok":true}`)); err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil {
 		t.Fatalf("wait: %v (status=%s reason=%s)", err, res.Status, res.FailureReason)
 	}
@@ -650,7 +717,7 @@ func TestRejectedApprovalReturnsToAgent(t *testing.T) {
 	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "rejected", nil); err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil || res.Outputs["s"] != "ok, skipped" {
 		t.Fatalf("status=%s err=%v reason=%s", res.Status, err, res.FailureReason)
 	}
@@ -699,7 +766,7 @@ func TestApprovalExpires(t *testing.T) {
 		t.Fatal(err)
 	}
 	approvalID := awaitApprovalRequest(t, s, runID)
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil || res.Outputs["s"] != "gave up" {
 		t.Fatalf("status=%s err=%v reason=%s", res.Status, err, res.FailureReason)
 	}
@@ -760,7 +827,7 @@ func TestCanceledRunCancelsPendingApproval(t *testing.T) {
 	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "test"); err != nil {
 		t.Fatal(err)
 	}
-	if res, _ := orch.Wait(ctx, runID); res.Status != core.RunCanceled {
+	if res, _ := orch.Wait(ctx, core.DefaultTenant, runID); res.Status != core.RunCanceled {
 		t.Fatalf("status=%s want canceled", res.Status)
 	}
 	a, err := s.GetApproval(ctx, core.DefaultTenant, approvalID)
@@ -788,7 +855,7 @@ func TestStrictReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orch.Wait(ctx, runID); err != nil {
+	if _, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
 		t.Fatal(err)
 	}
 	res, err := runtime.Replay(ctx, s, core.DefaultTenant, runID)
@@ -826,7 +893,7 @@ func TestBudgetExceededStopsRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err == nil {
 		t.Fatalf("expected budget-exceeded failure, got %s", res.Status)
 	}
@@ -861,7 +928,7 @@ func TestToolCallBudgetReservesWholeGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err == nil {
 		t.Fatalf("expected budget-exceeded failure, got %s", res.Status)
 	}
@@ -906,7 +973,7 @@ func TestLoopDetectorTripsOnRepeats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = orch.Wait(ctx, runID)
+	_, err = orch.Wait(ctx, core.DefaultTenant, runID)
 	if err == nil || !strings.Contains(err.Error(), "loop detected") {
 		t.Fatalf("expected loop detection, got %v", err)
 	}
@@ -935,7 +1002,7 @@ func TestCancelStopsRun(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	res, _ := orch.Wait(ctx, runID)
+	res, _ := orch.Wait(ctx, core.DefaultTenant, runID)
 	if res.Status != core.RunCanceled && res.Status != core.RunFailed {
 		t.Fatalf("expected canceled/failed, got %s", res.Status)
 	}
@@ -960,7 +1027,7 @@ func TestCancelIgnoresOtherTenant(t *testing.T) {
 	if err := orch.Cancel(ctx, "other-tenant", runID, "test"); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("cross-tenant cancel err=%v want ErrNotFound", err)
 	}
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil || res.Status != core.RunSucceeded {
 		t.Fatalf("status=%s err=%v want succeeded", res.Status, err)
 	}
@@ -979,7 +1046,7 @@ func TestIdleWaitEmitsDiagnostic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res, err := orch.Wait(ctx, runID); err != nil {
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
 		t.Fatalf("status=%s err=%v", res.Status, err)
 	}
 	events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)

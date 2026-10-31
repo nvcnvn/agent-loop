@@ -389,7 +389,11 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 	rid := core.RunID(r.PathValue("rid"))
-	if err := s.Orch.Cancel(r.Context(), tenantOf(r), rid, "api request"); err != nil {
+	switch err := s.Orch.Cancel(r.Context(), tenantOf(r), rid, "api request"); {
+	case errors.Is(err, core.ErrConflict):
+		writeErr(w, http.StatusConflict, "conflict", err.Error())
+		return
+	case err != nil:
 		writeErr(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}

@@ -303,9 +303,18 @@ func TestCancelRunRejectsOtherTenant(t *testing.T) {
 		t.Fatalf("cross-tenant cancel status=%d want 404", resp.StatusCode)
 	}
 	close(gate.release)
-	res, err := orch.Wait(ctx, runID)
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
 	if err != nil || res.Status != core.RunSucceeded {
 		t.Fatalf("status=%s err=%v want succeeded", res.Status, err)
+	}
+
+	resp, err = srv.Client().Post(srv.URL+"/v1/runs/"+string(runID)+"/cancel", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("cancel of a finished run status=%d want 409", resp.StatusCode)
 	}
 }
 
@@ -328,7 +337,7 @@ func TestSSEStreamOfFinishedRunCloses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orch.Wait(ctx, runID); err != nil {
+	if _, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
 		t.Fatal(err)
 	}
 

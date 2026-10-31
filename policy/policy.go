@@ -147,6 +147,14 @@ func (b *BudgetManager) Commit(run core.RunID, used core.Usage) error {
 	return checkLimits(*u, b.limits[run])
 }
 
+// Forget drops a finished run's usage and limits.
+func (b *BudgetManager) Forget(run core.RunID) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.usage, run)
+	delete(b.limits, run)
+}
+
 // Snapshot returns the current accumulated usage.
 func (b *BudgetManager) Snapshot(run core.RunID) core.Usage {
 	b.mu.Lock()
