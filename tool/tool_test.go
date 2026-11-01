@@ -36,6 +36,28 @@ func TestRegisterValidatesAndFillsDefaults(t *testing.T) {
 	}
 }
 
+func TestRegisterCompilesInputSchemaAndCheckInputUsesIt(t *testing.T) {
+	r := tool.NewRegistry()
+	if err := r.Register(core.ToolDefinition{Name: "bad", InputSchema: json.RawMessage(`{"type":"nope"}`)}, noop); err == nil {
+		t.Fatal("invalid schema accepted")
+	}
+	if err := r.Register(core.ToolDefinition{Name: "remote", InputSchema: json.RawMessage(`{"$ref":"https://example.com/s.json"}`)}, noop); err == nil {
+		t.Fatal("schema referencing another document accepted")
+	}
+	schema := json.RawMessage(`{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}`)
+	if err := r.Register(core.ToolDefinition{Name: "x", InputSchema: schema}, noop); err != nil {
+		t.Fatal(err)
+	}
+	for in, ok := range map[string]bool{`{"n":1}`: true, `{"n":"1"}`: false, `{}`: false, `not json`: false} {
+		if err := r.CheckInput("x", json.RawMessage(in)); (err == nil) != ok {
+			t.Errorf("CheckInput(%s) = %v", in, err)
+		}
+	}
+	if err := r.CheckInput("missing", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("unknown tool passed")
+	}
+}
+
 func TestBuiltins(t *testing.T) {
 	r := tool.NewRegistry()
 	if err := tool.RegisterBuiltins(r); err != nil {
@@ -79,5 +101,19 @@ func FuzzBuiltinArguments(f *testing.F) {
 		if err == nil && !json.Valid(res.Output) {
 			t.Fatalf("%s returned invalid JSON %q", def.Name, res.Output)
 		}
+	})
+}
+
+func FuzzCheckInput(f *testing.F) {
+	r := tool.NewRegistry()
+	schema := json.RawMessage(`{"type":"object","properties":{"n":{"type":"integer"},"s":{"type":"string","maxLength":4}},"required":["n"]}`)
+	if err := r.Register(core.ToolDefinition{Name: "x", InputSchema: schema}, noop); err != nil {
+		f.Fatal(err)
+	}
+	for _, seed := range []string{`{"n":1}`, `{"n":1.5}`, `{"s":"toolong"}`, `[]`, `"str"`, ``, `{"n":1e999}`, `{"n":` + "\x00"} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, in []byte) {
+		_ = r.CheckInput("x", in)
 	})
 }

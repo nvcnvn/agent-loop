@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -118,7 +119,8 @@ func (h headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return h.base.RoundTrip(r)
 }
 
-// Register discovers the server's tools and registers each in reg, returning their names.
+// Register discovers the server's tools and registers each in reg, returning
+// their names. A tool whose input schema does not compile is skipped with a warning.
 func (c *Client) Register(ctx context.Context, reg *tool.Registry) ([]string, error) {
 	sess, err := c.connected(ctx)
 	if err != nil {
@@ -143,7 +145,8 @@ func (c *Client) Register(ctx context.Context, reg *tool.Registry) ([]string, er
 			return c.call(ctx, remote, call.Input, idempotent)
 		})
 		if err := reg.Register(def, exec); err != nil {
-			return names, err
+			slog.WarnContext(ctx, "skipping MCP tool", "server", c.cfg.Name, "tool", t.Name, "err", err)
+			continue
 		}
 		names = append(names, def.Name)
 	}
@@ -153,7 +156,11 @@ func (c *Client) Register(ctx context.Context, reg *tool.Registry) ([]string, er
 // definition translates an MCP tool. Annotations are hints from the server;
 // missing ones default to the most cautious class, as the MCP spec does.
 func (c *Client) definition(t *sdk.Tool, version string) (core.ToolDefinition, error) {
-	in, err := json.Marshal(t.InputSchema)
+	var schema any = t.InputSchema
+	if schema == nil {
+		schema = map[string]any{"type": "object"}
+	}
+	in, err := json.Marshal(schema)
 	if err != nil {
 		return core.ToolDefinition{}, fmt.Errorf("mcp tool %s: input schema: %w", t.Name, err)
 	}

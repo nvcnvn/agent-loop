@@ -161,7 +161,8 @@ Support tools implemented as normal Go functions with a defined registration con
 Requirements:
 - [x] Registration contract.
 - [x] Input and output JSON schema declared on each tool.
-- [ ] Input validated against the schema before execution.
+- [x] Input validated against the schema before approval and execution; a mismatch goes back to the
+  model as a tool error.
 - [x] Context propagation for run timeout and cancellation.
 - [x] Per-tool timeout (`ToolDefinition.Timeout`).
 - [x] Structured error handling: a tool error or panic, or a call to a tool the agent may not use, goes

@@ -137,6 +137,22 @@ func TestRegisterTranslatesTools(t *testing.T) {
 	}
 }
 
+func TestRegisterSkipsToolWithBadSchema(t *testing.T) {
+	s := sdk.NewServer(&sdk.Implementation{Name: "odd", Version: "1"}, nil)
+	ok := func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{}, nil
+	}
+	s.AddTool(&sdk.Tool{Name: "remote_ref", InputSchema: json.RawMessage(`{"type":"object","properties":{"x":{"$ref":"https://example.com/x.json"}}}`)}, ok)
+	s.AddTool(&sdk.Tool{Name: "fine", InputSchema: json.RawMessage(`{"type":"object"}`)}, ok)
+	srv := &inMemory{server: s}
+	c := newClient(Server{Name: "odd"}, srv.transport)
+	t.Cleanup(func() { _ = c.Close() })
+	names, err := c.Register(context.Background(), tool.NewRegistry())
+	if err != nil || len(names) != 1 || names[0] != "odd.fine" {
+		t.Fatalf("names=%v err=%v", names, err)
+	}
+}
+
 func TestCallResults(t *testing.T) {
 	_, reg, _ := registered(t, Server{Name: "calc"})
 	if res, err := call(t, reg, "calc.add", `{"a":2,"b":3}`); err != nil || string(res.Output) != `{"sum":5}` {

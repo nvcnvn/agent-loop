@@ -1115,6 +1115,53 @@ func TestToolErrorsReturnToModel(t *testing.T) {
 	}
 }
 
+// Acceptance: §Tool Calling #1 – input is validated against the tool's schema
+// before approval and execution, and a mismatch goes back to the model.
+func TestToolInputValidatedBeforeExecution(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "refund", Input: json.RawMessage(`{"order_id":7}`)}}},
+		model.MockResponse{Content: "fixed"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"refund"}}})
+	ran := false
+	if err := orch.Tools.Register(core.ToolDefinition{
+		Name:             "refund",
+		RequiresApproval: true,
+		InputSchema:      json.RawMessage(`{"type":"object","properties":{"order_id":{"type":"string"}},"required":["order_id"]}`),
+	}, tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) {
+		ran = true
+		return tool.Result{Output: json.RawMessage(`{}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
+	if err != nil || res.Outputs["s"] != "fixed" {
+		t.Fatalf("status=%s err=%v reason=%s", res.Status, err, res.FailureReason)
+	}
+	if ran {
+		t.Fatal("tool ran with input that does not match its schema")
+	}
+	msgs := prov.Calls()[1].Messages
+	if got := msgs[len(msgs)-1].Content; !strings.Contains(got, "invalid input for tool refund") {
+		t.Fatalf("validation error not returned to the model: %s", got)
+	}
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	for _, ev := range events {
+		if ev.Type == core.EvApprovalReq || ev.Type == core.EvToolStarted {
+			t.Fatalf("invalid call reached %s", ev.Type)
+		}
+	}
+}
+
 // Acceptance: §Tool Calling #5 – exclusive tools do not overlap parallel ones.
 func TestExclusiveToolWaitsForEarlierParallelTools(t *testing.T) {
 	prov := model.NewMockProvider(

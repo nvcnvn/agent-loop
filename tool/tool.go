@@ -5,10 +5,13 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/nvcnvn/agent-loop/core"
 )
@@ -41,7 +44,7 @@ type ExecutorFunc func(ctx context.Context, call Call) (Result, error)
 
 func (f ExecutorFunc) Execute(ctx context.Context, c Call) (Result, error) { return f(ctx, c) }
 
-// Registry holds the set of native tools available to a tenant. The simple
+// Registry holds the native and MCP tools available to a tenant. The simple
 // in-memory implementation is shared across tenants in single-tenant mode.
 type Registry struct {
 	mu    sync.RWMutex
@@ -49,21 +52,29 @@ type Registry struct {
 }
 
 type registered struct {
-	def  core.ToolDefinition
-	exec Executor
+	def    core.ToolDefinition
+	exec   Executor
+	schema *jsonschema.Schema
 }
 
 func NewRegistry() *Registry {
 	return &Registry{tools: map[string]registered{}}
 }
 
-// Register adds (or replaces) a tool by name.
+// Register adds (or replaces) a tool by name. Its input schema must compile.
 func (r *Registry) Register(def core.ToolDefinition, exec Executor) error {
 	if def.Name == "" {
 		return fmt.Errorf("tool: name required")
 	}
 	if exec == nil {
 		return fmt.Errorf("tool: executor required")
+	}
+	var schema *jsonschema.Schema
+	if len(def.InputSchema) > 0 {
+		var err error
+		if schema, err = CompileSchema(def.InputSchema); err != nil {
+			return fmt.Errorf("tool %s: input schema: %w", def.Name, err)
+		}
 	}
 	if def.ID == "" {
 		def.ID = core.ToolID(core.NewID())
@@ -82,7 +93,7 @@ func (r *Registry) Register(def core.ToolDefinition, exec Executor) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.tools[def.Name] = registered{def: def, exec: exec}
+	r.tools[def.Name] = registered{def: def, exec: exec, schema: schema}
 	return nil
 }
 
@@ -104,4 +115,42 @@ func (r *Registry) List() []core.ToolDefinition {
 		out = append(out, t.def)
 	}
 	return out
+}
+
+// CheckInput validates input against the named tool's input schema.
+func (r *Registry) CheckInput(name string, input json.RawMessage) error {
+	r.mu.RLock()
+	t, ok := r.tools[name]
+	r.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("unknown tool %s", name)
+	}
+	if t.schema == nil {
+		return nil
+	}
+	return validateJSON(t.schema, input)
+}
+
+// CompileSchema compiles a JSON Schema that may not reference any other document.
+func CompileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	c := jsonschema.NewCompiler()
+	c.UseLoader(jsonschema.SchemeURLLoader{})
+	const url = "urn:agent-loop:schema"
+	if err := c.AddResource(url, doc); err != nil {
+		return nil, err
+	}
+	return c.Compile(url)
+}
+
+// validateJSON checks that doc is a JSON document that satisfies s.
+func validateJSON(s *jsonschema.Schema, doc []byte) error {
+	v, err := jsonschema.UnmarshalJSON(bytes.NewReader(doc))
+	if err != nil {
+		return fmt.Errorf("not a JSON document: %w", err)
+	}
+	return s.Validate(v)
 }

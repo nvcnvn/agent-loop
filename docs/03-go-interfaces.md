@@ -385,11 +385,17 @@ import (
     "github.com/nvcnvn/agent-loop/core"
 )
 
-type Registry interface {
-    RegisterNative(def core.ToolDefinition, exec Executor) error
-    Discover(ctx context.Context, tenantID core.TenantID) ([]core.ToolDefinition, error)
-    Get(ctx context.Context, tenantID core.TenantID, name string, version string) (core.ToolDefinition, Executor, error)
-}
+// Registry holds the tools agents may call, by name. Register compiles the input
+// schema and refuses one that is invalid or references another document.
+type Registry struct{}
+
+func NewRegistry() *Registry
+func (r *Registry) Register(def core.ToolDefinition, exec Executor) error
+func (r *Registry) Get(name string) (core.ToolDefinition, Executor, bool)
+func (r *Registry) List() []core.ToolDefinition
+func (r *Registry) CheckInput(name string, input json.RawMessage) error
+
+func CompileSchema(raw json.RawMessage) (*jsonschema.Schema, error)
 
 type Executor interface {
     Execute(ctx context.Context, call Call) (Result, error)
@@ -398,9 +404,9 @@ type Executor interface {
 type Call struct {
     TenantID       core.TenantID
     RunID          core.RunID
-    TaskID         *core.TaskID
+    TaskID         core.TaskID
     StepID         core.StepID
-    ToolID         core.ToolID
+    Tool           core.ToolDefinition
     Input          json.RawMessage
     IdempotencyKey string
     Metadata       map[string]any

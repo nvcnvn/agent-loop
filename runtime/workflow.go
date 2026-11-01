@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
+	"github.com/nvcnvn/agent-loop/tool"
 )
 
 // Agent is a runtime-resolvable agent definition.
@@ -141,7 +141,7 @@ func compileWorkflow(wf Workflow, agents map[string]Agent) (*plan, error) {
 	}
 	var err error
 	if len(wf.InputSchema) > 0 {
-		if p.input, err = compileSchema(wf.InputSchema); err != nil {
+		if p.input, err = tool.CompileSchema(wf.InputSchema); err != nil {
 			return nil, fmt.Errorf("input_schema: %w", err)
 		}
 	}
@@ -189,7 +189,7 @@ func compileWorkflow(wf Workflow, agents map[string]Agent) (*plan, error) {
 			}
 		}
 		if len(s.OutputSchema) > 0 {
-			if p.output[i], err = compileSchema(s.OutputSchema); err != nil {
+			if p.output[i], err = tool.CompileSchema(s.OutputSchema); err != nil {
 				return nil, bad("output_schema: %v", err)
 			}
 		}
@@ -284,21 +284,6 @@ func (p *plan) checkInput(input map[string]string) error {
 		return fmt.Errorf("input does not match the workflow input_schema: %w", err)
 	}
 	return nil
-}
-
-// compileSchema compiles a JSON Schema that may not reference any other document.
-func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
-	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
-		return nil, err
-	}
-	c := jsonschema.NewCompiler()
-	c.UseLoader(jsonschema.SchemeURLLoader{})
-	const url = "urn:agent-loop:schema"
-	if err := c.AddResource(url, doc); err != nil {
-		return nil, err
-	}
-	return c.Compile(url)
 }
 
 func validateJSON(s *jsonschema.Schema, text string) error {

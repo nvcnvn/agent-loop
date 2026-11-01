@@ -158,8 +158,11 @@ visibility rules.
 A tool is a `core.ToolDefinition` and a `tool.Executor`, registered by name in a `tool.Registry`.
 The definition holds the name, version, description, input and output JSON Schema, idempotency
 hint, side-effect level, concurrency class, whether calls need approval, and a per-call timeout.
-Native Go tools are registered in Go (`tool.RegisterBuiltins` registers the demo tools). Input is
-not yet validated against the schema.
+Native Go tools are registered in Go (`tool.RegisterBuiltins` registers the demo tools).
+Registering a tool whose input schema does not compile, or references another document, fails.
+Every call's input is validated against the schema before it is approved or run; a call that does
+not match goes back to the model as a tool error naming the mismatch, and still counts toward the
+tool-call budget.
 
 MCP servers are listed under `mcp_servers` in the `-config` file (§4):
 
@@ -176,8 +179,10 @@ MCP servers are listed under `mcp_servers` in the `-config` file (§4):
   `${VAR}` in a header value is read from the environment at startup.
 - At startup each server's tools are listed and registered as `<server>.<tool>`, the names agents
   list in `tools`. A server that cannot be reached, or a header naming an unset variable, stops
-  startup. Tools a server adds later are not picked up until a restart.
-- The schemas are copied, the version is the one the server reports, and the timeout is the
+  startup; a tool whose input schema does not compile is skipped with a warning. Tools a server
+  adds later are not picked up until a restart.
+- The schemas are copied (a missing input schema becomes `{"type": "object"}`), the version is the
+  one the server reports, and the timeout is the
   server's `timeout` (default 30s). The tool's annotations, which are hints the server is trusted to
   give, set its class; a missing annotation takes the MCP default (not read-only, destructive,
   open-world):
@@ -351,7 +356,8 @@ Each error should include:
 
 ### Tool Calling
 
-1. Register a native Go tool and validate input schema before execution.
+1. Register a native Go tool and validate input schema before execution
+   (`TestToolInputValidatedBeforeExecution`).
 2. Reject a tool call denied by policy.
 3. Require approval for an external side-effecting tool.
 4. Run parallel read-only tool calls and fan in results.

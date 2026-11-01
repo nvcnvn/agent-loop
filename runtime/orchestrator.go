@@ -1377,6 +1377,11 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, refused: fmt.Errorf("unknown tool %s", tc.Name)})
 			continue
 		}
+		if err := o.Tools.CheckInput(tc.Name, tc.Input); err != nil {
+			callRec.Tool = allowedTool.def
+			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, refused: fmt.Errorf("invalid input for tool %s: %w", tc.Name, err)})
+			continue
+		}
 		def := allowedTool.def
 		callRec.Tool = def
 		plans = append(plans, plannedTool{
