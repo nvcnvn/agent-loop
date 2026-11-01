@@ -336,6 +336,11 @@ type RetentionStore interface {
     PurgeMemories(ctx context.Context, before time.Time) (int, error)
 }
 
+// pg.Store.Sealer (pg.NewSealer("<id>:<base64 key>,...")) encrypts runs.input/output,
+// tasks.input/output, run_events.payload/hidden_payload, messages.content, artifacts.content,
+// memories.content and approvals.request/resolution with AES-256-GCM under the first key, and
+// opens values sealed under any; a missing key gives pg.ErrSealed.
+
 // Store is what runtime and api take; /readyz calls Ping.
 type Store interface {
     Ping(ctx context.Context) error

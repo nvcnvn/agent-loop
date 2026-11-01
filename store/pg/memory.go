@@ -57,20 +57,20 @@ func (s *Store) PutMemories(ctx context.Context, ms []store.Memory) ([]string, e
 	}
 	ids := make([]string, len(ms))
 	for i, m := range ms {
-		if ids[i], err = putMemory(ctx, tx, m); err != nil {
+		if ids[i], err = s.putMemory(ctx, tx, m); err != nil {
 			return nil, err
 		}
 	}
 	return ids, mapErr(tx.Commit(ctx))
 }
 
-func putMemory(ctx context.Context, tx pgx.Tx, m store.Memory) (string, error) {
+func (s *Store) putMemory(ctx context.Context, tx pgx.Tx, m store.Memory) (string, error) {
 	m.ID = uuidOrNew(m.ID)
 	_, err := tx.Exec(ctx, `
 		INSERT INTO memories (memory_id, tenant_id, scope, session_id, workflow, content, embedding, embed_model, source, created_at, project)
 		VALUES ($1,$2,$3,$4,$5,$6,$7::vector,$8,$9,COALESCE($10, now()),$11)`,
 		m.ID, string(m.TenantID), string(m.Scope), nullableUUID(string(m.SessionID)), nullable(m.Workflow),
-		m.Content, vectorLiteral(m.Embedding), m.EmbedModel, encJSON(m.Source), nullableTime(m.CreatedAt), nullable(m.Project))
+		s.Sealer.text("memories.content", m.Content), vectorLiteral(m.Embedding), m.EmbedModel, encJSON(m.Source), nullableTime(m.CreatedAt), nullable(m.Project))
 	return m.ID, mapErr(err)
 }
 
@@ -103,6 +103,9 @@ func (s *Store) SearchMemories(ctx context.Context, q store.MemoryQuery) ([]stor
 		var sid, wf, project *string
 		var src []byte
 		if err := rows.Scan(&h.ID, &scope, &sid, &wf, &project, &h.Content, &h.EmbedModel, &src, &h.CreatedAt, &h.Score); err != nil {
+			return nil, err
+		}
+		if h.Content, err = s.Sealer.openText("memories.content", h.Content); err != nil {
 			return nil, err
 		}
 		h.TenantID, h.Scope = q.TenantID, store.MemoryScope(scope)

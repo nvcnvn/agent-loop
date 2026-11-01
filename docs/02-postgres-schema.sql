@@ -3,6 +3,8 @@
 -- - PostgreSQL 18 provides uuidv7().
 -- - pgvector is available for embeddings.
 -- - jsonb schemas use application-level JSON Schema validation first, database constraints second.
+-- - With encryption at rest on, a sealed jsonb column holds a JSON string "sealed:v1:<key id>:<base64>",
+--   and a sealed text or bytea column holds that string itself.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 

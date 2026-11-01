@@ -28,6 +28,8 @@ import (
 
 // Store is the pgx-backed implementation of store.Store.
 type Store struct {
+	// Sealer, when set, encrypts the sensitive columns it names before they are written.
+	Sealer *Sealer
 	pool   *pgxpool.Pool
 	notify *notifier
 	// Recheck is how often Subscribe and WaitForApproval look again without a notification.
@@ -264,7 +266,7 @@ func (s *Store) AddMessage(ctx context.Context, m store.MessageProjection) error
 		INSERT INTO messages (message_id, session_id, run_id, event_id, role, visibility, content, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 		m.ID, string(m.SessionID), nullableUUID(string(m.RunID)), nullableUUID(string(m.EventID)),
-		m.Role, string(m.Visibility), m.Content, m.CreatedAt,
+		m.Role, string(m.Visibility), s.Sealer.text("messages.content", m.Content), m.CreatedAt,
 	)
 	return mapErr(err)
 }
@@ -287,6 +289,9 @@ func (s *Store) ListMessages(ctx context.Context, tenant core.TenantID, id core.
 		var rid, eid *string
 		var vis string
 		if err := rows.Scan(&m.ID, &sid, &rid, &eid, &m.Role, &vis, &m.Content, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		if m.Content, err = s.Sealer.openText("messages.content", m.Content); err != nil {
 			return nil, err
 		}
 		m.SessionID = core.SessionID(sid)
@@ -324,7 +329,7 @@ func (s *Store) CreateRun(ctx context.Context, r store.Run) (core.RunID, error) 
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())`,
 		string(r.ID), string(r.TenantID), string(r.SessionID), nullableUUID(string(r.ParentRunID)),
 		string(r.Status), limits, usage, r.FailureReason, nullable(r.IdempotencyKey),
-		nullableJSON(r.Workflow), nullableJSON(r.Input), nullableJSON(r.Output),
+		nullableJSON(r.Workflow), nullableJSON(s.Sealer.json("runs.input", r.Input)), nullableJSON(s.Sealer.json("runs.output", r.Output)),
 		r.QueuedAt, nullableTime(r.StartedAt), nullableTime(r.EndedAt), nullableUUID(string(r.StartedBy)),
 	)
 	if err != nil {
@@ -344,7 +349,7 @@ func (s *Store) GetRun(ctx context.Context, tenant core.TenantID, id core.RunID)
 		       failure_reason, idempotency_key, workflow, input, output,
 		       queued_at, started_at, ended_at, started_by
 		FROM runs WHERE run_id=$1 AND tenant_id=$2`, string(id), string(tenant))
-	return scanRun(row)
+	return s.scanRun(row)
 }
 
 func (s *Store) UpdateRun(ctx context.Context, r store.Run) error {
@@ -356,7 +361,7 @@ func (s *Store) UpdateRun(ctx context.Context, r store.Run) error {
 		                started_at=$10, ended_at=$11, updated_at=now()
 		WHERE run_id=$1 AND tenant_id=$2`,
 		string(r.ID), string(r.TenantID), string(r.Status), limits, usage,
-		r.FailureReason, nullableJSON(r.Workflow), nullableJSON(r.Input), nullableJSON(r.Output),
+		r.FailureReason, nullableJSON(r.Workflow), nullableJSON(s.Sealer.json("runs.input", r.Input)), nullableJSON(s.Sealer.json("runs.output", r.Output)),
 		nullableTime(r.StartedAt), nullableTime(r.EndedAt),
 	)
 	if err != nil {
@@ -416,14 +421,22 @@ func (s *Store) queryRuns(ctx context.Context, where string, args ...any) ([]sto
 	}
 	defer rows.Close()
 	out := []store.Run{}
+	var unreadable []error
 	for rows.Next() {
-		r, err := scanRun(rows)
+		r, err := s.scanRun(rows)
+		if errors.Is(err, ErrSealed) || errors.Is(err, errCorrupt) {
+			unreadable = append(unreadable, err)
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, r)
 	}
-	return out, nil
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err)
+	}
+	return out, errors.Join(unreadable...)
 }
 
 func (s *Store) FindByIdempotency(ctx context.Context, tenant core.TenantID, key string) (store.Run, error) {
@@ -432,14 +445,14 @@ func (s *Store) FindByIdempotency(ctx context.Context, tenant core.TenantID, key
 		       failure_reason, idempotency_key, workflow, input, output,
 		       queued_at, started_at, ended_at, started_by
 		FROM runs WHERE tenant_id=$1 AND idempotency_key=$2`, string(tenant), key)
-	return scanRun(row)
+	return s.scanRun(row)
 }
 
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanRun(row rowScanner) (store.Run, error) {
+func (s *Store) scanRun(row rowScanner) (store.Run, error) {
 	var (
 		out                  store.Run
 		rid, tid, sid        string
@@ -481,8 +494,13 @@ func scanRun(row rowScanner) (store.Run, error) {
 		_ = json.Unmarshal(usage, &out.Usage)
 	}
 	out.Workflow = workflow
-	out.Input = in
-	out.Output = output
+	var err error
+	if out.Input, err = s.Sealer.openJSON("runs.input", in); err != nil {
+		return store.Run{}, err
+	}
+	if out.Output, err = s.Sealer.openJSON("runs.output", output); err != nil {
+		return store.Run{}, err
+	}
 	return out, nil
 }
 
@@ -507,7 +525,7 @@ func (s *Store) CreateTask(ctx context.Context, t store.Task) (core.TaskID, erro
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
 		string(t.ID), string(t.TenantID), string(t.RunID), nullableUUID(string(t.ParentTaskID)),
 		t.AgentName, string(t.Status), t.Depth, t.Attempt,
-		nullableJSONOr(t.Input, "{}"), nullableJSON(t.Output), t.Error, t.CreatedAt,
+		nullableJSONOr(s.Sealer.json("tasks.input", t.Input), "{}"), nullableJSON(s.Sealer.json("tasks.output", t.Output)), t.Error, t.CreatedAt,
 	)
 	if err != nil {
 		return "", mapErr(err)
@@ -520,7 +538,7 @@ func (s *Store) UpdateTask(ctx context.Context, t store.Task) error {
 		UPDATE tasks SET status=$3, output=$4, error=$5, updated_at=now()
 		WHERE task_id=$1 AND tenant_id=$2`,
 		string(t.ID), string(t.TenantID), string(t.Status),
-		nullableJSON(t.Output), t.Error,
+		nullableJSON(s.Sealer.json("tasks.output", t.Output)), t.Error,
 	)
 	if err != nil {
 		return mapErr(err)
@@ -561,8 +579,12 @@ func (s *Store) ListRunTasks(ctx context.Context, tenant core.TenantID, run core
 			t.ParentTaskID = core.TaskID(*parent)
 		}
 		t.Status = core.TaskStatus(status)
-		t.Input = input
-		t.Output = outp
+		if t.Input, err = s.Sealer.openJSON("tasks.input", input); err != nil {
+			return nil, err
+		}
+		if t.Output, err = s.Sealer.openJSON("tasks.output", outp); err != nil {
+			return nil, err
+		}
 		out = append(out, t)
 	}
 	return out, nil
@@ -584,7 +606,7 @@ func (s *Store) CreateApproval(ctx context.Context, a store.Approval) (core.Appr
 		INSERT INTO approvals (approval_id, tenant_id, run_id, step_id, reason, status, request, created_at, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		string(a.ID), string(a.TenantID), nullableUUID(string(a.RunID)), nullableUUID(string(a.StepID)),
-		a.Reason, a.Status, encJSON(a.Request), a.CreatedAt, nullableTime(a.ExpiresAt),
+		a.Reason, a.Status, s.Sealer.json("approvals.request", encJSON(a.Request)), a.CreatedAt, nullableTime(a.ExpiresAt),
 	)
 	if err != nil {
 		return "", mapErr(err)
@@ -594,7 +616,7 @@ func (s *Store) CreateApproval(ctx context.Context, a store.Approval) (core.Appr
 
 const approvalColumns = `approval_id, tenant_id, run_id, step_id, reason, status, request, resolution, created_at, resolved_at, expires_at, resolved_by`
 
-func scanApproval(row rowScanner) (store.Approval, error) {
+func (s *Store) scanApproval(row rowScanner) (store.Approval, error) {
 	var (
 		a                 store.Approval
 		aid, tid          string
@@ -613,7 +635,13 @@ func scanApproval(row rowScanner) (store.Approval, error) {
 	if sid != nil {
 		a.StepID = core.StepID(*sid)
 	}
-	a.Request, a.Resolution = req, res
+	var err error
+	if a.Request, err = s.Sealer.openJSON("approvals.request", req); err != nil {
+		return store.Approval{}, err
+	}
+	if a.Resolution, err = s.Sealer.openJSON("approvals.resolution", res); err != nil {
+		return store.Approval{}, err
+	}
 	if resolved != nil {
 		a.ResolvedAt = *resolved
 	}
@@ -627,7 +655,7 @@ func scanApproval(row rowScanner) (store.Approval, error) {
 }
 
 func (s *Store) GetApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID) (store.Approval, error) {
-	return scanApproval(s.pool.QueryRow(ctx, `
+	return s.scanApproval(s.pool.QueryRow(ctx, `
 		SELECT `+approvalColumns+` FROM approvals WHERE approval_id=$1 AND tenant_id=$2`, string(id), string(tenant)))
 }
 
@@ -639,7 +667,7 @@ func (s *Store) ResolveApproval(ctx context.Context, tenant core.TenantID, id co
 			  AND ($3 IN ('expired', 'canceled') OR expires_at IS NULL OR expires_at > now())
 			RETURNING approval_id)
 		SELECT pg_notify('`+approvalsChannel+`', approval_id::text) FROM resolved`,
-		string(id), string(tenant), status, nullableJSON(resolution), nullableUUID(string(by)),
+		string(id), string(tenant), status, nullableJSON(s.Sealer.json("approvals.resolution", resolution)), nullableUUID(string(by)),
 	)
 	if err != nil {
 		return mapErr(err)
@@ -685,7 +713,7 @@ func (s *Store) ListApprovals(ctx context.Context, tenant core.TenantID, f store
 	defer rows.Close()
 	out := []store.Approval{}
 	for rows.Next() {
-		a, err := scanApproval(rows)
+		a, err := s.scanApproval(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -701,7 +729,7 @@ func (s *Store) WaitForApproval(ctx context.Context, id core.ApprovalID) (store.
 	t := time.NewTicker(s.Recheck)
 	defer t.Stop()
 	for {
-		a, err := scanApproval(s.pool.QueryRow(ctx, `
+		a, err := s.scanApproval(s.pool.QueryRow(ctx, `
 			SELECT `+approvalColumns+` FROM approvals WHERE approval_id=$1`, string(id)))
 		if err != nil {
 			return store.Approval{}, err
@@ -746,7 +774,7 @@ func (s *Store) PutArtifact(ctx context.Context, a store.Artifact) (string, erro
 		        (SELECT COALESCE(max(version), 0) + 1 FROM artifacts WHERE session_id=$3 AND name=$9),
 		        $10,$11,$12,$13,$14)`,
 		a.ID, string(a.TenantID), string(a.SessionID), nullableUUID(string(a.RunID)), nullableUUID(string(a.TaskID)),
-		nullableUUID(string(a.StepID)), a.Producer, a.Kind, a.Name, a.MimeType, a.Size, a.Content, encJSON(a.Metadata), a.CreatedAt,
+		nullableUUID(string(a.StepID)), a.Producer, a.Kind, a.Name, a.MimeType, a.Size, s.Sealer.bytes("artifacts.content", a.Content), encJSON(a.Metadata), a.CreatedAt,
 	); err != nil {
 		return "", mapErr(err)
 	}
@@ -758,7 +786,7 @@ const artifactColumns = `artifact_id, tenant_id, session_id, run_id, task_id, st
 // artifactListColumns are artifactColumns without the content, which lists leave out.
 const artifactListColumns = `artifact_id, tenant_id, session_id, run_id, task_id, step_id, producer, kind, name, version, mime_type, size_bytes, NULL::bytea, metadata, created_at`
 
-func scanArtifact(row rowScanner) (store.Artifact, error) {
+func (s *Store) scanArtifact(row rowScanner) (store.Artifact, error) {
 	var (
 		a                   store.Artifact
 		tid, sid            string
@@ -767,6 +795,10 @@ func scanArtifact(row rowScanner) (store.Artifact, error) {
 	)
 	if err := row.Scan(&a.ID, &tid, &sid, &rid, &taskID, &stepID, &a.Producer, &a.Kind, &a.Name, &a.Version, &a.MimeType, &a.Size, &a.Content, &meta, &a.CreatedAt); err != nil {
 		return store.Artifact{}, mapErr(err)
+	}
+	var err error
+	if a.Content, err = s.Sealer.openBytes("artifacts.content", a.Content); err != nil {
+		return store.Artifact{}, err
 	}
 	a.TenantID, a.SessionID = core.TenantID(tid), core.SessionID(sid)
 	if rid != nil {
@@ -785,7 +817,7 @@ func scanArtifact(row rowScanner) (store.Artifact, error) {
 }
 
 func (s *Store) GetArtifact(ctx context.Context, tenant core.TenantID, id string) (store.Artifact, error) {
-	return scanArtifact(s.pool.QueryRow(ctx, `
+	return s.scanArtifact(s.pool.QueryRow(ctx, `
 		SELECT `+artifactColumns+` FROM artifacts WHERE artifact_id=$1 AND tenant_id=$2`, id, string(tenant)))
 }
 
@@ -809,7 +841,7 @@ func (s *Store) queryArtifacts(ctx context.Context, q string, args ...any) ([]st
 	defer rows.Close()
 	out := []store.Artifact{}
 	for rows.Next() {
-		a, err := scanArtifact(rows)
+		a, err := s.scanArtifact(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -888,7 +920,7 @@ func (s *Store) Append(ctx context.Context, events []core.Event) ([]core.Event, 
 			ev.Sequence, ev.SessionSequence, ev.Type, string(ev.Visibility),
 			nullableUUID(string(ev.ActorID)), nullableUUID(string(ev.TaskID)), nullableUUID(string(ev.StepID)),
 			nullableUUID(string(ev.ParentEventID)), ev.CorrelationID, nullable(ev.CausationID),
-			encJSON(ev.Payload), nullableJSON(ev.HiddenPayload),
+			s.Sealer.json("run_events.payload", encJSON(ev.Payload)), nullableJSON(s.Sealer.json("run_events.hidden_payload", ev.HiddenPayload)),
 			ev.OccurredAt, ev.RecordedAt,
 		)
 		if err != nil {
@@ -985,8 +1017,12 @@ func (s *Store) queryEvents(ctx context.Context, q string, args ...any) ([]core.
 		if caus != nil {
 			ev.CausationID = *caus
 		}
-		ev.Payload = payload
-		ev.HiddenPayload = hidden
+		if ev.Payload, err = s.Sealer.openJSON("run_events.payload", payload); err != nil {
+			return nil, err
+		}
+		if ev.HiddenPayload, err = s.Sealer.openJSON("run_events.hidden_payload", hidden); err != nil {
+			return nil, err
+		}
 		out = append(out, ev)
 	}
 	return out, nil
@@ -1013,7 +1049,7 @@ func (s *Store) Subscribe(ctx context.Context, run core.RunID, afterSeq int64) (
 				       occurred_at, recorded_at
 				FROM run_events WHERE run_id=$1 AND sequence>$2 ORDER BY sequence`,
 				string(run), seq)
-			if err != nil && subCtx.Err() != nil {
+			if err != nil {
 				return
 			}
 			for _, ev := range events {

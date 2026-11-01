@@ -38,6 +38,7 @@ The recommended first vertical slice from
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost; per-tool calls, time and cost) | [policy/policy.go](policy/policy.go) |
 | Tool credentials by name from a mounted secret directory or the environment (`tool.Call.Secrets`); secrets and secret-shaped values redacted from logs and trace errors | [tool/secrets.go](tool/secrets.go), [observe/redact.go](observe/redact.go) |
 | Retention policy: idle sessions deleted with everything in them, and memories past an age (`retention` in the config file) | [runtime/retention.go](runtime/retention.go), [store/retention.go](store/retention.go), [store/pg/retention.go](store/pg/retention.go) |
+| Optional encryption at rest of the Postgres columns holding conversation and tool data (`AGENT_LOOP_ENCRYPTION_KEYS`, AES-256-GCM, rotatable keys) | [store/pg/seal.go](store/pg/seal.go) |
 | Prometheus metrics at `/metrics` (runs, model calls, tokens, cost, tools, queue depth, HTTP latency) | [observe/metrics.go](observe/metrics.go) |
 | Loop / stall detector (identical tool calls, near-identical rejected answers, hand-back drafts and delegations, retry storms) that fails, pauses or asks approval for a run; approval past a cost threshold; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Workflows as stage graphs (`depends_on`) with hand-backs to earlier stages, stop conditions, retries, stage/agent/tool timeouts, stage approval gates, and JSON Schema for input and stage outputs; agents delegating to child agents at runtime (`delegate` tool, depth-limited) and asking the session's people a question that the next posted message answers (`ask_human`); runs started by posting a message; agents and named workflow templates loaded from a JSON config | [runtime/workflow.go](runtime/workflow.go), [runtime/config.go](runtime/config.go) |
@@ -236,6 +237,9 @@ go run ./cmd/agent-loop -addr :8080 -debug -trust-identity-headers
 # or a hosted OpenAI-compatible API instead of Ollama (cp .env.example .env and fill it in;
 # OLLAMA_EMBED_MODEL or LLM_EMBED_MODEL there also enables the memory.save/memory.search tools):
 set -a && . ./.env && set +a && go run ./cmd/agent-loop -debug -trust-identity-headers
+
+# encrypt conversation and tool data in Postgres; list new keys first and keep old ones listed:
+AGENT_LOOP_ENCRYPTION_KEYS="k1:$(openssl rand -base64 32)" go run ./cmd/agent-loop -debug -trust-identity-headers
 
 AGENT_LOOP_REST_URL='http://localhost:8080' \
 AGENT_LOOP_REST_TIMEOUT=900 \

@@ -275,7 +275,11 @@ func fatal(msg string, err error) {
 
 func openStore() store.Store {
 	dsn := os.Getenv("AGENT_LOOP_PG_DSN")
+	keys := os.Getenv("AGENT_LOOP_ENCRYPTION_KEYS")
 	if dsn == "" {
+		if keys != "" {
+			slog.Warn("AGENT_LOOP_ENCRYPTION_KEYS applies to PostgreSQL only; the in-memory store keeps everything in memory")
+		}
 		slog.Info("using in-memory store")
 		return store.NewMemStore()
 	}
@@ -287,6 +291,12 @@ func openStore() store.Store {
 	}
 	if err := persistence.Migrate(ctx); err != nil {
 		fatal("postgres migrate", err)
+	}
+	if keys != "" {
+		if persistence.Sealer, err = pgstore.NewSealer(keys); err != nil {
+			fatal("AGENT_LOOP_ENCRYPTION_KEYS", err)
+		}
+		slog.Info("encrypting sensitive columns at rest")
 	}
 	slog.Info("using PostgreSQL store")
 	return persistence

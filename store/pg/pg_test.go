@@ -14,6 +14,7 @@ package pg_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -553,5 +554,101 @@ func TestPg_NoWritesIntoAPurgedSession(t *testing.T) {
 	}
 	if _, err := s.PutMemory(ctx, store.Memory{TenantID: core.DefaultTenant, Scope: store.MemorySession, SessionID: gone, Content: "x", Embedding: []float32{1}, EmbedModel: "m"}); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("session memory: %v", err)
+	}
+}
+
+// Acceptance: §Security #7 – sensitive columns are encrypted at rest when a key is set.
+func TestPg_SealedColumns(t *testing.T) {
+	plain := freshStore(t)
+	sealer, err := pg.NewSealer("k1:" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.New(context.Background(), dsn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	s := pg.NewFromPool(pool)
+	s.Sealer = sealer
+	ctx := context.Background()
+	const secret = "launch code 0000"
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sid, err := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	must(err)
+	oldRun, err := plain.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid, Input: json.RawMessage(`{"q":"before sealing"}`)})
+	must(err)
+	rid, err := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid, Input: json.RawMessage(`{"q":"` + secret + `"}`)})
+	must(err)
+	run, err := s.GetRun(ctx, core.DefaultTenant, rid)
+	must(err)
+	run.Output = json.RawMessage(`{"a":"` + secret + `"}`)
+	must(s.UpdateRun(ctx, run))
+	tid, err := s.CreateTask(ctx, store.Task{TenantID: core.DefaultTenant, RunID: rid, AgentName: "a", Status: core.TaskPending, Input: json.RawMessage(`{"q":"` + secret + `"}`)})
+	must(err)
+	must(s.UpdateTask(ctx, store.Task{ID: tid, TenantID: core.DefaultTenant, RunID: rid, Status: core.TaskCompleted, Output: json.RawMessage(`{"a":"` + secret + `"}`)}))
+	_, err = s.Append(ctx, []core.Event{{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvSystem, Visibility: core.VisibilityInternal,
+		Payload: json.RawMessage(`{"out":"` + secret + `"}`), HiddenPayload: json.RawMessage(`{"thinking":"` + secret + `"}`)}})
+	must(err)
+	must(s.AddMessage(ctx, store.MessageProjection{SessionID: sid, Role: "user", Visibility: core.VisibilityParticipant, Content: secret}))
+	aid, err := s.PutArtifact(ctx, store.Artifact{TenantID: core.DefaultTenant, SessionID: sid, Kind: "file", Name: "f", Content: []byte(secret)})
+	must(err)
+	appr, err := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: rid, Request: json.RawMessage(`{"input":"` + secret + `"}`)})
+	must(err)
+	must(s.ResolveApproval(ctx, core.DefaultTenant, appr, "approved", core.DefaultPrincipal, json.RawMessage(`{"answer":"`+secret+`"}`)))
+	_, err = s.PutMemory(ctx, store.Memory{TenantID: core.DefaultTenant, Scope: store.MemoryTenant, Content: secret, Embedding: []float32{1}, EmbedModel: "m"})
+	must(err)
+
+	var leaks int
+	if err := pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM runs WHERE input::text LIKE '%launch%' OR output::text LIKE '%launch%') +
+		(SELECT count(*) FROM tasks WHERE input::text LIKE '%launch%' OR output::text LIKE '%launch%') +
+		(SELECT count(*) FROM run_events WHERE payload::text LIKE '%launch%' OR hidden_payload::text LIKE '%launch%') +
+		(SELECT count(*) FROM messages WHERE content LIKE '%launch%') +
+		(SELECT count(*) FROM artifacts WHERE convert_from(content, 'UTF8') LIKE '%launch%') +
+		(SELECT count(*) FROM approvals WHERE request::text LIKE '%launch%' OR resolution::text LIKE '%launch%') +
+		(SELECT count(*) FROM memories WHERE content LIKE '%launch%')`).Scan(&leaks); err != nil || leaks != 0 {
+		t.Fatalf("%d rows hold the secret in plain text (err=%v)", leaks, err)
+	}
+
+	if run, err := s.GetRun(ctx, core.DefaultTenant, rid); err != nil || !strings.Contains(string(run.Input), secret) || !strings.Contains(string(run.Output), secret) {
+		t.Fatalf("run %s %s err=%v", run.Input, run.Output, err)
+	}
+	if run, err := s.GetRun(ctx, core.DefaultTenant, oldRun); err != nil || string(run.Input) != `{"q": "before sealing"}` {
+		t.Fatalf("plain run written before sealing: %s err=%v", run.Input, err)
+	}
+	tasks, err := s.ListRunTasks(ctx, core.DefaultTenant, rid)
+	if err != nil || len(tasks) != 1 || !strings.Contains(string(tasks[0].Input), secret) || !strings.Contains(string(tasks[0].Output), secret) {
+		t.Fatalf("tasks %+v err=%v", tasks, err)
+	}
+	events, err := s.ListRunEvents(ctx, core.DefaultTenant, rid, 0, 0)
+	if err != nil || len(events) != 1 || !strings.Contains(string(events[0].Payload), secret) || !strings.Contains(string(events[0].HiddenPayload), secret) {
+		t.Fatalf("events %+v err=%v", events, err)
+	}
+	if msgs, err := s.ListMessages(ctx, core.DefaultTenant, sid); err != nil || len(msgs) != 1 || msgs[0].Content != secret {
+		t.Fatalf("messages %+v err=%v", msgs, err)
+	}
+	if a, err := s.GetArtifact(ctx, core.DefaultTenant, aid); err != nil || string(a.Content) != secret {
+		t.Fatalf("artifact %q err=%v", a.Content, err)
+	}
+	if a, err := s.GetApproval(ctx, core.DefaultTenant, appr); err != nil || !strings.Contains(string(a.Request), secret) || !strings.Contains(string(a.Resolution), secret) {
+		t.Fatalf("approval %s %s err=%v", a.Request, a.Resolution, err)
+	}
+	if hits, err := s.SearchMemories(ctx, store.MemoryQuery{TenantID: core.DefaultTenant, Embedding: []float32{1}, EmbedModel: "m"}); err != nil || len(hits) != 1 || hits[0].Content != secret {
+		t.Fatalf("memories %+v err=%v", hits, err)
+	}
+
+	if _, err := plain.GetRun(ctx, core.DefaultTenant, rid); !errors.Is(err, pg.ErrSealed) {
+		t.Fatalf("a store without the key read a sealed run: %v", err)
+	}
+	unfinished, err := plain.ListUnfinishedRuns(ctx)
+	if !errors.Is(err, pg.ErrSealed) || len(unfinished) != 1 || unfinished[0].ID != oldRun {
+		t.Fatalf("unfinished runs without the key: %+v err=%v; want the plain run and ErrSealed", unfinished, err)
 	}
 }

@@ -398,14 +398,15 @@ func (o *Orchestrator) Resume(ctx context.Context, tenant core.TenantID, runID c
 }
 
 // Recover resumes every unfinished run in the store and returns how many it
-// resumed. Recovered runs bypass MaxQueuedRuns so none is left behind. It
+// resumed. Recovered runs bypass MaxQueuedRuns so none is left behind, and
+// runs the store cannot read are reported without holding back the rest. It
 // assumes this process is the only one executing runs.
 func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 	runs, err := o.Store.ListUnfinishedRuns(ctx)
-	if err != nil {
+	if len(runs) == 0 && err != nil {
 		return 0, err
 	}
-	var errs []error
+	errs := []error{err}
 	resumed := 0
 	for _, run := range runs {
 		if run.Status == core.RunPaused {

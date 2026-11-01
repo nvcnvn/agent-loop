@@ -193,7 +193,7 @@ type RunStore interface {
 	UpdateRunStatus(ctx context.Context, tenant core.TenantID, id core.RunID, status core.RunStatus, reason string) error
 	UpdateRunUsage(ctx context.Context, tenant core.TenantID, id core.RunID, usage core.Usage) error
 	ListRuns(ctx context.Context, tenant core.TenantID, sessionID core.SessionID) ([]Run, error)
-	// ListUnfinishedRuns returns every tenant's runs that are not in a terminal status.
+	// ListUnfinishedRuns returns every tenant's runs that are not in a terminal status; runs it cannot read are left out and reported in the error.
 	ListUnfinishedRuns(ctx context.Context) ([]Run, error)
 	FindByIdempotency(ctx context.Context, tenant core.TenantID, key string) (Run, error)
 }

@@ -529,6 +529,16 @@ Decide v1 deployment mode explicitly:
   URLs, plus the config file's `redact` list of regular expressions. Errors of tool and model calls
   are redacted where they occur, so the model, events, task errors and a run's failure reason never
   hold the secrets they named; tool outputs and other stored data are not redacted.
+- encryption at rest: with `AGENT_LOOP_ENCRYPTION_KEYS` set to comma-separated `<id>:<base64 32-byte
+  key>` entries, the Postgres store seals with AES-256-GCM, under the first key, the columns that
+  hold conversation and tool data: run and task inputs and outputs, event payloads and hidden
+  payloads, messages, artifact contents, memory contents, and approval requests and resolutions.
+  It reads values sealed with any listed key and values written before sealing was on. A key is
+  rotated by putting a new one first; events and messages are never rewritten, so every key that
+  sealed a row still kept must stay listed. Workflows, agent definitions, session titles, run
+  failure reasons, task errors, IDs, statuses, timestamps and memory embeddings stay plain. A store
+  without the key fails to read a sealed value (`pg.ErrSealed`); recovery skips such runs and
+  reports them.
 
 ### 10. Storage and Artifact Contract
 
@@ -745,6 +755,8 @@ Each error should include:
 6. Keep members and viewers to the sessions they participate in, and to what their session role
    allows; serve each role only the visibilities it may read (`TestRolesAndSessionMembership`,
    `TestListRunEventsFiltersInternalVisibility`, `storetest.Participants`).
+7. Encrypt sensitive columns at rest, read them back, rotate keys and refuse to read without the key
+   (`TestPg_SealedColumns`, `TestSealer`).
 
 ## Recommended First Development Slice
 

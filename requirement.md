@@ -379,7 +379,8 @@ Requirements:
   patterns, become `[REDACTED]`.
 - [x] Data retention policy (`retention` in the config file): idle sessions are deleted with
   everything in them, and memories past an age.
-- [ ] Optional encryption at rest for sensitive fields.
+- [x] Optional encryption at rest for sensitive fields (`AGENT_LOOP_ENCRYPTION_KEYS`: AES-256-GCM on the
+  Postgres columns holding conversation and tool data, with key rotation).
 - [x] Debug console and `/v1/debug/*` endpoints are off unless enabled (`-debug`); they expose agent instructions.
 - [x] Single-tenant deployment is the initial scope (see §17).
 
