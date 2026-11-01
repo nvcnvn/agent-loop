@@ -60,6 +60,14 @@ Required behavior:
   model call has its own `step_id`; a reply that ends in tool calls or is rejected by the output
   schema is superseded by the next step, and the finished reply is `agent_message_created`, which
   follows its deltas.
+- `error_recorded` reports a failure with a stable `code` and its `message`. With `scope: run`
+  (visibility `participant`) it reports a run that ends `failed` or `timed_out`, just before its
+  terminal `run_state_changed`. With `scope: task` (visibility `internal`, since the message can
+  name internal hosts) it reports a failed agent task attempt, with `agent`, `stage`, `attempt` and
+  `will_retry`; an attempt stopped because its run, its stage or a sibling agent failed, timed out
+  or was canceled records none. Codes: `budget_exceeded`, `policy_denied`, `timed_out`, `canceled`,
+  `unsupported_capability`, `loop_detected`, `provider_unavailable` (a model call failed), and
+  `failed` for the rest.
 - Event names are backward-compatible or versioned.
 
 ### 3. Workflow Definition Contract

@@ -708,6 +708,7 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	stageOutputs := map[string]string{}
 	var finalStatus core.RunStatus = core.RunSucceeded
 	var failureReason string
+	var runErr error
 
 	ctx, span := o.startSpan(ctx, "run "+in.Workflow.Name,
 		attribute.String("agentloop.run_id", string(runID)),
@@ -737,6 +738,7 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		if err != nil {
 			finalStatus = core.RunFailed
 			failureReason = "session history: " + err.Error()
+			runErr = fmt.Errorf("session history: %w", err)
 		}
 		in.history = history
 		runnable = err == nil
@@ -752,6 +754,7 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 
 	if runnable {
 		err := o.runStages(ctx, runID, in, in.plan, stageOutputs)
+		runErr = err
 		switch {
 		case err == nil:
 		case errors.Is(err, context.Canceled):
@@ -796,6 +799,12 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	}
 	o.logErr(ctx, "persist final run state", err, "run_id", runID)
 	finalStored := err == nil
+	if finalStatus == core.RunFailed || finalStatus == core.RunTimedOut {
+		if runErr == nil {
+			runErr = errors.New(failureReason)
+		}
+		o.recordError(context.Background(), in, runID, "", core.VisibilityParticipant, runErr, map[string]any{"scope": "run"})
+	}
 	o.emit(context.Background(), core.Event{
 		TenantID:   in.TenantID,
 		SessionID:  in.SessionID,
@@ -967,16 +976,30 @@ func (o *Orchestrator) runTask(ctx context.Context, runID core.RunID, in StartRu
 	if out, ok := in.reuse.take(spec.stage, spec.agent.Name, spec.prompt); ok {
 		return out, nil
 	}
+	if !reserved {
+		if err := o.Budget.ReserveSubAgent(runID); err != nil {
+			return "", err
+		}
+	}
 	backoff := spec.retry.Backoff
 	for attempt := 1; ; attempt++ {
-		if !reserved || attempt > 1 {
-			if err := o.Budget.ReserveSubAgent(runID); err != nil {
-				return "", err
+		out, taskID, err := o.attemptTask(ctx, runID, in, spec, attempt)
+		if err == nil {
+			return out, nil
+		}
+		retry := spec.retries(ctx, attempt, err)
+		if retry {
+			if rerr := o.Budget.ReserveSubAgent(runID); rerr != nil {
+				retry, err = false, rerr
 			}
 		}
-		out, err := o.attemptTask(ctx, runID, in, spec, attempt)
-		if err == nil || attempt >= spec.retry.MaxAttempts || ctx.Err() != nil || errors.Is(err, core.ErrBudgetExceeded) || errors.Is(err, model.ErrUnsupported) {
-			return out, err
+		if taskID != "" && ctx.Err() == nil {
+			o.recordError(ctx, in, runID, taskID, core.VisibilityInternal, err, map[string]any{
+				"scope": "task", "agent": spec.agent.Name, "stage": spec.stage, "attempt": attempt, "will_retry": retry,
+			})
+		}
+		if !retry {
+			return "", err
 		}
 		o.Metrics.Add("agentloop_task_retries_total", 1, "agent", spec.agent.Name)
 		o.systemEvent(ctx, in, runID, "", map[string]any{
@@ -985,6 +1008,7 @@ func (o *Orchestrator) runTask(ctx context.Context, runID core.RunID, in StartRu
 		})
 		select {
 		case <-ctx.Done():
+			o.Budget.Release(runID, core.Usage{SubAgents: 1})
 			return "", ctx.Err()
 		case <-time.After(backoff):
 		}
@@ -992,7 +1016,12 @@ func (o *Orchestrator) runTask(ctx context.Context, runID core.RunID, in StartRu
 	}
 }
 
-func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in StartRunInput, spec taskSpec, attempt int) (string, error) {
+// retries reports whether a failed attempt is retried.
+func (spec taskSpec) retries(ctx context.Context, attempt int, err error) bool {
+	return attempt < spec.retry.MaxAttempts && ctx.Err() == nil && !errors.Is(err, core.ErrBudgetExceeded) && !errors.Is(err, model.ErrUnsupported)
+}
+
+func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in StartRunInput, spec taskSpec, attempt int) (string, core.TaskID, error) {
 	taskID, err := o.Store.CreateTask(ctx, store.Task{
 		TenantID:     in.TenantID,
 		RunID:        runID,
@@ -1005,7 +1034,7 @@ func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in Sta
 	})
 	if err != nil {
 		o.Budget.Release(runID, core.Usage{SubAgents: 1})
-		return "", err
+		return "", "", err
 	}
 	o.emit(ctx, core.Event{
 		TenantID:   in.TenantID,
@@ -1037,9 +1066,9 @@ func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in Sta
 	}
 	endSpan(span, err)
 	if err != nil {
-		return "", o.failTask(ctx, in.TenantID, taskID, err)
+		return "", taskID, o.failTask(ctx, in.TenantID, taskID, err)
 	}
-	return out, nil
+	return out, taskID, nil
 }
 
 // agentLoop calls the model and the tools it asks for until the model answers.
@@ -1097,7 +1126,7 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 	if len(spec.images) > 0 || len(toolSpecs) > 0 {
 		caps, err := agent.Provider.Capabilities(ctx, agent.Model)
 		if err != nil {
-			return "", fmt.Errorf("model capabilities: %w", err)
+			return "", fmt.Errorf("%w capabilities: %w", errModelCall, err)
 		}
 		if len(spec.images) > 0 && !caps.Vision {
 			return "", fmt.Errorf("agent %s: model %s does not accept images: %w", agent.Name, agent.Model, model.ErrUnsupported)
@@ -1184,7 +1213,7 @@ func (o *Orchestrator) modelCall(ctx context.Context, runID core.RunID, in Start
 	o.Metrics.Observe("agentloop_model_call_duration_seconds", time.Since(callStart).Seconds(), "model", agent.Model)
 	if err != nil {
 		o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "error")
-		return model.ChatResponse{}, fmt.Errorf("model: %w", err)
+		return model.ChatResponse{}, fmt.Errorf("%w: %w", errModelCall, err)
 	}
 	o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "ok")
 	o.Metrics.Add("agentloop_tokens_total", float64(resp.Usage.PromptTokens), "model", agent.Model, "type", "prompt")
@@ -1301,6 +1330,46 @@ func (o *Orchestrator) systemEvent(ctx context.Context, in StartRunInput, runID 
 	})
 }
 
+var (
+	errModelCall    = errors.New("model")
+	errLoopDetected = errors.New("loop detected")
+)
+
+// errorCode classifies err for error_recorded events.
+func errorCode(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timed_out"
+	case errors.Is(err, core.ErrBudgetExceeded):
+		return "budget_exceeded"
+	case errors.Is(err, core.ErrPolicyDenied):
+		return "policy_denied"
+	case errors.Is(err, model.ErrUnsupported):
+		return "unsupported_capability"
+	case errors.Is(err, errLoopDetected):
+		return "loop_detected"
+	case errors.Is(err, errModelCall):
+		return "provider_unavailable"
+	default:
+		return "failed"
+	}
+}
+
+// recordError emits an error_recorded event for err with fields.
+func (o *Orchestrator) recordError(ctx context.Context, in StartRunInput, runID core.RunID, taskID core.TaskID, vis core.Visibility, err error, fields map[string]any) {
+	o.emit(context.WithoutCancel(ctx), core.Event{
+		TenantID:   in.TenantID,
+		SessionID:  in.SessionID,
+		RunID:      runID,
+		TaskID:     taskID,
+		Type:       core.EvError,
+		Visibility: vis,
+		Payload:    mustJSON(withFields(fields, map[string]any{"code": errorCode(err), "message": err.Error()})),
+	})
+}
+
 func (o *Orchestrator) failTask(ctx context.Context, tenant core.TenantID, taskID core.TaskID, err error) error {
 	ctx = context.WithoutCancel(ctx)
 	o.logErr(ctx, "update task", o.Store.UpdateTask(ctx, store.Task{
@@ -1362,7 +1431,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 				Visibility: core.VisibilityAudit,
 				Payload:    mustJSON(map[string]any{"event": "loop_detected", "tool": tc.Name, "count": count}),
 			})
-			return nil, fmt.Errorf("loop detected on tool %s after %d identical calls", tc.Name, count)
+			return nil, fmt.Errorf("%w on tool %s after %d identical calls", errLoopDetected, tc.Name, count)
 		}
 		callRec := tool.Call{
 			TenantID: tenant,

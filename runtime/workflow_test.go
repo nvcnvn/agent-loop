@@ -179,6 +179,72 @@ func TestStageRetryPolicy(t *testing.T) {
 	}
 }
 
+// errorEvents returns the run's error_recorded payloads, checking each one's
+// visibility and that the run-scope one comes just before the terminal event.
+func errorEvents(t *testing.T, s store.Store, runID core.RunID) []map[string]any {
+	t.Helper()
+	events, err := s.ListRunEvents(context.Background(), core.DefaultTenant, runID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for i, ev := range events {
+		if ev.Type != core.EvError {
+			continue
+		}
+		var p map[string]any
+		_ = json.Unmarshal(ev.Payload, &p)
+		want := core.VisibilityInternal
+		if p["scope"] == "run" {
+			want = core.VisibilityParticipant
+			if i != len(events)-2 || events[i+1].Type != core.EvRunStateChanged {
+				t.Fatalf("run error_recorded is not just before the terminal event")
+			}
+		}
+		if ev.Visibility != want {
+			t.Fatalf("%v: visibility=%s", p, ev.Visibility)
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func TestFailuresRecordErrorEvents(t *testing.T) {
+	retried := runtime.Workflow{Stages: []runtime.Stage{
+		{Name: "s", Retry: runtime.RetryPolicy{MaxAttempts: 2, Backoff: time.Millisecond}, Agents: []runtime.AgentStep{{Name: "a", Prompt: "x"}}},
+	}}
+	prov := model.NewMockProvider(model.MockResponse{Err: errors.New("flaky")}, model.MockResponse{Content: "ok"})
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "a", Model: "m", Provider: prov}})
+	res, err := runWorkflow(t, orch, runtime.StartRunInput{SessionID: sid, Workflow: retried})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := errorEvents(t, s, res.RunID)
+	if len(got) != 1 || got[0]["scope"] != "task" || got[0]["code"] != "provider_unavailable" || got[0]["will_retry"] != true ||
+		got[0]["agent"] != "a" || got[0]["attempt"] != 1.0 || !strings.Contains(got[0]["message"].(string), "flaky") {
+		t.Fatalf("retried failure: %v", got)
+	}
+
+	// The sub-agent budget leaves no room for the retry.
+	prov = model.NewMockProvider(model.MockResponse{Err: errors.New("flaky")})
+	orch, s, sid = setup(t, []runtime.Agent{{Name: "a", Model: "m", Provider: prov}})
+	res, _ = runWorkflow(t, orch, runtime.StartRunInput{SessionID: sid, Limits: core.Limits{MaxSubAgents: 1}, Workflow: retried})
+	got = errorEvents(t, s, res.RunID)
+	if res.Status != core.RunFailed || len(got) != 2 || got[0]["will_retry"] != false || got[0]["code"] != "budget_exceeded" ||
+		got[1]["scope"] != "run" || got[1]["code"] != "budget_exceeded" {
+		t.Fatalf("status=%s errors=%v", res.Status, got)
+	}
+
+	orch, s, sid = setup(t, []runtime.Agent{{Name: "a", Model: "m", Provider: &slowProvider{delay: time.Second}}})
+	res, _ = runWorkflow(t, orch, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{
+		{Name: "s", Timeout: 20 * time.Millisecond, Agents: []runtime.AgentStep{{Name: "a", Prompt: "x"}}},
+	}}})
+	got = errorEvents(t, s, res.RunID)
+	if res.Status != core.RunTimedOut || len(got) != 1 || got[0]["scope"] != "run" || got[0]["code"] != "timed_out" {
+		t.Fatalf("stage timeout: status=%s errors=%v", res.Status, got)
+	}
+}
+
 func TestStageAndAgentTimeouts(t *testing.T) {
 	for name, tc := range map[string]struct {
 		stageTimeout, agentTimeout time.Duration

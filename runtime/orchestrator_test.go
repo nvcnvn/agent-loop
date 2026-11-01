@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -947,7 +948,7 @@ func TestParallelStageQuorum(t *testing.T) {
 // fail_fast and an unreachable quorum cancel the agents still running.
 func TestParallelStageFailureCancelsSiblings(t *testing.T) {
 	for _, policy := range []runtime.Stage{{FailurePolicy: runtime.FailFast}, {FailurePolicy: runtime.Quorum, Quorum: 2}} {
-		orch, _, sid := setup(t, []runtime.Agent{
+		orch, s, sid := setup(t, []runtime.Agent{
 			{Name: "fails", Model: "m", Provider: model.NewMockProvider(model.MockResponse{Err: errors.New("provider down")})},
 			{Name: "blocks", Model: "m", Provider: gateProvider(make(chan struct{}))},
 		})
@@ -963,6 +964,18 @@ func TestParallelStageFailureCancelsSiblings(t *testing.T) {
 		cancel()
 		if res.Status != core.RunFailed || !strings.Contains(res.FailureReason, "provider down") {
 			t.Fatalf("%s: status=%s reason=%s", policy.FailurePolicy, res.Status, res.FailureReason)
+		}
+		events, _ := s.ListRunEvents(context.Background(), core.DefaultTenant, runID, 0, 0)
+		var agents []string
+		for _, ev := range events {
+			if ev.Type == core.EvError {
+				var p struct{ Agent, Scope string }
+				_ = json.Unmarshal(ev.Payload, &p)
+				agents = append(agents, p.Scope+":"+p.Agent)
+			}
+		}
+		if !slices.Equal(agents, []string{"task:fails", "run:"}) {
+			t.Fatalf("%s: canceled sibling recorded an error: %v", policy.FailurePolicy, agents)
 		}
 	}
 }

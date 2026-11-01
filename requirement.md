@@ -117,7 +117,7 @@ Support at least these message and event types:
 - [x] Tool result.
 - [x] Approval request and approval result.
 - [x] Snapshot (an internal session message holding a history summary, and `snapshot_created`).
-- [ ] Error event (failures appear only as a reason on the run state change).
+- [x] Error event (`error_recorded`, with a stable code, for failed task attempts and runs).
 
 Requirements:
 - [x] Hidden reasoning is stored separately from user-visible messages (`hidden_payload`).
