@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1042,12 +1044,18 @@ func TestDebugSetupEndpoints(t *testing.T) {
 
 func FuzzRESTBodies(f *testing.F) {
 	s := store.NewMemStore()
-	h := api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s).Handler()
+	srv := api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s)
+	srv.Log = slog.New(slog.DiscardHandler)
+	h := srv.Handler()
 	sid, err := s.CreateSession(context.Background(), store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
 	if err != nil {
 		f.Fatal(err)
 	}
-	paths := []string{"/v1/sessions", "/v1/sessions/" + string(sid) + "/messages", "/v1/approvals/missing", "/v1/runs"}
+	rid, err := s.CreateRun(context.Background(), store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunSucceeded})
+	if err != nil {
+		f.Fatal(err)
+	}
+	paths := []string{"/v1/sessions", "/v1/sessions/" + string(sid) + "/messages", "/v1/approvals/missing", "/v1/runs", "/v1/runs/" + string(rid) + "/cancel"}
 	f.Add(uint8(0), []byte(`{"title":"demo"}`))
 	f.Add(uint8(0), []byte(``))
 	f.Add(uint8(1), []byte(`{"role":"user","content":"hi"}`))
@@ -1059,6 +1067,8 @@ func FuzzRESTBodies(f *testing.F) {
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","workflow":{"tool_policy":{"deny_side_effects":["x"],"allowlist":[1]},"stages":[{"name":"a","agents":[{"name":"x"}]}]}}`))
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","workflow":{"input_schema":{"$ref":"file:///etc/passwd"},"stages":[{"name":"a","hand_back":{"when":"(","to":"b"},"output_schema":{"type":5},"agents":[{"name":"x"}]}]}}`))
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","images":{"p":{"mime_type":"image/png","data":"not base64!"}},"workflow":{"stages":[{"name":"a","agents":[{"name":"x","images":["p","q"]}]}]}}`))
+	f.Add(uint8(4), []byte(`{"reason":"`+strings.Repeat("x", 2000)+`"}`))
+	f.Add(uint8(4), []byte(`{"reason":7}`))
 	f.Fuzz(func(t *testing.T, which uint8, body []byte) {
 		path := paths[int(which)%len(paths)]
 		rec := httptest.NewRecorder()
@@ -1132,4 +1142,80 @@ func TestListMessagesHidesInternalMessages(t *testing.T) {
 	if !strings.Contains(string(body), `"hi"`) || strings.Contains(string(body), "secret") {
 		t.Fatalf("messages: %s", body)
 	}
+}
+
+func FuzzRESTQueries(f *testing.F) {
+	s := store.NewMemStore()
+	srv := api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s)
+	srv.Log = slog.New(slog.DiscardHandler)
+	h := srv.Handler()
+	ctx := context.Background()
+	sid, err := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	if err != nil {
+		f.Fatal(err)
+	}
+	rid, err := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunSucceeded})
+	if err != nil {
+		f.Fatal(err)
+	}
+	ev := func(vis core.Visibility, payload string) core.Event {
+		return core.Event{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvRunStateChanged, Visibility: vis, Payload: json.RawMessage(payload)}
+	}
+	if _, err := s.Append(ctx, []core.Event{
+		ev(core.VisibilityPublic, `{"status":"running"}`), ev(core.VisibilityInternal, `{}`),
+		ev(core.VisibilityParticipant, `{}`), ev(core.VisibilityPublic, `{"status":"succeeded"}`),
+	}); err != nil {
+		f.Fatal(err)
+	}
+	f.Add(uint8(0), "status=all&limit=100&after=00000000-0000-0000-0000-000000000001", "", "")
+	f.Add(uint8(0), "limit=-1&run_id=%00", "", "")
+	f.Add(uint8(1), "after=-5&limit=99999999999999999999", "", "")
+	f.Add(uint8(1), "after=2&limit=1", "", "")
+	f.Add(uint8(2), "after=x&deltas=1", "1", "")
+	f.Add(uint8(2), "", "9", "")
+	f.Add(uint8(2), "after=2", "\xa8", "")
+	f.Add(uint8(3), "", "", "not-a-uuid")
+	f.Add(uint8(3), "", "", "../../sessions")
+	f.Fuzz(func(t *testing.T, which uint8, query, lastEventID, runID string) {
+		paths := []string{"/v1/approvals", "/v1/runs/" + string(rid) + "/events", "/v1/runs/" + string(rid) + "/stream", "/v1/runs/" + url.PathEscape(runID) + "/events"}
+		path := paths[int(which)%len(paths)]
+		// A stream stays open while its run may still emit, so it must end with the request.
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, path, nil)
+		req.URL.RawQuery = query
+		req.Header.Set("Last-Event-ID", lastEventID)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code >= 500 {
+			t.Fatalf("GET %s?%s: status %d: %s", path, query, rec.Code, rec.Body)
+		}
+		if rec.Code != http.StatusOK {
+			return
+		}
+		after, _ := strconv.ParseInt(req.URL.Query().Get("after"), 10, 64)
+		switch path {
+		case paths[1]:
+			var body struct{ Events []core.Event }
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			for _, e := range body.Events {
+				if e.Visibility == core.VisibilityInternal || e.Sequence <= after {
+					t.Fatalf("?%s served event %d (%s)", query, e.Sequence, e.Visibility)
+				}
+			}
+		case paths[2]:
+			if v, err := strconv.ParseInt(lastEventID, 10, 64); err == nil {
+				after = v
+			}
+			for line := range strings.Lines(rec.Body.String()) {
+				if id, ok := strings.CutPrefix(strings.TrimSpace(line), "id: "); ok {
+					if n, _ := strconv.ParseInt(id, 10, 64); n <= after || n == 2 {
+						t.Fatalf("Last-Event-ID %q ?%s streamed event %d", lastEventID, query, n)
+					}
+				}
+			}
+		}
+	})
 }

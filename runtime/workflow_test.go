@@ -779,3 +779,77 @@ func TestUnsupportedCapabilityFailsBeforeModelCall(t *testing.T) {
 		})
 	}
 }
+
+func FuzzDelegateArguments(f *testing.F) {
+	f.Add([]byte(`{"agent":"helper","task":"look it up"}`))
+	f.Add([]byte(`{"agent":"lead","task":"recurse"}`))
+	f.Add([]byte(`{"agent":1}`))
+	f.Add([]byte(`[]`))
+	f.Fuzz(func(t *testing.T, input []byte) {
+		if !json.Valid(input) {
+			return
+		}
+		prov := model.NewMockProvider(
+			model.MockResponse{ToolCalls: []model.ToolCall{{ID: "c", Name: "delegate", Input: input}}},
+			model.MockResponse{Content: "child or final"},
+			model.MockResponse{Content: "final"},
+		)
+		orch, s, sid := setup(t, []runtime.Agent{
+			{Name: "lead", Model: "m", Provider: prov, Children: []string{"helper"}},
+			{Name: "helper", Model: "m", Provider: prov},
+		})
+		ctx, cancel := waitCtx()
+		defer cancel()
+		runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{
+			{Name: "s", Agents: []runtime.AgentStep{{Name: "lead", Prompt: "go"}}},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil || res.Status != core.RunSucceeded {
+			t.Fatalf("delegate input %q: status %s err %v", input, res.Status, err)
+		}
+		var req struct {
+			Agent string `json:"agent"`
+			Task  string `json:"task"`
+		}
+		valid := json.Unmarshal(input, &req) == nil && req.Agent == "helper"
+		tasks, err := s.ListRunTasks(ctx, core.DefaultTenant, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if helped := slices.ContainsFunc(tasks, func(tk store.Task) bool { return tk.AgentName == "helper" }); helped != valid {
+			t.Fatalf("delegate input %q: helper ran=%v", input, helped)
+		}
+	})
+}
+
+func FuzzStructuredOutput(f *testing.F) {
+	f.Add(`{"n":1}`)
+	f.Add(`{"n":"1"}`)
+	f.Add("```json\n{\"n\":2}\n```")
+	f.Add(`{"n":1e400}`)
+	f.Fuzz(func(t *testing.T, content string) {
+		prov := model.NewMockProvider(model.MockResponse{Content: content}, model.MockResponse{Content: `{"n":7}`})
+		orch, _, sid := setup(t, []runtime.Agent{{Name: "a", Model: "m", Provider: prov}})
+		ctx, cancel := waitCtx()
+		defer cancel()
+		runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name: "s", Agents: []runtime.AgentStep{{Name: "a", Prompt: "count"}},
+			OutputSchema: json.RawMessage(`{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}`),
+		}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := orch.Wait(ctx, core.DefaultTenant, runID)
+		if err != nil {
+			t.Fatalf("content %q: %v", content, err)
+		}
+		var out struct {
+			N *json.Number `json:"n"`
+		}
+		if json.Unmarshal([]byte(res.Outputs["s"]), &out) != nil || out.N == nil {
+			t.Fatalf("content %q gave output %q", content, res.Outputs["s"])
+		}
+	})
+}

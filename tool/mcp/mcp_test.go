@@ -286,3 +286,50 @@ func TestNewChecksConfig(t *testing.T) {
 		}
 	}
 }
+
+func FuzzToolFromServer(f *testing.F) {
+	c := newClient(Server{Name: "srv"}, nil)
+	f.Add([]byte(`{"name":"add","inputSchema":{"type":"object","properties":{"a":{"type":"integer"}}},"annotations":{"readOnlyHint":true}}`))
+	f.Add([]byte(`{"name":"x","inputSchema":{"$ref":"http://example.com/s.json"}}`))
+	f.Add([]byte(`{"name":"x","inputSchema":{"type":"object"},"outputSchema":{"type":5}}`))
+	f.Add([]byte(`{"name":"","annotations":{"destructiveHint":false,"openWorldHint":false}}`))
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		var tl sdk.Tool
+		if json.Unmarshal(raw, &tl) != nil {
+			return
+		}
+		def, err := c.definition(&tl, "1")
+		if err != nil {
+			return
+		}
+		if !strings.HasPrefix(def.Name, "srv.") {
+			t.Fatalf("name %q lacks the server prefix", def.Name)
+		}
+		if a := tl.Annotations; a == nil && def.SideEffect != core.SideDangerous {
+			t.Fatalf("unannotated tool classed %s", def.SideEffect)
+		} else if a != nil && a.ReadOnlyHint && (def.SideEffect != core.SideNone && def.SideEffect != core.SideReadExternal || def.Concurrency != core.ConcurrencyParallelRead) {
+			t.Fatalf("read-only tool classed %s, %s", def.SideEffect, def.Concurrency)
+		}
+		_, schemaErr := tool.CompileSchema(def.InputSchema)
+		regErr := tool.NewRegistry().Register(def, tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) { return tool.Result{}, nil }))
+		if (schemaErr == nil) != (regErr == nil) {
+			t.Fatalf("schema error %v but register error %v", schemaErr, regErr)
+		}
+	})
+}
+
+func FuzzCallResult(f *testing.F) {
+	f.Add([]byte(`{"content":[{"type":"text","text":"hi"}]}`))
+	f.Add([]byte(`{"content":[{"type":"image","data":"aGk=","mimeType":"image/png"}],"isError":true}`))
+	f.Add([]byte(`{"content":[],"structuredContent":{"sum":3}}`))
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		var res sdk.CallToolResult
+		if json.Unmarshal(raw, &res) != nil {
+			return
+		}
+		out, err := result(&res)
+		if err == nil && !json.Valid(out.Output) {
+			t.Fatalf("invalid output %q", out.Output)
+		}
+	})
+}

@@ -411,7 +411,9 @@ Requirements:
 - [ ] Replay tests using recorded run fixtures.
 - [x] Concurrency tests for fan-out and cancellation.
 - [ ] Failure injection tests for network loss, tool timeout, and process restart.
-- [ ] Fuzz tests for every decoder of external input (model responses, tool arguments, REST bodies).
+- [x] Fuzz tests for every decoder of external input: model responses, streams, structured output and
+  embeddings, model capabilities, MCP tool definitions and results, tool arguments (including
+  `delegate`), REST bodies and queries, and API key lists.
 
 ## 15. End-State Goals
 

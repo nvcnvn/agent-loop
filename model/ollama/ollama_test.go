@@ -3,10 +3,13 @@ package ollama
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nvcnvn/agent-loop/model"
@@ -196,4 +199,43 @@ func TestChatStream(t *testing.T) {
 	if len(deltas) != 3 || deltas[0].Thinking != "hm" || deltas[1].Content != "4" {
 		t.Fatalf("deltas=%+v", deltas)
 	}
+}
+
+func FuzzServerReplies(f *testing.F) {
+	var body atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body.Load().(string))
+	}))
+	defer srv.Close()
+	p := New(srv.URL, srv.Client())
+	f.Add(`{"capabilities":["completion","tools","vision"]}`)
+	f.Add(`{"embeddings":[[0.1,0.2],[0.3]]}`)
+	f.Add(`{"embeddings":null}`)
+	f.Add(`{"message":{"content":"a"}}` + "\n" + `{"message":{"tool_calls":[{"function":{"name":"x","arguments":"[]"}}]},"done":true}`)
+	f.Add(`{"message":{"content":"a"}}{`)
+	var n atomic.Int64
+	f.Fuzz(func(t *testing.T, raw string) {
+		body.Store(raw)
+		ctx := context.Background()
+		var show struct{ Capabilities []string }
+		if caps, err := p.Capabilities(ctx, fmt.Sprint("m", n.Add(1))); err == nil && json.Unmarshal([]byte(raw), &show) == nil && caps.Vision != slices.Contains(show.Capabilities, "vision") {
+			t.Fatalf("vision=%v from %q", caps.Vision, raw)
+		}
+		if vecs, err := p.Embed(ctx, "m", []string{"a", "b"}); err == nil && len(vecs) != 2 {
+			t.Fatalf("%d vectors for 2 texts", len(vecs))
+		}
+		var deltas strings.Builder
+		resp, err := p.ChatStream(ctx, model.ChatRequest{Model: "m"}, func(d model.Delta) { deltas.WriteString(d.Content) })
+		if err != nil {
+			return
+		}
+		if deltas.String() != resp.Message.Content {
+			t.Fatalf("deltas %q do not add up to %q", deltas.String(), resp.Message.Content)
+		}
+		for _, tc := range resp.ToolCalls {
+			if !json.Valid(tc.Input) {
+				t.Fatalf("invalid tool input %q", tc.Input)
+			}
+		}
+	})
 }

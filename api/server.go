@@ -430,6 +430,10 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	rid := core.RunID(r.PathValue("rid"))
+	if _, err := s.Store.GetRun(r.Context(), tenantOf(r), rid); err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	events, err := s.Store.ListRunEvents(r.Context(), tenantOf(r), rid, after, limit)
@@ -683,13 +687,9 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	var afterSeq int64
-	if last := r.Header.Get("Last-Event-ID"); last != "" {
-		if v, err := strconv.ParseInt(last, 10, 64); err == nil {
-			afterSeq = v
-		}
-	} else if v, err := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64); err == nil {
-		afterSeq = v
+	afterSeq, err := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64)
+	if err != nil {
+		afterSeq, _ = strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	}
 
 	// 1. Drain history first. A terminal event followed by others ended an

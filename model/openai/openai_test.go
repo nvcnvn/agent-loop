@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nvcnvn/agent-loop/model"
@@ -253,6 +254,28 @@ func FuzzDecodeResponse(f *testing.F) {
 			if !json.Valid(tc.Input) {
 				t.Fatalf("invalid tool input %q", tc.Input)
 			}
+		}
+	})
+}
+
+func FuzzEmbed(f *testing.F) {
+	var body atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body.Load().(string))
+	}))
+	defer srv.Close()
+	p := New(srv.URL, "")
+	f.Add(`{"data":[{"index":1,"embedding":[0.5]},{"index":0,"embedding":[0.1,0.2]}]}`)
+	f.Add(`{"data":[{"index":2,"embedding":[1]}]}`)
+	f.Add(`{"data":[{"index":0,"embedding":null},{"index":1,"embedding":[]}]}`)
+	f.Fuzz(func(t *testing.T, raw string) {
+		body.Store(raw)
+		vecs, err := p.Embed(context.Background(), "m", []string{"a", "b"})
+		if err != nil {
+			return
+		}
+		if len(vecs) != 2 || vecs[0] == nil || vecs[1] == nil {
+			t.Fatalf("vectors %v for 2 texts", vecs)
 		}
 	})
 }

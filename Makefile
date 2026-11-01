@@ -39,7 +39,7 @@ test:
 fuzz:
 	@for d in $$(grep -rl --include='*_test.go' '^func Fuzz' . | xargs -n1 dirname | sort -u); do \
 	  for f in $$(grep -ho '^func Fuzz[A-Za-z0-9_]*' $$d/*_test.go | cut -c6-); do \
-	    go test -run='^$$' -fuzz="^$$f$$" -fuzztime=$(FUZZTIME) $$d || exit 1; \
+	    go test -run='^$$' -fuzz="^$$f$$" -fuzztime=$(FUZZTIME) -fuzzminimizetime=50x $$d || exit 1; \
 	  done; \
 	done
 

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/nvcnvn/agent-loop/api"
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
@@ -135,4 +137,21 @@ func TestAPIKeyAuthentication(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("access_token outside the stream: status=%d want 401", resp.StatusCode)
 	}
+}
+
+func FuzzParseAPIKeys(f *testing.F) {
+	f.Add("00000000-0000-0000-0000-000000000001:00000000-0000-0000-0000-000000000002:k1")
+	f.Add("a:b:c,,")
+	f.Add("00000000-0000-0000-0000-000000000001:00000000-0000-0000-0000-000000000002:k:with:colons")
+	f.Fuzz(func(t *testing.T, spec string) {
+		keys, err := api.ParseAPIKeys(spec)
+		if err != nil {
+			return
+		}
+		for key, id := range keys {
+			if key == "" || uuid.Validate(string(id.Tenant)) != nil || uuid.Validate(string(id.Principal)) != nil {
+				t.Fatalf("accepted %q as %+v", key, id)
+			}
+		}
+	})
 }
