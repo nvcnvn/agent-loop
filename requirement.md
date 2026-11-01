@@ -325,7 +325,7 @@ Requirements:
 - [x] Metrics for latency, token use, cost, queue depth, failures, and tool usage at `/metrics`
   (Prometheus text; listed in docs/03), including task retries.
 - [x] Audit trail of human messages and approvals in the event history.
-- [ ] Audit of run cancellations and of who resolved each approval.
+- [x] Audit of run cancellations (who and why) and of who resolved each approval.
 - [x] Run timeline view data model (events, tasks, and the debug console).
 
 Operational requirements:

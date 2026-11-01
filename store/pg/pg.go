@@ -507,17 +507,17 @@ func (s *Store) CreateApproval(ctx context.Context, a store.Approval) (core.Appr
 	return a.ID, nil
 }
 
-const approvalColumns = `approval_id, tenant_id, run_id, step_id, reason, status, request, resolution, created_at, resolved_at, expires_at`
+const approvalColumns = `approval_id, tenant_id, run_id, step_id, reason, status, request, resolution, created_at, resolved_at, expires_at, resolved_by`
 
 func scanApproval(row rowScanner) (store.Approval, error) {
 	var (
 		a                 store.Approval
 		aid, tid          string
-		rid, sid          *string
+		rid, sid, by      *string
 		req, res          []byte
 		resolved, expires *time.Time
 	)
-	if err := row.Scan(&aid, &tid, &rid, &sid, &a.Reason, &a.Status, &req, &res, &a.CreatedAt, &resolved, &expires); err != nil {
+	if err := row.Scan(&aid, &tid, &rid, &sid, &a.Reason, &a.Status, &req, &res, &a.CreatedAt, &resolved, &expires, &by); err != nil {
 		return store.Approval{}, mapErr(err)
 	}
 	a.ID = core.ApprovalID(aid)
@@ -535,6 +535,9 @@ func scanApproval(row rowScanner) (store.Approval, error) {
 	if expires != nil {
 		a.ExpiresAt = *expires
 	}
+	if by != nil {
+		a.ResolvedBy = core.PrincipalID(*by)
+	}
 	return a, nil
 }
 
@@ -543,12 +546,12 @@ func (s *Store) GetApproval(ctx context.Context, tenant core.TenantID, id core.A
 		SELECT `+approvalColumns+` FROM approvals WHERE approval_id=$1 AND tenant_id=$2`, string(id), string(tenant)))
 }
 
-func (s *Store) ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, resolution json.RawMessage) error {
+func (s *Store) ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, by core.PrincipalID, resolution json.RawMessage) error {
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE approvals SET status=$3, resolution=$4, resolved_at=now()
+		UPDATE approvals SET status=$3, resolution=$4, resolved_at=now(), resolved_by=$5
 		WHERE approval_id=$1 AND tenant_id=$2 AND status='requested'
 		  AND ($3 IN ('expired', 'canceled') OR expires_at IS NULL OR expires_at > now())`,
-		string(id), string(tenant), status, nullableJSON(resolution),
+		string(id), string(tenant), status, nullableJSON(resolution), nullableUUID(string(by)),
 	)
 	if err != nil {
 		return mapErr(err)

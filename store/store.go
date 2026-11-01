@@ -77,16 +77,17 @@ type MessageProjection struct {
 
 // Approval is the stored shape of an approval request.
 type Approval struct {
-	ID         core.ApprovalID `json:"approval_id"`
-	TenantID   core.TenantID   `json:"tenant_id"`
-	RunID      core.RunID      `json:"run_id,omitempty"`
-	StepID     core.StepID     `json:"step_id,omitempty"`
-	Reason     string          `json:"reason"`
-	Status     string          `json:"status"` // requested|approved|rejected|expired|canceled
-	Request    json.RawMessage `json:"request,omitempty"`
-	Resolution json.RawMessage `json:"resolution,omitempty"`
-	CreatedAt  time.Time       `json:"created_at"`
-	ResolvedAt time.Time       `json:"resolved_at,omitzero"`
+	ID         core.ApprovalID  `json:"approval_id"`
+	TenantID   core.TenantID    `json:"tenant_id"`
+	RunID      core.RunID       `json:"run_id,omitempty"`
+	StepID     core.StepID      `json:"step_id,omitempty"`
+	Reason     string           `json:"reason"`
+	Status     string           `json:"status"` // requested|approved|rejected|expired|canceled
+	Request    json.RawMessage  `json:"request,omitempty"`
+	Resolution json.RawMessage  `json:"resolution,omitempty"`
+	CreatedAt  time.Time        `json:"created_at"`
+	ResolvedAt time.Time        `json:"resolved_at,omitzero"`
+	ResolvedBy core.PrincipalID `json:"resolved_by,omitempty"`
 	// ExpiresAt, when set, is the time after which only "expired" or
 	// "canceled" can resolve the approval.
 	ExpiresAt time.Time `json:"expires_at,omitzero"`
@@ -167,7 +168,8 @@ type TaskStore interface {
 type ApprovalStore interface {
 	CreateApproval(ctx context.Context, a Approval) (core.ApprovalID, error)
 	GetApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID) (Approval, error)
-	ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, resolution json.RawMessage) error
+	// ResolveApproval records by, empty for the runtime itself, as who resolved it.
+	ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, by core.PrincipalID, resolution json.RawMessage) error
 	WaitForApproval(ctx context.Context, id core.ApprovalID) (Approval, error)
 	ListApprovals(ctx context.Context, tenant core.TenantID, f ApprovalFilter) ([]Approval, error)
 	// CancelRunApprovals resolves the run's open approvals as "canceled".
@@ -493,7 +495,7 @@ func (m *MemStore) GetApproval(_ context.Context, tenant core.TenantID, id core.
 	return e.approval, nil
 }
 
-func (m *MemStore) ResolveApproval(_ context.Context, tenant core.TenantID, id core.ApprovalID, status string, resolution json.RawMessage) error {
+func (m *MemStore) ResolveApproval(_ context.Context, tenant core.TenantID, id core.ApprovalID, status string, by core.PrincipalID, resolution json.RawMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.approvals[id]
@@ -506,6 +508,7 @@ func (m *MemStore) ResolveApproval(_ context.Context, tenant core.TenantID, id c
 	}
 	e.approval.Status = status
 	e.approval.Resolution = resolution
+	e.approval.ResolvedBy = by
 	e.approval.ResolvedAt = time.Now().UTC()
 	close(e.done)
 	return nil

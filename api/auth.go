@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/nvcnvn/agent-loop/core"
 )
 
@@ -20,7 +22,8 @@ type Identity struct {
 // Authenticator resolves the caller of a request to a non-public route; an error answers 401.
 type Authenticator func(*http.Request) (Identity, error)
 
-// HeaderIdentity trusts X-Tenant-ID and X-Principal-ID as sent; it is for local development only.
+// HeaderIdentity trusts X-Tenant-ID and X-Principal-ID as sent, if they are
+// UUIDs; it is for local development only.
 func HeaderIdentity(r *http.Request) (Identity, error) {
 	id := Identity{Tenant: core.DefaultTenant, Principal: core.DefaultPrincipal}
 	if t := r.Header.Get("X-Tenant-ID"); t != "" {
@@ -29,7 +32,15 @@ func HeaderIdentity(r *http.Request) (Identity, error) {
 	if p := r.Header.Get("X-Principal-ID"); p != "" {
 		id.Principal = core.PrincipalID(p)
 	}
-	return id, nil
+	return id, id.validate()
+}
+
+// validate checks the IDs are UUIDs, which the Postgres store requires.
+func (id Identity) validate() error {
+	if uuid.Validate(string(id.Tenant)) != nil || uuid.Validate(string(id.Principal)) != nil {
+		return errors.New("tenant and principal IDs must be UUIDs")
+	}
+	return nil
 }
 
 var errUnauthenticated = errors.New("missing or unknown API key")
@@ -68,7 +79,11 @@ func ParseAPIKeys(spec string) (map[string]Identity, error) {
 		if _, dup := keys[parts[2]]; dup {
 			return nil, fmt.Errorf("API key for %s:%s is listed twice", parts[0], parts[1])
 		}
-		keys[parts[2]] = Identity{Tenant: core.TenantID(parts[0]), Principal: core.PrincipalID(parts[1])}
+		id := Identity{Tenant: core.TenantID(parts[0]), Principal: core.PrincipalID(parts[1])}
+		if err := id.validate(); err != nil {
+			return nil, fmt.Errorf("API key entry %d: %w", i+1, err)
+		}
+		keys[parts[2]] = id
 	}
 	return keys, nil
 }

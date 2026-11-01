@@ -395,6 +395,44 @@ func (g gatedProvider) Chat(ctx context.Context, _ model.ChatRequest) (model.Cha
 	}
 }
 
+// Acceptance: §Security #3 – who canceled a run, and why, is audited.
+func TestCancelRunIsAudited(t *testing.T) {
+	s := store.NewMemStore()
+	gate := gatedProvider{release: make(chan struct{})}
+	orch := runtime.NewOrchestrator(s, tool.NewRegistry(), []runtime.Agent{{Name: "gated", Model: "m", Provider: gate}})
+	srv := httptest.NewServer(api.NewServer(orch, s).Handler())
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+		Name: "s", Agents: []runtime.AgentStep{{Name: "gated", Prompt: "x"}},
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/runs/"+string(runID)+"/cancel", strings.NewReader(`{"reason":"duplicate request"}`))
+	req.Header.Set("X-Principal-ID", "00000000-0000-0000-0000-0000000000c3")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("cancel status=%d", resp.StatusCode)
+	}
+	if res, _ := orch.Wait(ctx, core.DefaultTenant, runID); res.Status != core.RunCanceled {
+		t.Fatalf("status=%s", res.Status)
+	}
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	for _, ev := range events {
+		if ev.ActorID == "00000000-0000-0000-0000-0000000000c3" && strings.Contains(string(ev.Payload), `"reason":"duplicate request"`) {
+			return
+		}
+	}
+	t.Fatal("no audit event names who canceled the run and why")
+}
+
 // Acceptance: §Security #1 – cross-tenant run cancellation.
 func TestCancelRunRejectsOtherTenant(t *testing.T) {
 	s := store.NewMemStore()
@@ -704,8 +742,9 @@ func TestResolveApprovalEndpoint(t *testing.T) {
 		t.Fatalf("invalid decision status=%d", resp.StatusCode)
 	}
 
-	body := strings.NewReader(`{"decision":"approved","payload":{"source":"debug_console"}}`)
-	resp, err = srv.Client().Post(srv.URL+"/v1/approvals/"+string(aid), "application/json", body)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/approvals/"+string(aid), strings.NewReader(`{"decision":"approved","payload":{"source":"debug_console"}}`))
+	req.Header.Set("X-Principal-ID", "00000000-0000-0000-0000-0000000000a9")
+	resp, err = srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -724,8 +763,8 @@ func TestResolveApprovalEndpoint(t *testing.T) {
 	if string(approval.Resolution) != `{"source":"debug_console"}` {
 		t.Fatalf("resolution=%s", approval.Resolution)
 	}
-	if approval.ResolvedAt.IsZero() {
-		t.Fatal("resolved_at was not set")
+	if approval.ResolvedAt.IsZero() || approval.ResolvedBy != "00000000-0000-0000-0000-0000000000a9" {
+		t.Fatalf("resolved_at=%v resolved_by=%q", approval.ResolvedAt, approval.ResolvedBy)
 	}
 }
 
@@ -737,7 +776,7 @@ func TestListApprovals(t *testing.T) {
 	run, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid})
 	open, _ := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: run, Reason: "tool requires approval", Request: json.RawMessage(`{"tool":"refund"}`)})
 	done, _ := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: run})
-	_ = s.ResolveApproval(ctx, core.DefaultTenant, done, "rejected", nil)
+	_ = s.ResolveApproval(ctx, core.DefaultTenant, done, "rejected", "", nil)
 	var next string
 	list := func(query, tenant string) (int, []map[string]any) {
 		t.Helper()

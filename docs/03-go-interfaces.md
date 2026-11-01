@@ -155,7 +155,9 @@ import (
 type Orchestrator interface {
     StartRun(ctx context.Context, input core.RunInput) (core.RunHandle, error)
     ResumeRun(ctx context.Context, tenantID core.TenantID, runID core.RunID) error
-    CancelRun(ctx context.Context, tenantID core.TenantID, runID core.RunID, reason string) error
+    // Cancel records by and reason in an audit event, then stops the run; a finished run gives
+    // core.ErrConflict.
+    Cancel(ctx context.Context, tenantID core.TenantID, runID core.RunID, by core.PrincipalID, reason string) error
     // ReExecute runs a finished run again as a child run, answering model and tool calls
     // from its recorded outputs, and waits for the copy's result.
     ReExecute(ctx context.Context, tenantID core.TenantID, runID core.RunID) (Result, error)
@@ -238,7 +240,7 @@ type TaskStore interface {
 type ApprovalStore interface {
     CreateApproval(ctx context.Context, a Approval) (core.ApprovalID, error)
     GetApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID) (Approval, error)
-    ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, resolution json.RawMessage) error
+    ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, by core.PrincipalID, resolution json.RawMessage) error
     WaitForApproval(ctx context.Context, id core.ApprovalID) (Approval, error)
     ListApprovals(ctx context.Context, tenant core.TenantID, f ApprovalFilter) ([]Approval, error)
     CancelRunApprovals(ctx context.Context, tenant core.TenantID, run core.RunID) error

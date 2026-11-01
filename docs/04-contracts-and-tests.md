@@ -22,15 +22,22 @@ Define an OpenAPI document for:
 Approvals: `GET /v1/approvals` lists the caller's tenant's approvals that are still `requested`
 and not expired, oldest first, as `{"approvals": [{"approval_id", "tenant_id", "run_id",
 "step_id", "reason", "status", "request", "resolution", "created_at", "resolved_at",
-"expires_at"}], "next_after"}`. `?run_id=` narrows the list to one run (404 if the tenant has no
+"resolved_by", "expires_at"}], "next_after"}`. `?run_id=` narrows the list to one run (404 if the tenant has no
 such run), and `?status=` picks `approved`, `rejected`, `expired`, `canceled` or `all` (where an
 approval that expired before anyone closed it still shows as `requested`). Pages hold `?limit=`
 approvals (1 to 100, default 100); a full page carries `next_after`, which `?after=` takes to get
 the next. `request` holds the `tool` and its `input`, or the stage `gate`, `stage` and, for output
 gates, `output`: whoever may approve sees what they approve, so any key of the tenant can read tool
 inputs this way, though `tool_call_scheduled` is internal. `POST /v1/approvals/{aid}` with
-`{"decision": "approved" | "rejected", "payload": {...}}` resolves one; an approval already
-resolved or expired answers 409.
+`{"decision": "approved" | "rejected", "payload": {...}}` resolves one as the caller's principal,
+which `resolved_by` and the `actor_id` of the `approval_resolved` event record (both omitted when
+the runtime closes an approval that expired or whose run ended); an approval already resolved or
+expired answers 409.
+
+Cancellation: `POST /v1/runs/{rid}/cancel`, with an optional `{"reason": "..."}` of at most 1024
+bytes, records an `audit` `system_event_recorded` event (`"event": "run_cancel_requested"`,
+`reason`) whose `actor_id` is the caller's principal, then stops the run; a finished run answers
+409. Audit events are kept in the event store and served by no endpoint yet.
 
 Key decisions:
 - idempotency headers for `POST` endpoints
@@ -474,7 +481,8 @@ Each error should include:
 1. Prevent cross-tenant reads for sessions, runs, events, tools, artifacts, and memory, and
    cross-tenant run cancellation.
 2. Redact secrets from logs and traces.
-3. Verify audit records for user actions and approval decisions.
+3. Verify audit records for user actions and approval decisions (`TestCancelRunIsAudited`,
+   `TestResolveApprovalEndpoint`, `storetest.Approvals`).
 4. Enforce artifact retention policy.
 5. Reject a request without a valid API key with 401; a valid key fixes the tenant and principal,
    whatever identity headers say.

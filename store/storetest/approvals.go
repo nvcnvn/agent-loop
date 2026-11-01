@@ -10,10 +10,11 @@ import (
 )
 
 // Approvals checks how an ApprovalStore lists approvals by tenant, run,
-// status and page. Run IDs must be UUIDs of runs the driver accepts approvals for.
+// status and page, and records who resolved one. Run IDs must be UUIDs of runs the driver accepts approvals for.
 func Approvals(t *testing.T, s store.ApprovalStore, run, otherRun core.RunID) {
 	t.Helper()
 	ctx := context.Background()
+	principal := core.PrincipalID(core.NewID())
 	create := func(tenant core.TenantID, run core.RunID) core.ApprovalID {
 		t.Helper()
 		id, err := s.CreateApproval(ctx, store.Approval{TenantID: tenant, RunID: run, Reason: "r"})
@@ -24,8 +25,11 @@ func Approvals(t *testing.T, s store.ApprovalStore, run, otherRun core.RunID) {
 	}
 	first, second, other := create(core.DefaultTenant, run), create(core.DefaultTenant, run), create(core.DefaultTenant, otherRun)
 	create(core.TenantID(core.NewID()), run)
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, second, "approved", nil); err != nil {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, second, "approved", principal, nil); err != nil {
 		t.Fatal(err)
+	}
+	if a, err := s.GetApproval(ctx, core.DefaultTenant, second); err != nil || a.ResolvedBy != principal {
+		t.Fatalf("resolved_by=%q err=%v", a.ResolvedBy, err)
 	}
 	expired, err := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: otherRun, ExpiresAt: time.Now().Add(-time.Second)})
 	if err != nil {

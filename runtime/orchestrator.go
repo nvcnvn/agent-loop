@@ -683,13 +683,30 @@ func (o *Orchestrator) ActiveRuns() int {
 	return len(o.runs)
 }
 
-// Cancel signals the tenant's run to stop. It returns immediately; Wait
-// observes the terminal status. A run that already ended gives core.ErrConflict.
-func (o *Orchestrator) Cancel(ctx context.Context, tenant core.TenantID, runID core.RunID, _ string) error {
+// Cancel signals the tenant's run to stop, recording who asked and why in an
+// audit event. It returns immediately; Wait observes the terminal status. A
+// run that already ended gives core.ErrConflict.
+func (o *Orchestrator) Cancel(ctx context.Context, tenant core.TenantID, runID core.RunID, by core.PrincipalID, reason string) error {
 	o.mu.Lock()
 	st, ok := o.runs[runID]
 	o.mu.Unlock()
 	if ok && st.tenant == tenant {
+		run, err := o.Store.GetRun(ctx, tenant, runID)
+		if err != nil {
+			return err
+		}
+		if run.Status.Terminal() {
+			return fmt.Errorf("run %s already %s: %w", runID, run.Status, core.ErrConflict)
+		}
+		o.emit(ctx, core.Event{
+			TenantID:   tenant,
+			SessionID:  run.SessionID,
+			RunID:      runID,
+			Type:       core.EvSystem,
+			Visibility: core.VisibilityAudit,
+			ActorID:    by,
+			Payload:    mustJSON(map[string]any{"event": "run_cancel_requested", "reason": reason}),
+		})
 		st.cancel(nil)
 		return nil
 	}
@@ -1620,7 +1637,8 @@ func (o *Orchestrator) awaitApproval(ctx context.Context, tenant core.TenantID, 
 		StepID:     stepID,
 		Type:       core.EvApprovalRes,
 		Visibility: core.VisibilityParticipant,
-		Payload:    mustJSON(withFields(subject, map[string]any{"approval_id": approvalID, "status": approval.Status})),
+		ActorID:    approval.ResolvedBy,
+		Payload:    mustJSON(withFields(subject, map[string]any{"approval_id": approvalID, "status": approval.Status, "resolved_by": approval.ResolvedBy})),
 	})
 	if ctx.Err() != nil {
 		return "", fmt.Errorf("approval %s: %w", approvalID, ctx.Err())
@@ -1638,7 +1656,7 @@ func withFields(base, extra map[string]any) map[string]any {
 // closeApproval resolves an open approval with status, or returns the
 // decision a human recorded first.
 func (o *Orchestrator) closeApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string) (store.Approval, error) {
-	if err := o.Approvals.ResolveApproval(ctx, tenant, id, status, nil); err != nil && !errors.Is(err, core.ErrConflict) {
+	if err := o.Approvals.ResolveApproval(ctx, tenant, id, status, "", nil); err != nil && !errors.Is(err, core.ErrConflict) {
 		return store.Approval{}, err
 	}
 	return o.Approvals.GetApproval(ctx, tenant, id)

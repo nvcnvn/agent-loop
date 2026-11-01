@@ -327,11 +327,11 @@ func TestStageApprovalGates(t *testing.T) {
 	if len(prov.Calls()) != 0 {
 		t.Fatal("stage started before its start gate was approved")
 	}
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, start, "approved", nil); err != nil {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, start, "approved", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	output := awaitGate(t, s, runID, "output")
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, output, "rejected", nil); err != nil {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, output, "rejected", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
@@ -647,7 +647,7 @@ func TestCanceledRunIsNotResumed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "test"); err != nil {
+	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "", "test"); err != nil {
 		t.Fatal(err)
 	}
 	if res, _ := orch.Wait(ctx, core.DefaultTenant, runID); res.Status != core.RunCanceled {

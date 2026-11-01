@@ -222,7 +222,7 @@ func (w *world) resolveApprovals(ctx context.Context, runID core.RunID, done <-c
 				w.t.Errorf("unexpected approval request: %s", ev.Payload)
 				decision = "rejected"
 			}
-			_ = w.store.ResolveApproval(ctx, core.DefaultTenant, p.ApprovalID, decision, nil)
+			_ = w.store.ResolveApproval(ctx, core.DefaultTenant, p.ApprovalID, decision, "", nil)
 		}
 	}
 }

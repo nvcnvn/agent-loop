@@ -241,7 +241,7 @@ func TestPg_ApprovalResolveRoundtrip(t *testing.T) {
 	}()
 
 	time.Sleep(150 * time.Millisecond)
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "approved", json.RawMessage(`{"ok":true}`)); err != nil {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "approved", "", json.RawMessage(`{"ok":true}`)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -315,7 +315,7 @@ func TestPg_CancelRunApprovals(t *testing.T) {
 	rid, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunAwaitingApproval})
 	open, _ := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: rid})
 	done, _ := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: rid})
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, done, "approved", nil); err != nil {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, done, "approved", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CancelRunApprovals(ctx, core.DefaultTenant, rid); err != nil {
@@ -336,10 +336,10 @@ func TestPg_ExpiredApprovalCannotBeApproved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "approved", nil); !errors.Is(err, core.ErrConflict) {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "approved", "", nil); !errors.Is(err, core.ErrConflict) {
 		t.Fatalf("approve after expiry err=%v want ErrConflict", err)
 	}
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "expired", nil); err != nil {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "expired", "", nil); err != nil {
 		t.Fatalf("expire: %v", err)
 	}
 	a, err := s.GetApproval(ctx, core.DefaultTenant, id)

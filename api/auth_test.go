@@ -31,13 +31,23 @@ func TestParseAPIKeys(t *testing.T) {
 	if keys["s3cret:with:colons"] != (api.Identity{Tenant: tenantA, Principal: userA}) || len(keys) != 2 {
 		t.Fatalf("keys=%v", keys)
 	}
-	for _, bad := range []string{"", "tenant:principal", "a:b:", ":b:secretkey", "a::secretkey", "a:b:secretkey,a:b:secretkey"} {
+	for _, bad := range []string{"", "tenant:principal", "a:b:", ":b:secretkey", "a::secretkey", "a:b:secretkey,a:b:secretkey", string(tenantA) + ":bot:secretkey"} {
 		_, err := api.ParseAPIKeys(bad)
 		if err == nil {
 			t.Fatalf("ParseAPIKeys(%q) accepted", bad)
 		}
 		if strings.Contains(err.Error(), "secretkey") {
 			t.Fatalf("error leaks the key: %v", err)
+		}
+	}
+}
+
+func TestHeaderIdentityNeedsUUIDs(t *testing.T) {
+	for h, ok := range map[string]bool{"": true, string(userA): true, "operator-3": false} {
+		r := httptest.NewRequest(http.MethodGet, "/v1/sessions", nil)
+		r.Header.Set("X-Principal-ID", h)
+		if _, err := api.HeaderIdentity(r); (err == nil) != ok {
+			t.Errorf("X-Principal-ID %q: err=%v", h, err)
 		}
 	}
 }

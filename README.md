@@ -113,10 +113,10 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 OTEL_SERVICE_NAME=agent-loop \
 
 The server refuses to start until you choose how `/v1` requests are
 authenticated. In production set `AGENT_LOOP_API_KEYS` to comma-separated
-`<tenant>:<principal>:<key>` entries; clients send `Authorization: Bearer
+`<tenant>:<principal>:<key>` entries, where tenant and principal are UUIDs; clients send `Authorization: Bearer
 <key>` (SSE clients may pass `?access_token=<key>` instead), and the key alone
 decides the tenant and principal. `-trust-identity-headers` takes them from
-`X-Tenant-ID` and `X-Principal-ID` unchecked, for local development only.
+`X-Tenant-ID` and `X-Principal-ID` (UUIDs) unchecked, for local development only.
 `/healthz`, `/readyz` and `/metrics` need no key. Any key of a tenant may act
 on everything in that tenant.
 

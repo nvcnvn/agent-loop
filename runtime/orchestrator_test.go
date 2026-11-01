@@ -288,7 +288,7 @@ func TestCancelQueuedRun(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if err := orch.Cancel(ctx, core.DefaultTenant, queued, "test"); err != nil {
+	if err := orch.Cancel(ctx, core.DefaultTenant, queued, "", "test"); err != nil {
 		t.Fatal(err)
 	}
 	if res, _ := orch.Wait(ctx, core.DefaultTenant, queued); res.Status != core.RunCanceled {
@@ -1026,7 +1026,7 @@ func TestQuorumStageMetThenRunCanceled(t *testing.T) {
 			done = done || ev.Type == core.EvTaskCompleted
 		}
 	}
-	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "test"); err != nil {
+	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "", "test"); err != nil {
 		t.Fatal(err)
 	}
 	if res, _ := orch.Wait(ctx, core.DefaultTenant, runID); res.Status != core.RunCanceled {
@@ -1368,7 +1368,7 @@ func TestToolErrorAfterCancelFailsTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-started
-	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "test"); err != nil {
+	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "", "test"); err != nil {
 		t.Fatal(err)
 	}
 	res, _ := orch.Wait(ctx, core.DefaultTenant, runID)
@@ -1413,7 +1413,7 @@ func TestApprovalRequiredToolWaitsForResolution(t *testing.T) {
 	if run.Status != core.RunAwaitingApproval {
 		t.Fatalf("status=%s want awaiting_approval", run.Status)
 	}
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "approved", json.RawMessage(`{"ok":true}`)); err != nil {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "approved", "approver-1", json.RawMessage(`{"ok":true}`)); err != nil {
 		t.Fatal(err)
 	}
 	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
@@ -1434,7 +1434,9 @@ func TestApprovalRequiredToolWaitsForResolution(t *testing.T) {
 	for _, ev := range events {
 		if ev.Type == core.EvApprovalRes {
 			foundResolution = true
-			break
+			if ev.ActorID != "approver-1" || !strings.Contains(string(ev.Payload), `"resolved_by":"approver-1"`) {
+				t.Fatalf("approval_resolved does not name its resolver: actor=%q %s", ev.ActorID, ev.Payload)
+			}
 		}
 	}
 	if !foundResolution {
@@ -1504,7 +1506,7 @@ func TestRejectedApprovalReturnsToAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	approvalID := awaitApprovalRequest(t, s, runID)
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "rejected", nil); err != nil {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "rejected", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	res, err := orch.Wait(ctx, core.DefaultTenant, runID)
@@ -1568,7 +1570,7 @@ func TestApprovalExpires(t *testing.T) {
 	if err != nil || a.Status != "expired" {
 		t.Fatalf("approval=%+v err=%v", a, err)
 	}
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "approved", nil); !errors.Is(err, core.ErrConflict) {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "approved", "", nil); !errors.Is(err, core.ErrConflict) {
 		t.Fatalf("late approval err=%v want ErrConflict", err)
 	}
 	requested, resolved := approvalEvents(t, s, runID)
@@ -1614,11 +1616,22 @@ func TestCanceledRunCancelsPendingApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	approvalID := awaitApprovalRequest(t, s, runID)
-	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "test"); err != nil {
+	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "operator-7", "wrong order"); err != nil {
 		t.Fatal(err)
 	}
 	if res, _ := orch.Wait(ctx, core.DefaultTenant, runID); res.Status != core.RunCanceled {
 		t.Fatalf("status=%s want canceled", res.Status)
+	}
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	audited := false
+	for _, ev := range events {
+		if ev.Type == core.EvSystem && ev.Visibility == core.VisibilityAudit && ev.ActorID == "operator-7" &&
+			strings.Contains(string(ev.Payload), `"event":"run_cancel_requested"`) && strings.Contains(string(ev.Payload), `"reason":"wrong order"`) {
+			audited = true
+		}
+	}
+	if !audited {
+		t.Fatal("cancellation not audited with its principal and reason")
 	}
 	a, err := s.GetApproval(ctx, core.DefaultTenant, approvalID)
 	if err != nil || a.Status != "canceled" {
@@ -1788,7 +1801,7 @@ func TestCancelStopsRun(t *testing.T) {
 	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		if err := orch.Cancel(context.Background(), core.DefaultTenant, runID, "test"); err != nil {
+		if err := orch.Cancel(context.Background(), core.DefaultTenant, runID, "", "test"); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -1814,7 +1827,7 @@ func TestCancelIgnoresOtherTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := orch.Cancel(ctx, "other-tenant", runID, "test"); !errors.Is(err, core.ErrNotFound) {
+	if err := orch.Cancel(ctx, "other-tenant", runID, "", "test"); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("cross-tenant cancel err=%v want ErrNotFound", err)
 	}
 	res, err := orch.Wait(ctx, core.DefaultTenant, runID)

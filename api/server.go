@@ -445,7 +445,18 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 	rid := core.RunID(r.PathValue("rid"))
-	switch err := s.Orch.Cancel(r.Context(), tenantOf(r), rid, "api request"); {
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeDecodeErr(w, err)
+		return
+	}
+	if len(req.Reason) > 1024 {
+		writeErr(w, http.StatusBadRequest, "validation_error", "reason is longer than 1024 bytes")
+		return
+	}
+	switch err := s.Orch.Cancel(r.Context(), tenantOf(r), rid, principalOf(r), req.Reason); {
 	case errors.Is(err, core.ErrConflict):
 		writeErr(w, http.StatusConflict, "conflict", err.Error())
 		return
@@ -552,7 +563,7 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "validation_error", "decision must be approved|rejected")
 		return
 	}
-	switch err := s.Store.ResolveApproval(r.Context(), tenantOf(r), aid, req.Decision, req.Payload); {
+	switch err := s.Store.ResolveApproval(r.Context(), tenantOf(r), aid, req.Decision, principalOf(r), req.Payload); {
 	case errors.Is(err, core.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not_found", err.Error())
 		return

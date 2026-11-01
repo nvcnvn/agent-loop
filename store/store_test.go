@@ -139,10 +139,10 @@ func TestExpiredApprovalCannotBeApproved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "approved", nil); !errors.Is(err, core.ErrConflict) {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "approved", "", nil); !errors.Is(err, core.ErrConflict) {
 		t.Fatalf("approve after expiry err=%v want ErrConflict", err)
 	}
-	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "expired", nil); err != nil {
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, id, "expired", "", nil); err != nil {
 		t.Fatalf("expire: %v", err)
 	}
 	a, err := s.GetApproval(ctx, core.DefaultTenant, id)
