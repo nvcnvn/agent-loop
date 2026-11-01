@@ -23,3 +23,13 @@ func TestLimitsDefaultsReplaceNegatives(t *testing.T) {
 		t.Fatalf("negatives not replaced: %+v", got)
 	}
 }
+
+func TestLimitsFillAndNegative(t *testing.T) {
+	got := Limits{MaxToolCalls: 5, MaxModelCalls: -1}.Fill(Limits{MaxToolCalls: 9, MaxModelCalls: 7, MaxRuntime: time.Minute})
+	if got != (Limits{MaxToolCalls: 5, MaxModelCalls: 7, MaxRuntime: time.Minute}) {
+		t.Fatalf("Fill: %+v", got)
+	}
+	if !(Limits{MaxCostUnits: -1}).Negative() || (Limits{MaxDepth: 1}).Negative() {
+		t.Fatal("Negative")
+	}
+}

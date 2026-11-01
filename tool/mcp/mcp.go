@@ -29,8 +29,8 @@ type Server struct {
 	Name    string   `json:"name"`              // its tools are registered as <name>.<tool>
 	Command []string `json:"command,omitempty"` // a program and its arguments, spoken to over stdio
 	URL     string   `json:"url,omitempty"`     // a streamable HTTP endpoint
-	// Headers go with every HTTP request. ${VAR} in a value is read from the
-	// environment, so credentials stay out of the config file.
+	// Headers go with every HTTP request, as given; a config file reads
+	// credentials from the environment with ${VAR} (runtime.ExpandEnv).
 	Headers    map[string]string `json:"headers,omitempty"`
 	Timeout    time.Duration     `json:"timeout,omitempty"`     // per call; default 30s
 	MaxRetries int               `json:"max_retries,omitempty"` // reconnect-and-retry rounds for idempotent calls; default 2
@@ -65,20 +65,7 @@ func New(cfg Server) (*Client, error) {
 	if cfg.Name == "" || (len(cfg.Command) == 0) == (cfg.URL == "") {
 		return nil, fmt.Errorf("mcp server %q: needs a name and exactly one of command and url", cfg.Name)
 	}
-	headers := map[string]string{}
-	for k, v := range cfg.Headers {
-		var missing []string
-		headers[k] = os.Expand(v, func(name string) string {
-			val, ok := os.LookupEnv(name)
-			if !ok {
-				missing = append(missing, name)
-			}
-			return val
-		})
-		if len(missing) > 0 {
-			return nil, fmt.Errorf("mcp server %q: header %s uses unset variables %v", cfg.Name, k, missing)
-		}
-	}
+	headers := cfg.Headers
 	transport := func() (sdk.Transport, error) {
 		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 		cmd.Stderr = os.Stderr

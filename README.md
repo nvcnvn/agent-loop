@@ -34,7 +34,7 @@ The recommended first vertical slice from
 | Artifacts produced by tools and agents, linked to run, task, step and producing tool; versioned by name within a session; listed with `GET /v1/runs/{rid}/artifacts` and `GET /v1/artifacts/{aid}/versions`, downloaded with `GET /v1/artifacts/{aid}`; capped at `max_artifact_bytes` | [runtime/orchestrator.go](runtime/orchestrator.go), [api/server.go](api/server.go) |
 | Agents defined per tenant over REST (`GET`/`PUT`/`DELETE /v1/agents`), next to the config file's | [runtime/agents.go](runtime/agents.go), [api/agents.go](api/agents.go) |
 | Roles (`admin`, `operator`, `member`, `viewer`) on API keys, session participants (`owner`, `member`, `viewer`) and per-role event visibility | [policy/access.go](policy/access.go), [api/access.go](api/access.go) |
-| Tool policy (allow / deny / approval, by tool name or side-effect level; `tool_policy` in the config file or a workflow) | [policy/policy.go](policy/policy.go) |
+| Tool policy (allow / deny / approval, by tool name or side-effect level; per-tool budgets and timeouts; `tool_policy` in the config file or a workflow) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost; per-tool calls, time and cost) | [policy/policy.go](policy/policy.go) |
 | Prometheus metrics at `/metrics` (runs, model calls, tokens, cost, tools, queue depth, HTTP latency) | [observe/metrics.go](observe/metrics.go) |
 | Loop / stall detector (identical tool calls, near-identical rejected answers, hand-back drafts and delegations, retry storms) that fails, pauses or asks approval for a run; approval past a cost threshold; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
@@ -46,7 +46,7 @@ The recommended first vertical slice from
 | Re-execution of a finished run from its recorded model requests/responses and tool results (`POST /v1/runs/{rid}/reexecute`) | [runtime/reexecute.go](runtime/reexecute.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
 | Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
-| MCP tools: servers over stdio or streamable HTTP, tools discovered and translated at startup and kept in step with the server, auth headers from the environment, reconnects, retries of idempotent calls, a circuit breaker | [tool/mcp/mcp.go](tool/mcp/mcp.go) |
+| MCP tools: servers over stdio or streamable HTTP, tools discovered and translated at startup and kept in step with the server, auth headers from the config file's `${VAR}`, reconnects, retries of idempotent calls, a circuit breaker | [tool/mcp/mcp.go](tool/mcp/mcp.go) |
 | OpenTelemetry traces of runs, stages, tasks (including delegated ones), model calls, tool calls and approval waits | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | HTTP server example: JSON logs (`log/slog`) to stdout, resumes unfinished runs at startup, graceful shutdown on SIGINT/SIGTERM (`-shutdown-timeout`) | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
 | Programmatic example: planner -> parallel researchers -> synthesizer + replay | [cmd/example-workflow/main.go](cmd/example-workflow/main.go) |
@@ -92,8 +92,10 @@ curl -X POST http://localhost:8080/v1/runs \
 curl -N http://localhost:8080/v1/runs/<run_id>/stream
 ```
 
-Without `-config` the server has one `echo` agent. `-config agents.json` replaces it with the agents,
-named workflow templates and MCP servers in that file, and a run can then start a template by name:
+Without `-config` (or `AGENT_LOOP_CONFIG`) the server has one `echo` agent. `-config agents.json`
+replaces it with the agents, named workflow templates and MCP servers in that file, which also sets
+the tool policy, run limits, worker pool and the other deployment settings, with `${VAR}` read from
+the environment; a run can then start a template by name:
 
 ```sh
 curl -X POST http://localhost:8080/v1/runs \

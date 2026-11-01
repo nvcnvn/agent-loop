@@ -24,6 +24,8 @@ type ToolPolicy struct {
 	ApproveSideEffects []core.SideEffectLevel `json:"approve_side_effects,omitempty"`
 	// Budgets limits, per run, how much each named tool may be used.
 	Budgets map[string]ToolBudget `json:"budgets,omitempty"`
+	// Timeouts caps each call of the named tools, below their own timeout.
+	Timeouts map[string]time.Duration `json:"timeouts,omitempty"`
 }
 
 // ToolBudget limits one tool's use in a run; zero fields are unlimited.
@@ -38,6 +40,11 @@ func (p ToolPolicy) Validate() error {
 	for name, b := range p.Budgets {
 		if b.MaxCalls < 0 || b.MaxTime < 0 || b.MaxCostUnits < 0 {
 			return fmt.Errorf("tool policy: budget of %s must not be negative", name)
+		}
+	}
+	for name, d := range p.Timeouts {
+		if d <= 0 {
+			return fmt.Errorf("tool policy: timeout of %s must be positive", name)
 		}
 	}
 	for _, level := range slices.Concat(p.DenySideEffects, p.ApproveSideEffects) {

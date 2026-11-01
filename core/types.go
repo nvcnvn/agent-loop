@@ -165,6 +165,32 @@ func (l Limits) Defaults() Limits {
 	return l
 }
 
+// Fill sets each unset (zero or negative) field to d's.
+func (l Limits) Fill(d Limits) Limits {
+	fillFrom(&l.MaxDepth, d.MaxDepth)
+	fillFrom(&l.MaxSubAgents, d.MaxSubAgents)
+	fillFrom(&l.MaxConcurrent, d.MaxConcurrent)
+	fillFrom(&l.MaxToolCalls, d.MaxToolCalls)
+	fillFrom(&l.MaxModelCalls, d.MaxModelCalls)
+	fillFrom(&l.MaxRuntime, d.MaxRuntime)
+	fillFrom(&l.MaxPromptTokens, d.MaxPromptTokens)
+	fillFrom(&l.MaxCompletionTokens, d.MaxCompletionTokens)
+	fillFrom(&l.MaxCostUnits, d.MaxCostUnits)
+	return l
+}
+
+// Negative reports whether any field is negative.
+func (l Limits) Negative() bool {
+	return min(int64(l.MaxDepth), int64(l.MaxSubAgents), int64(l.MaxConcurrent), int64(l.MaxToolCalls), int64(l.MaxModelCalls),
+		int64(l.MaxRuntime), l.MaxPromptTokens, l.MaxCompletionTokens, l.MaxCostUnits) < 0
+}
+
+func fillFrom[T ~int | ~int64](v *T, d T) {
+	if *v <= 0 {
+		*v = d
+	}
+}
+
 // Cap lowers each field to ceiling's matching positive field.
 func (l Limits) Cap(ceiling Limits) Limits {
 	capAt(&l.MaxDepth, ceiling.MaxDepth)

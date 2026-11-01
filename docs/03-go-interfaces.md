@@ -144,9 +144,12 @@ type ToolDefinition struct {
 
 Workflows and agents are the JSON-tagged structs `runtime.Workflow`, `runtime.Stage` and
 `runtime.Agent`, whose fields are the contract in `docs/04-contracts-and-tests.md` §3 and §4.
-`StartRunInput.Template` names one of `Orchestrator.Workflows` instead of passing a `Workflow`, and
-`runtime.ParseConfig(data []byte) (runtime.Config, error)` decodes and checks a config file of agents
-and workflow templates.
+`StartRunInput.Template` names one of `Orchestrator.Workflows` instead of passing a `Workflow`;
+`runtime.ExpandEnv` fills a config file's `${VAR}` from the environment, `runtime.ParseConfig(data
+[]byte) (runtime.Config, error)` decodes and checks it, and `Config.Apply(o *Orchestrator)` sets its
+templates, compaction, tool policy, `DefaultLimits` and `MaxLimits`, worker pool and timeouts on an
+Orchestrator. A run's limits are what it asks for, then `DefaultLimits`, then built-in defaults
+(`core.Limits.Fill`, `Defaults`), capped at `MaxLimits`.
 
 ```go
 package runtime
@@ -522,7 +525,7 @@ type Server struct {
     Name       string            // tools are registered as <Name>.<tool>
     Command    []string          // stdio, or
     URL        string            // streamable HTTP
-    Headers    map[string]string // ${VAR} read from the environment
+    Headers    map[string]string // sent as given; config files fill ${VAR} from the environment
     Timeout    time.Duration
     MaxRetries int
     BreakAfter int
@@ -569,6 +572,7 @@ type Engine interface {
     AuthorizeMemoryWrite(ctx context.Context, request MemoryAuthorization) (Decision, error)
 }
 
+// ToolPolicy.Timeouts caps each call of the named tools (the lowest timeout applies);
 // ToolPolicy.Budgets limits each named tool per run; BudgetManager.ReserveTool counts a call
 // against them (ReleaseTool gives back one that never ran), ToolTimeLeft gives a call its time and
 // CommitTool records what its attempts took and cost.

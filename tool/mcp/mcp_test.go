@@ -232,11 +232,10 @@ func TestCircuitBreaker(t *testing.T) {
 }
 
 func TestStreamableHTTPSendsHeaders(t *testing.T) {
-	t.Setenv("MCP_TEST_TOKEN", "s3cret")
 	server := testServer()
 	handler := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, nil)
 	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer s3cret" {
+		if r.Header.Get("Authorization") != "Bearer s3$cret" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -244,7 +243,7 @@ func TestStreamableHTTPSendsHeaders(t *testing.T) {
 	}))
 	defer httpSrv.Close()
 
-	c, err := New(Server{Name: "calc", URL: httpSrv.URL, Headers: map[string]string{"Authorization": "Bearer ${MCP_TEST_TOKEN}"}})
+	c, err := New(Server{Name: "calc", URL: httpSrv.URL, Headers: map[string]string{"Authorization": "Bearer s3$cret"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +278,6 @@ func TestNewChecksConfig(t *testing.T) {
 		"no name":        {Command: []string{"x"}},
 		"no transport":   {Name: "s"},
 		"two transports": {Name: "s", Command: []string{"x"}, URL: "http://x"},
-		"unset secret":   {Name: "s", URL: "http://x", Headers: map[string]string{"Authorization": "Bearer ${MCP_TEST_UNSET}"}},
 	} {
 		if _, err := New(cfg); err == nil {
 			t.Errorf("%s: accepted", name)

@@ -199,7 +199,8 @@ The framework should support policy enforcement per agent or workflow:
   as `tool_policy` in the `-config` file.
 - [x] Approval required before tools flagged or listed as needing it.
 - [x] Max tool calls per run.
-- [x] Max calls, cost or time budget per tool and run (`budgets` in the tool policy).
+- [x] Max calls, cost or time budget per tool and run (`budgets` in the tool policy), and per-call
+  timeouts (`timeouts`).
 
 ### 6.4 Concurrent Tool Execution
 
@@ -350,14 +351,16 @@ Operational requirements:
 - [x] Readiness endpoint that checks the database (`/readyz`).
 - [x] Backpressure handling: at most `MaxActiveRuns` runs execute, up to `MaxQueuedRuns` more wait in
   `queued`, and StartRun beyond that fails with `core.ErrOverloaded` (REST 503 with `Retry-After`).
-- [ ] Configurable worker pool and queueing model.
+- [x] Configurable worker pool and queueing model (`concurrency` in the config file: runs executing,
+  runs queued first-in-first-out, and per-tenant, workflow, agent and tool bounds).
 - [x] Server timeouts (read header, read, idle) and request body size limits (`api.Server.HTTPServer`,
   `MaxBodyBytes`).
 - [x] Versioned schema migrations (`store/pg/migrations`, applied by `pg.Store.Migrate`).
 - [x] In-process state for finished runs is released; `Wait` answers finished runs from the store.
 - [ ] Run ownership by lease, so several API replicas can share one database.
 - [x] Deployment configuration for agents and workflow templates from a file (`-config`).
-- [ ] Deployment configuration for tools, policy, and limits from file or environment.
+- [x] Deployment configuration for tools, policy, and limits from file or environment (`-config` or
+  `AGENT_LOOP_CONFIG`, with `${VAR}` from the environment).
 
 ## 11. Security and Multi-Tenancy
 

@@ -52,7 +52,7 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	debug := flag.Bool("debug", false, "serve the debug console and /v1/debug/* (exposes agent instructions)")
 	trustHeaders := flag.Bool("trust-identity-headers", false, "take the tenant and principal from X-Tenant-ID/X-Principal-ID without authentication (local development only)")
-	configPath := flag.String("config", "", "JSON file of agents, named workflow templates, history compaction, tool policy and MCP servers (see README); without it the server has one echo agent")
+	configPath := flag.String("config", os.Getenv("AGENT_LOOP_CONFIG"), "JSON file of agents, workflow templates, compaction, tool policy, limits, worker pool and MCP servers, with ${VAR} read from the environment (see README); default $AGENT_LOOP_CONFIG; without one the server has one echo agent")
 	drain := flag.Duration("shutdown-timeout", 30*time.Second, "on SIGINT/SIGTERM, how long to let requests and runs finish before checkpointing runs")
 	flag.Parse()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -85,22 +85,7 @@ func main() {
 	}
 	orch := runtime.NewOrchestrator(persistence, reg, cfg.Agents)
 	orch.Provider, orch.Model = prov, modelName
-	for _, wf := range cfg.Workflows {
-		orch.Workflows[wf.Name] = wf
-	}
-	if cfg.Compaction != nil {
-		orch.Compaction = *cfg.Compaction
-	}
-	if cfg.ToolPolicy != nil {
-		orch.Policy = *cfg.ToolPolicy
-	}
-	orch.LoopResponse = cfg.LoopResponse
-	if cfg.ApproveAbove != nil {
-		orch.ApproveAbove = *cfg.ApproveAbove
-	}
-	if cfg.MaxArtifactBytes != nil {
-		orch.MaxArtifactBytes = *cfg.MaxArtifactBytes
-	}
+	cfg.Apply(orch)
 	if n, err := orch.Recover(context.Background()); err != nil {
 		slog.Error("recover runs", "resumed", n, "err", err)
 	} else if n > 0 {
@@ -154,6 +139,9 @@ func loadConfig(path string) fileConfig {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		fatal("read config", err)
+	}
+	if data, err = runtime.ExpandEnv(data); err != nil {
+		fatal("config "+path, err)
 	}
 	var cfg fileConfig
 	dec := json.NewDecoder(bytes.NewReader(data))

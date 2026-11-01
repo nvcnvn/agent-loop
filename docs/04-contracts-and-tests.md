@@ -226,7 +226,8 @@ send a workflow or policy.
 duplicate or unknown stage, agent, kind, failure policy or image; a `quorum` that is missing, out of
 range or set without `failure_policy: quorum`; a dependency cycle; a hand-back to a stage
 the handing stage does not depend on; an invalid regexp or schema; a negative timeout or retry; an
-unknown side-effect level in `tool_policy`; or input that does not match `input_schema`.
+unknown side-effect level, negative budget or non-positive timeout in `tool_policy`; or input that
+does not match `input_schema`.
 
 The run records its workflow decisions as `system_event_recorded` events whose `event` is
 `stage_handed_back`, `workflow_stopped`, `task_retry_scheduled` or `output_rejected`. Stage gates
@@ -236,12 +237,29 @@ for output gates, `output`, where tool approvals have `tool`.
 ### 4. Agent Definition Contract
 
 Agents are `runtime.Agent` values registered in Go, or come from the JSON file passed to
-`cmd/agent-loop -config`, which also holds the named workflow templates, history compaction, the
-tool policy, the loop response and cost approval threshold (§8), the artifact size cap
-(`max_artifact_bytes`, §10), and in `visibility` which event visibilities each role reads.
+`cmd/agent-loop -config` (or named by `AGENT_LOOP_CONFIG`), which also holds the deployment's
+settings: the named workflow templates, history compaction, the tool policy (§8: allow, deny,
+approval, budgets and per-tool `timeouts`), the loop response and cost approval threshold (§8), the
+artifact size cap (`max_artifact_bytes`, §10), the run `limits` (`default` fills what a run does
+not ask for, `max` caps what it may), the worker pool (`concurrency`: `max_active_runs` executing,
+`max_queued_runs` waiting in first-in-first-out order beyond them, and `per_tenant`,
+`per_workflow`, `per_agent` and `per_tool` bounds), `approval_timeout`, `idle_warn_after`,
+`max_history_messages`, `tool_retry`, the MCP servers, and in `visibility` which event
+visibilities each role reads. Durations are nanoseconds.
+
+`${NAME}` anywhere in the file, an MCP header included, is replaced by the environment variable
+`NAME` before parsing (an unset one stops startup), so values and secrets can come from the
+environment. Values go in verbatim, not JSON-escaped: put a reference inside quotes for a string,
+and keep `"` and `\` out of the value. `$${NAME}` stays as the text `${NAME}`, and a `$` not
+followed by `{` stays as it is.
+
 `runtime.ParseConfig` rejects unknown fields, duplicate names, unknown child agents, invalid
 workflows, a compaction whose agent is unknown or that has no trigger, an unknown side-effect level
-in the tool policy, an unknown loop response, and negative thresholds or caps.
+in the tool policy, an unknown loop response, and negative thresholds, caps, limits, pool sizes,
+durations and non-positive tool timeouts. `Config.Apply` sets them on an Orchestrator, keeping its
+values for what the file leaves out or sets to zero, except `max_active_runs` and
+`max_queued_runs`, where 0 means no cap and no queue. So `limits.max` can lower the built-in caps
+but not lift them, and a `default` above `max` is capped to it.
 
 ```json
 {
@@ -257,6 +275,8 @@ in the tool policy, an unknown loop response, and negative thresholds or caps.
   "tool_policy": {"approve_side_effects": ["write_external", "dangerous"]},
   "loop_response": "pause",
   "approve_above": {"total_tokens": 200000},
+  "limits": {"default": {"max_tool_calls": 32}, "max": {"max_runtime": 1800000000000}},
+  "concurrency": {"max_active_runs": 32, "max_queued_runs": 512, "per_tenant": 8},
   "visibility": {"member": ["public", "participant", "internal"]}
 }
 ```
@@ -329,10 +349,9 @@ MCP servers are listed under `mcp_servers` in the `-config` file (§4):
 ```
 
 - A server is a program spoken to over stdio (`command`) or a streamable HTTP endpoint (`url`).
-  `${VAR}` in a header value is read from the environment at startup.
+  Headers go as given; read secrets from the environment with `${VAR}` (§4).
 - At startup each server's tools are listed and registered as `<server>.<tool>`, the names agents
-  list in `tools`. A server that cannot be reached, or a header naming an unset variable, stops
-  startup; a tool whose input schema does not compile is skipped with a warning. When the server
+  list in `tools`. A server that cannot be reached stops startup; a tool whose input schema does not compile is skipped with a warning. When the server
   sends `notifications/tools/list_changed`, and after every reconnect, the list is read again:
   new and changed tools are registered and tools the server dropped are unregistered, so a later
   call to one goes back to the model as an unknown tool. A task offers the model the tools
@@ -422,7 +441,8 @@ file) decides for each tool whether agents may call it and whether each call wai
 ```json
 "tool_policy": {"allowlist": [], "denylist": ["shell.exec"], "approval_required": ["orders.refund"],
                 "deny_side_effects": ["dangerous"], "approve_side_effects": ["write_external"],
-                "budgets": {"search.web": {"max_calls": 20, "max_time": 60000000000, "max_cost_units": 500}}}
+                "budgets": {"search.web": {"max_calls": 20, "max_time": 60000000000, "max_cost_units": 500}},
+                "timeouts": {"search.web": 10000000000}}
 ```
 
 - A tool is denied when `denylist` names it, its side-effect level is in `deny_side_effects`, or
@@ -438,6 +458,9 @@ file) decides for each tool whether agents may call it and whether each call wai
   starts with at most the time left, which concurrent calls of the tool each get in full, so
   they can overrun it together. A call past a budget, or cut short by the time budget, goes back
   to the model as a tool error.
+- `timeouts` caps each call of a tool: a call gets the lowest of the tool's own timeout (an MCP
+  server's `timeout`, 30s by default) and every policy's, so a workflow's policy, which a client may
+  send, can lower a timeout but never raise it.
 - A workflow's own `tool_policy` (§3) applies to its runs as well, under the same rules; each
   budget of either applies.
 
@@ -690,6 +713,8 @@ Each error should include:
 2. Emit metrics for latency, token use, cost, queue depth, failures, retries, and tool usage.
 3. Gracefully shut down workers and recover queued/running work after restart.
 4. Apply backpressure when queue depth exceeds configured limits.
+5. Take limits, the worker pool and tool settings from the config file and environment
+   (`TestConfigSetsLimitsPoolAndTools`).
 
 ### Security
 

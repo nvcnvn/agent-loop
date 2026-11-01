@@ -86,6 +86,8 @@ type Orchestrator struct {
 	Approvals store.ApprovalStore // typically the same Store
 	// MaxLimits caps the limits a caller may request for a run.
 	MaxLimits core.Limits
+	// DefaultLimits fills the limits a run does not ask for, before core.Limits.Defaults does.
+	DefaultLimits core.Limits
 	// Log receives run lifecycle and error logs; NewOrchestrator sets slog.Default().
 	Log *slog.Logger
 	// Tracer records a span per run, stage, task, model call, tool call and approval wait;
@@ -233,7 +235,7 @@ func (o *Orchestrator) prepareRun(ctx context.Context, in *StartRunInput) (core.
 	if _, err := o.Store.GetSession(ctx, in.TenantID, in.SessionID); err != nil {
 		return "", fmt.Errorf("session: %w", err)
 	}
-	in.Limits = in.Limits.Defaults().Cap(o.MaxLimits)
+	in.Limits = in.Limits.Fill(o.DefaultLimits).Defaults().Cap(o.MaxLimits)
 
 	if in.IdempotencyKey != "" {
 		if existing, err := o.Store.FindByIdempotency(ctx, in.TenantID, in.IdempotencyKey); err == nil {
@@ -1245,6 +1247,9 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 		for _, p := range policies {
 			if b, ok := p.Budgets[def.Name]; ok {
 				at.budgets = append(at.budgets, b)
+			}
+			if d, ok := p.Timeouts[def.Name]; ok && (at.def.Timeout <= 0 || d < at.def.Timeout) {
+				at.def.Timeout = d
 			}
 		}
 		allowed[def.Name] = at
