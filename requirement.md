@@ -377,7 +377,8 @@ Requirements:
   a mounted secret directory, per tenant, or the environment; no secret is stored.
 - [x] Redaction support for logs and traces: known secrets and secret-shaped values, plus configured
   patterns, become `[REDACTED]`.
-- [ ] Data retention policy.
+- [x] Data retention policy (`retention` in the config file): idle sessions are deleted with
+  everything in them, and memories past an age.
 - [ ] Optional encryption at rest for sensitive fields.
 - [x] Debug console and `/v1/debug/*` endpoints are off unless enabled (`-debug`); they expose agent instructions.
 - [x] Single-tenant deployment is the initial scope (see §17).

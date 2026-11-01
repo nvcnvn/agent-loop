@@ -215,7 +215,15 @@ func TestPg_TenantIsolation(t *testing.T) {
 }
 
 func TestPg_Memories(t *testing.T) {
-	storetest.Memories(t, freshStore(t), core.SessionID(core.NewID()), core.SessionID(core.NewID()))
+	s := freshStore(t)
+	session := func() core.SessionID {
+		sid, err := s.CreateSession(context.Background(), store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sid
+	}
+	storetest.Memories(t, s, session(), session())
 }
 
 func TestPg_ApprovalResolveRoundtrip(t *testing.T) {
@@ -529,4 +537,21 @@ func TestPg_PushesEventsAndApprovals(t *testing.T) {
 
 func TestPg_Agents(t *testing.T) {
 	storetest.Agents(t, freshStore(t))
+}
+
+func TestPg_Retention(t *testing.T) {
+	storetest.Retention(t, freshStore(t))
+}
+
+// Writing into a session a purge deleted fails instead of leaving orphans.
+func TestPg_NoWritesIntoAPurgedSession(t *testing.T) {
+	s := freshStore(t)
+	ctx := context.Background()
+	gone := core.SessionID(core.NewID())
+	if _, err := s.Append(ctx, []core.Event{{TenantID: core.DefaultTenant, SessionID: gone, Type: core.EvSystem, Visibility: core.VisibilityInternal}}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("append: %v", err)
+	}
+	if _, err := s.PutMemory(ctx, store.Memory{TenantID: core.DefaultTenant, Scope: store.MemorySession, SessionID: gone, Content: "x", Embedding: []float32{1}, EmbedModel: "m"}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("session memory: %v", err)
+	}
 }

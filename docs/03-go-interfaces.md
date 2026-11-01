@@ -327,6 +327,15 @@ type AgentStore interface {
     DeleteAgent(ctx context.Context, tenantID core.TenantID, name string) error
 }
 
+// RetentionStore deletes what the retention policy no longer keeps: PurgeSessions every session
+// idle since a time with no unfinished run, with everything in it; PurgeMemories memories saved
+// before a time. Orchestrator.Retention (Sessions, Memories) sets the ages, Purge applies them
+// once and KeepPurging periodically. storetest.Retention is the conformance check.
+type RetentionStore interface {
+    PurgeSessions(ctx context.Context, idleSince time.Time) (int, error)
+    PurgeMemories(ctx context.Context, before time.Time) (int, error)
+}
+
 // Store is what runtime and api take; /readyz calls Ping.
 type Store interface {
     Ping(ctx context.Context) error
@@ -338,6 +347,7 @@ type Store interface {
     ArtifactStore
     MemoryStore
     AgentStore
+    RetentionStore
 }
 ```
 

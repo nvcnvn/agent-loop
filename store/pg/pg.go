@@ -843,6 +843,15 @@ func (s *Store) Append(ctx context.Context, events []core.Event) ([]core.Event, 
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	var sessions []string
+	for _, ev := range events {
+		if !slices.Contains(sessions, string(ev.SessionID)) {
+			sessions = append(sessions, string(ev.SessionID))
+		}
+	}
+	if err := lockSessions(ctx, tx, sessions); err != nil {
+		return nil, err
+	}
 
 	for _, ev := range events {
 		ev.ID = core.EventID(uuidOrNew(string(ev.ID)))
@@ -1062,3 +1071,25 @@ var _ store.Store = (*Store)(nil)
 // Placeholder so the unused import of fmt drops out cleanly when the file
 // is gofmt'd without other changes.
 var _ = fmt.Sprintf
+
+// lockSessions takes a key-share lock on sessions, which a purge waits for and
+// which waits for a purge, so nothing is written into a session being deleted;
+// it fails with core.ErrNotFound when one is gone.
+func lockSessions(ctx context.Context, tx pgx.Tx, sessions []string) error {
+	rows, err := tx.Query(ctx, `SELECT session_id FROM sessions WHERE session_id = ANY($1::uuid[]) FOR KEY SHARE`, sessions)
+	if err != nil {
+		return mapErr(err)
+	}
+	n := 0
+	for rows.Next() {
+		n++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return mapErr(err)
+	}
+	if n < len(sessions) {
+		return fmt.Errorf("session: %w", core.ErrNotFound)
+	}
+	return nil
+}

@@ -193,3 +193,7 @@ func TestMemStoreParticipants(t *testing.T) {
 func TestMemStoreAgents(t *testing.T) {
 	storetest.Agents(t, store.NewMemStore())
 }
+
+func TestMemStoreRetention(t *testing.T) {
+	storetest.Retention(t, store.NewMemStore())
+}

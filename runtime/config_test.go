@@ -134,3 +134,32 @@ func TestApplyKeepsWhatTheFileLeavesOut(t *testing.T) {
 		t.Fatalf("pool after apply: %+v active=%d queued=%d", orch.Concurrency, orch.MaxActiveRuns, orch.MaxQueuedRuns)
 	}
 }
+
+// Acceptance: §Security #4 – the retention policy deletes idle sessions with everything in them.
+func TestRetentionPurgesIdleSessions(t *testing.T) {
+	cfg, err := runtime.ParseConfig([]byte(`{"agents":[{"name":"ag"}],"retention":{"sessions":3600000000000}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Agents[0].Provider, cfg.Agents[0].Model = model.NewMockProvider(model.MockResponse{Content: "hi"}), "m"
+	orch, s, sid := setup(t, cfg.Agents)
+	cfg.Apply(orch)
+	res, err := runWorkflow(t, orch, runtime.StartRunInput{SessionID: sid, Workflow: oneStage("ag")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := orch.Purge(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetSession(ctx, core.DefaultTenant, sid); err != nil {
+		t.Fatalf("a session active within the retention period was purged: %v", err)
+	}
+	orch.Retention.Sessions = time.Nanosecond
+	if err := orch.Purge(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetRun(ctx, core.DefaultTenant, res.RunID); err == nil {
+		t.Fatal("an idle session's run survived the purge")
+	}
+}

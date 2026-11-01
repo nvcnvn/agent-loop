@@ -39,6 +39,8 @@ type Config struct {
 	IdleWarnAfter      *time.Duration `json:"idle_warn_after,omitempty"`
 	MaxHistoryMessages *int           `json:"max_history_messages,omitempty"`
 	ToolRetry          *RetryPolicy   `json:"tool_retry,omitempty"`
+	// Retention sets Orchestrator.Retention.
+	Retention *Retention `json:"retention,omitempty"`
 }
 
 // LimitsConfig is the run limits a Config sets: Default fills what a run
@@ -106,6 +108,9 @@ func (c Config) Apply(o *Orchestrator) {
 	}
 	if c.ToolRetry != nil {
 		o.ToolRetry = *c.ToolRetry
+	}
+	if c.Retention != nil {
+		o.Retention = *c.Retention
 	}
 }
 
@@ -207,6 +212,9 @@ func (c Config) Validate() error {
 	}
 	if r := c.ToolRetry; r != nil && (r.MaxAttempts < 0 || r.Backoff < 0) {
 		return errors.New("tool_retry must not be negative")
+	}
+	if r := c.Retention; r != nil && (r.Sessions < 0 || r.Memories < 0) {
+		return errors.New("retention must not be negative")
 	}
 	names := map[string]bool{}
 	for _, w := range c.Workflows {

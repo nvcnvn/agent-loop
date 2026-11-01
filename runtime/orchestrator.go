@@ -117,6 +117,8 @@ type Orchestrator struct {
 	// Redactor hides secrets, those Secrets returned included, in the errors of tool and model calls
 	// before anything records them, and in trace errors; nil hides nothing.
 	Redactor *observe.Redactor
+	// Retention is how long idle sessions and memories are kept; Purge applies it.
+	Retention Retention
 	// LoopResponse is what a detected runaway loop does to its run.
 	LoopResponse LoopResponse
 	// ApproveAbove asks a human, once per execution, before a model call of a run whose total tokens or cost units passed its positive fields.

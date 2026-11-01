@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -45,6 +46,15 @@ func (s *Store) PutMemories(ctx context.Context, ms []store.Memory) ([]string, e
 		return nil, mapErr(err)
 	}
 	defer tx.Rollback(ctx)
+	var sessions []string
+	for _, m := range ms {
+		if m.Scope == store.MemorySession && !slices.Contains(sessions, string(m.SessionID)) {
+			sessions = append(sessions, string(m.SessionID))
+		}
+	}
+	if err := lockSessions(ctx, tx, sessions); err != nil {
+		return nil, err
+	}
 	ids := make([]string, len(ms))
 	for i, m := range ms {
 		if ids[i], err = putMemory(ctx, tx, m); err != nil {

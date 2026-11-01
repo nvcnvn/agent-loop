@@ -50,7 +50,12 @@ tenant, members as their session role allows, viewers only read.
 Rules:
 - Only `active` sessions can accept human messages or start runs.
 - `archived` sessions are read-only but replayable.
-- `deleted` should be a tombstone state first; physical deletion follows retention policy.
+- Sessions are deleted by the deployment's retention policy, not by state: `retention.sessions`
+  deletes a session in which nothing happened for that long (no event, no memory saved to it) and
+  no run is unfinished, with its runs, tasks, events, messages, approvals, artifacts, participants
+  and session memories, and `retention.memories` deletes memories that old. Nothing is kept of
+  them, so their runs can no longer be replayed or audited. There is no per-session
+  `retention_policy` and no tombstone.
 
 ### Agent Definition
 

@@ -242,6 +242,7 @@ type Store interface {
 	ArtifactStore
 	MemoryStore
 	AgentStore
+	RetentionStore
 }
 
 // MemStore aggregates an in-memory implementation of every store interface.

@@ -114,6 +114,12 @@ func main() {
 		slog.Info("resumed unfinished runs", "count", n)
 	}
 
+	purging, stopPurging := context.WithCancel(context.Background())
+	defer stopPurging()
+	if orch.Retention != (runtime.Retention{}) {
+		go orch.KeepPurging(purging, time.Hour)
+	}
+
 	srv := api.NewServer(orch, persistence)
 	srv.Debug = *debug
 	srv.Auth = auth

@@ -244,8 +244,10 @@ artifact size cap (`max_artifact_bytes`, §10), the run `limits` (`default` fill
 not ask for, `max` caps what it may), the worker pool (`concurrency`: `max_active_runs` executing,
 `max_queued_runs` waiting in first-in-first-out order beyond them, and `per_tenant`,
 `per_workflow`, `per_agent` and `per_tool` bounds), `approval_timeout`, `idle_warn_after`,
-`max_history_messages`, `tool_retry`, the MCP servers, in `visibility` which event visibilities
-each role reads, and in `redact` more patterns that logs and traces hide (§9). Durations are nanoseconds.
+`max_history_messages`, `tool_retry`, the `retention` of idle sessions and of memories
+(`{"sessions", "memories"}`, durations; `cmd/agent-loop` applies it at startup and every hour), the
+MCP servers, in `visibility` which event visibilities each role reads, and in `redact` more patterns
+that logs and traces hide (§9). Durations are nanoseconds.
 
 `${NAME}` anywhere in the file, an MCP header included, is replaced by the environment variable
 `NAME` before parsing (an unset one stops startup), so values and secrets can come from the
@@ -735,7 +737,9 @@ Each error should include:
    (`TestSecrets`).
 3. Verify audit records for user actions and approval decisions (`TestCancelRunIsAudited`,
    `TestResolveApprovalEndpoint`, `storetest.Approvals`).
-4. Enforce artifact retention policy.
+4. Enforce the retention policy: idle sessions go with everything in them, sessions with recent
+   activity or an unfinished run stay, and old memories go (`TestRetentionPurgesIdleSessions`,
+   `storetest.Retention`); nothing is written into a purged session (`TestPg_NoWritesIntoAPurgedSession`).
 5. Reject a request without a valid API key with 401; a valid key fixes the tenant and principal,
    whatever identity headers say.
 6. Keep members and viewers to the sessions they participate in, and to what their session role

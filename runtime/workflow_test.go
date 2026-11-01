@@ -594,6 +594,7 @@ func TestParseConfig(t *testing.T) {
 		"negative pool":    `{"agents":[{"name":"a"}],"concurrency":{"per_agent":-1}}`,
 		"negative timeout": `{"agents":[{"name":"a"}],"approval_timeout":-1}`,
 		"tool timeout":     `{"agents":[{"name":"a"}],"tool_policy":{"timeouts":{"x":0}}}`,
+		"retention":        `{"agents":[{"name":"a"}],"retention":{"sessions":-1}}`,
 		"loop response":    `{"agents":[{"name":"a"}],"loop_response":"panic"}`,
 		"approve above":    `{"agents":[{"name":"a"}],"approve_above":{"cost_units":-1}}`,
 	} {
