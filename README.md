@@ -22,7 +22,7 @@ The recommended first vertical slice from
 | --- | --- |
 | Core domain types, IDs, events, limits, usage, tool definitions | [core/types.go](core/types.go), [core/tool.go](core/tool.go) |
 | Event-sourced in-memory store (sessions, runs, tasks, events, approvals, artifacts) with monotonic per-run sequence allocation under concurrency | [store/store.go](store/store.go) |
-| PostgreSQL driver (pgx v5, pgxpool, versioned embedded migrations, polling Subscribe); needs the pgvector extension (`pgvector/pgvector:pg18`) | [store/pg/pg.go](store/pg/pg.go) |
+| PostgreSQL driver (pgx v5, pgxpool, versioned embedded migrations, run events and approval decisions pushed with `LISTEN/NOTIFY`, which needs a session-mode connection, not a transaction-mode pooler); needs the pgvector extension (`pgvector/pgvector:pg18`) | [store/pg/pg.go](store/pg/pg.go), [store/pg/notify.go](store/pg/notify.go) |
 | Provider-agnostic model abstraction (`Provider` interface) | [model/model.go](model/model.go) |
 | Mock provider for deterministic tests | [model/mock.go](model/mock.go) |
 | Fixture recorder and request-matching replayer for real-model regression tests | [model/fixture.go](model/fixture.go) |

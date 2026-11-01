@@ -270,7 +270,8 @@ SSE requirements:
 - [x] Reconnect-safe resume (`Last-Event-ID`).
 - [x] Separation of public events and internal events.
 - [x] Reply deltas while a model writes (`?deltas=1`, not stored).
-- [ ] Push-based delivery from PostgreSQL (`LISTEN/NOTIFY` instead of polling).
+- [x] Push-based delivery from PostgreSQL: appended events and approval decisions `NOTIFY` the
+  process, whose one `LISTEN` connection wakes the waiting streams and approvals.
 
 ### 8.3 Compatibility Targets
 

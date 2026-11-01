@@ -221,11 +221,13 @@ type UnitOfWork interface {
     WithinTx(ctx context.Context, fn func(ctx context.Context, tx Tx) error) error
 }
 
+// EventStore allocates per-run and per-session sequences atomically. Subscribe delivers a run's
+// events after afterSeq in order until ctx ends or the returned func is called.
 type EventStore interface {
-    Append(ctx context.Context, events []core.Event) error
+    Append(ctx context.Context, events []core.Event) ([]core.Event, error)
     ListRunEvents(ctx context.Context, tenantID core.TenantID, runID core.RunID, afterSeq int64, limit int) ([]core.Event, error)
     ListSessionEvents(ctx context.Context, tenantID core.TenantID, sessionID core.SessionID, afterSeq int64, limit int) ([]core.Event, error)
-    LoadReplayEvents(ctx context.Context, tenantID core.TenantID, runID core.RunID) ([]core.Event, error)
+    Subscribe(ctx context.Context, runID core.RunID, afterSeq int64) (<-chan core.Event, func())
 }
 
 // SessionStore keeps sessions, their participants and messages. CreateSession makes the creator

@@ -452,3 +452,77 @@ func TestPg_Artifacts(t *testing.T) {
 func TestPg_Participants(t *testing.T) {
 	storetest.Participants(t, freshStore(t))
 }
+
+// Acceptance: §SSE – events and approval decisions are pushed, not polled, and survive a lost
+// LISTEN connection.
+func TestPg_PushesEventsAndApprovals(t *testing.T) {
+	s := freshStore(t)
+	s.Recheck = time.Hour
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	rid, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid})
+	events, stop := s.Subscribe(ctx, rid, 0)
+	defer stop()
+	appendOne := func() {
+		t.Helper()
+		if _, err := s.Append(ctx, []core.Event{{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvSystem,
+			Visibility: core.VisibilityInternal, ActorID: core.SystemPrincipal}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	receive := func(seq int64) {
+		t.Helper()
+		select {
+		case ev := <-events:
+			if ev.Sequence != seq || ev.ActorID != core.SystemPrincipal {
+				t.Fatalf("got event %d by %q, want %d by the system", ev.Sequence, ev.ActorID, seq)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("event %d was not pushed", seq)
+		}
+	}
+	appendOne()
+	receive(1)
+
+	admin, err := pgxpool.New(ctx, dsn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	var killed int
+	for killed == 0 && ctx.Err() == nil {
+		if err := admin.QueryRow(ctx, `SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid() AND datname = current_database() AND query LIKE 'LISTEN %'`).Scan(&killed); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	appendOne()
+	receive(2)
+
+	aid, err := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: rid, Reason: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := make(chan store.Approval, 1)
+	go func() {
+		a, err := s.WaitForApproval(ctx, aid)
+		if err != nil {
+			t.Error(err)
+		}
+		resolved <- a
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, aid, "approved", core.DefaultPrincipal, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case a := <-resolved:
+		if a.Status != "approved" {
+			t.Fatalf("approval %+v", a)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("approval decision was not pushed")
+	}
+}

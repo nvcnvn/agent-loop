@@ -115,6 +115,9 @@ the delegating agent, or the system for a stage's task. The run records who star
 (`StartedBy`; for a re-execution, who asked for it).
 
 Required behavior:
+- Events reach a stream as soon as they are stored, by any process sharing the Postgres database,
+  which pushes them with `LISTEN/NOTIFY` and keeps doing so after a lost connection
+  (`TestPg_PushesEventsAndApprovals`).
 - `Last-Event-ID` resumes from the next event after the acknowledged sequence, with no gap
   between the replayed history and live events, and events arrive in sequence order.
 - The stream closes after the run's terminal `run_state_changed` event, whether it is

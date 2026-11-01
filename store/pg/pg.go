@@ -5,10 +5,10 @@
 // event_counters within the same transaction as the insert, which is
 // strictly monotonic under concurrent writers.
 //
-// Subscribe is implemented with a polling loop (default 200ms). It is
-// adequate for v1 and avoids opening a dedicated LISTEN/NOTIFY connection
-// per subscriber. A LISTEN/NOTIFY-backed implementation can be added later
-// without changing the Store interface.
+// Subscribe and WaitForApproval are pushed: Append and resolving approvals
+// NOTIFY, and each Store LISTENs on one connection of its own, outside the
+// pool, so the database must allow session-level LISTEN (not a
+// transaction-mode pooler). They also look again every Store.Recheck.
 package pg
 
 import (
@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,12 +26,12 @@ import (
 	"github.com/nvcnvn/agent-loop/store"
 )
 
-// PollInterval controls how often Subscribe polls for new events.
-var PollInterval = 200 * time.Millisecond
-
 // Store is the pgx-backed implementation of store.Store.
 type Store struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	notify *notifier
+	// Recheck is how often Subscribe and WaitForApproval look again without a notification.
+	Recheck time.Duration
 }
 
 // New connects to the given DSN and returns a Store. The caller must Close()
@@ -40,17 +41,22 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{pool: pool}, nil
+	return NewFromPool(pool), nil
 }
 
 // NewFromPool wraps an existing pool (useful in tests).
-func NewFromPool(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewFromPool(pool *pgxpool.Pool) *Store {
+	return &Store{pool: pool, notify: newNotifier(pool), Recheck: 5 * time.Second}
+}
 
 // Ping checks that PostgreSQL answers.
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 // Close releases the underlying pool.
-func (s *Store) Close() { s.pool.Close() }
+func (s *Store) Close() {
+	s.notify.close()
+	s.pool.Close()
+}
 
 // ---- helpers ----
 
@@ -627,9 +633,12 @@ func (s *Store) GetApproval(ctx context.Context, tenant core.TenantID, id core.A
 
 func (s *Store) ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, by core.PrincipalID, resolution json.RawMessage) error {
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE approvals SET status=$3, resolution=$4, resolved_at=now(), resolved_by=$5
-		WHERE approval_id=$1 AND tenant_id=$2 AND status='requested'
-		  AND ($3 IN ('expired', 'canceled') OR expires_at IS NULL OR expires_at > now())`,
+		WITH resolved AS (
+			UPDATE approvals SET status=$3, resolution=$4, resolved_at=now(), resolved_by=$5
+			WHERE approval_id=$1 AND tenant_id=$2 AND status='requested'
+			  AND ($3 IN ('expired', 'canceled') OR expires_at IS NULL OR expires_at > now())
+			RETURNING approval_id)
+		SELECT pg_notify('`+approvalsChannel+`', approval_id::text) FROM resolved`,
 		string(id), string(tenant), status, nullableJSON(resolution), nullableUUID(string(by)),
 	)
 	if err != nil {
@@ -647,8 +656,11 @@ func (s *Store) ResolveApproval(ctx context.Context, tenant core.TenantID, id co
 
 func (s *Store) CancelRunApprovals(ctx context.Context, tenant core.TenantID, run core.RunID) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE approvals SET status='canceled', resolved_at=now()
-		WHERE tenant_id=$1 AND run_id=$2 AND status='requested'`, string(tenant), string(run))
+		WITH canceled AS (
+			UPDATE approvals SET status='canceled', resolved_at=now()
+			WHERE tenant_id=$1 AND run_id=$2 AND status='requested'
+			RETURNING approval_id)
+		SELECT pg_notify('`+approvalsChannel+`', approval_id::text) FROM canceled`, string(tenant), string(run))
 	return mapErr(err)
 }
 
@@ -682,9 +694,11 @@ func (s *Store) ListApprovals(ctx context.Context, tenant core.TenantID, f store
 	return out, mapErr(rows.Err())
 }
 
-// WaitForApproval polls until the approval resolves or ctx is canceled.
+// WaitForApproval waits until the approval resolves or ctx is canceled.
 func (s *Store) WaitForApproval(ctx context.Context, id core.ApprovalID) (store.Approval, error) {
-	t := time.NewTicker(PollInterval)
+	wake, unwatch := s.notify.watch(approvalsChannel, string(id))
+	defer unwatch()
+	t := time.NewTicker(s.Recheck)
 	defer t.Stop()
 	for {
 		a, err := scanApproval(s.pool.QueryRow(ctx, `
@@ -698,6 +712,7 @@ func (s *Store) WaitForApproval(ctx context.Context, id core.ApprovalID) (store.
 		select {
 		case <-ctx.Done():
 			return store.Approval{}, ctx.Err()
+		case <-wake:
 		case <-t.C:
 		}
 	}
@@ -849,6 +864,17 @@ func (s *Store) Append(ctx context.Context, events []core.Event) ([]core.Event, 
 		}
 		out = append(out, ev)
 	}
+	var runs []string
+	for _, ev := range out {
+		if ev.RunID != "" && !slices.Contains(runs, string(ev.RunID)) {
+			runs = append(runs, string(ev.RunID))
+		}
+	}
+	if len(runs) > 0 {
+		if _, err := tx.Exec(ctx, `SELECT pg_notify('`+eventsChannel+`', r) FROM unnest($1::text[]) r`, runs); err != nil {
+			return nil, mapErr(err)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, mapErr(err)
 	}
@@ -934,67 +960,42 @@ func (s *Store) queryEvents(ctx context.Context, q string, args ...any) ([]core.
 	return out, nil
 }
 
-// Subscribe polls the database for new events for a specific run. It returns
-// a channel and a cancel func; the channel is closed when the cancel func is
-// invoked or the context is canceled.
+// Subscribe delivers a run's events after afterSeq as notifications arrive. It
+// returns a channel and a cancel func; the channel is closed when the cancel
+// func is invoked or the context is canceled.
 func (s *Store) Subscribe(ctx context.Context, run core.RunID, afterSeq int64) (<-chan core.Event, func()) {
 	ch := make(chan core.Event, 64)
 	subCtx, cancel := context.WithCancel(ctx)
+	wake, unwatch := s.notify.watch(eventsChannel, string(run))
 	go func() {
 		defer close(ch)
+		defer unwatch()
 		seq := afterSeq
-		t := time.NewTicker(PollInterval)
+		t := time.NewTicker(s.Recheck)
 		defer t.Stop()
 		for {
-			events, err := s.pool.Query(subCtx, `
+			events, err := s.queryEvents(subCtx, `
 				SELECT event_id, tenant_id, session_id, run_id, sequence, session_sequence,
 				       event_type, visibility, actor_id, task_id, step_id, parent_event_id,
 				       correlation_id, causation_id, payload, hidden_payload,
 				       occurred_at, recorded_at
 				FROM run_events WHERE run_id=$1 AND sequence>$2 ORDER BY sequence`,
 				string(run), seq)
-			if err != nil {
-				if subCtx.Err() != nil {
+			if err != nil && subCtx.Err() != nil {
+				return
+			}
+			for _, ev := range events {
+				select {
+				case ch <- ev:
+					seq = ev.Sequence
+				case <-subCtx.Done():
 					return
 				}
-			} else {
-				for events.Next() {
-					var (
-						ev                   core.Event
-						eid, tid, sid        string
-						rid, actor, task, sp *string
-						parent, caus         *string
-						vis                  string
-						payload, hidden      []byte
-					)
-					if err := events.Scan(&eid, &tid, &sid, &rid, &ev.Sequence, &ev.SessionSequence,
-						&ev.Type, &vis, &actor, &task, &sp, &parent,
-						&ev.CorrelationID, &caus, &payload, &hidden,
-						&ev.OccurredAt, &ev.RecordedAt); err != nil {
-						continue
-					}
-					ev.ID = core.EventID(eid)
-					ev.TenantID = core.TenantID(tid)
-					ev.SessionID = core.SessionID(sid)
-					if rid != nil {
-						ev.RunID = core.RunID(*rid)
-					}
-					ev.Visibility = core.Visibility(vis)
-					ev.Payload = payload
-					ev.HiddenPayload = hidden
-					select {
-					case ch <- ev:
-						seq = ev.Sequence
-					case <-subCtx.Done():
-						events.Close()
-						return
-					}
-				}
-				events.Close()
 			}
 			select {
 			case <-subCtx.Done():
 				return
+			case <-wake:
 			case <-t.C:
 			}
 		}
