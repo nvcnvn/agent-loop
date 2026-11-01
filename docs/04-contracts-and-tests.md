@@ -239,7 +239,7 @@ in the tool policy, an unknown loop response, and negative thresholds or caps.
   "workflows": [
     {"name": "research", "stages": [{"name": "answer", "agents": [{"name": "lead", "prompt": "{{input.question}}"}]}]}
   ],
-  "compaction": {"agent": "lead", "max_tokens": 6000, "keep_recent": 6},
+  "compaction": {"agent": "lead", "max_tokens": 6000, "keep_recent": 6, "task_max_tokens": 12000},
   "tool_policy": {"approve_side_effects": ["write_external", "dangerous"]},
   "loop_response": "pause",
   "approve_above": {"total_tokens": 200000},
@@ -603,6 +603,9 @@ Each error should include:
 5. Fold the previous summary into the next (`TestCompactionFoldsTheLastSummaryIntoTheNext`).
 6. Keep facts from early turns through two summaries on a hosted model
    (`TestLiveLongSessionCompaction`, paid: `make test-paid`).
+7. Summarize a task's older tool-loop rounds once they pass `task_max_tokens`, keeping the latest,
+   and re-execute the run alike (`TestCompactionWithinATask`); fold one task summary into the next
+   without summarizing a summary alone (`TestTaskCompactionDoesNotResummarizeItsSummary`).
 
 ### Budget and Safety
 

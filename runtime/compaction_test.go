@@ -186,3 +186,84 @@ func TestCompactionKeepsMessagesWrittenInTheSameInstant(t *testing.T) {
 		t.Fatalf("re-execute: %+v %v", again, err)
 	}
 }
+
+// Acceptance: §Snapshot and Compaction #7 – a task's long tool loop is summarized before its next model call.
+func TestCompactionWithinATask(t *testing.T) {
+	w := newCompactionWorld(t, runtime.Compaction{TaskMaxTokens: 20})
+	w.orch.Agents["main"] = runtime.Agent{Name: "main", Provider: w.answer, Tools: []string{"echo"}, MaxToolLoops: 4}
+	long := strings.Repeat("first lookup ", 10)
+	w.answer.Push(model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "echo", Input: []byte(`{"text":"` + long + `"}`)}}})
+	w.answer.Push(model.MockResponse{ToolCalls: []model.ToolCall{{ID: "2", Name: "echo", Input: []byte(`{"text":"second lookup"}`)}}})
+	w.sum.Push(model.MockResponse{Content: "The first lookup echoed back."})
+	msgs, runID := w.ask("look things up")
+	last := msgs[len(msgs)-1]
+	if last.Role != model.RoleTool || !strings.Contains(last.Content, "second lookup") {
+		t.Fatalf("the latest round was not kept: %+v", last)
+	}
+	var seen strings.Builder
+	for _, m := range msgs {
+		seen.WriteString(m.Content)
+	}
+	if strings.Contains(seen.String(), long) || !strings.Contains(seen.String(), "The first lookup echoed back.") {
+		t.Fatalf("the model saw %q", seen.String())
+	}
+	if sumReq := w.sum.Calls(); len(sumReq) != 1 || !strings.Contains(sumReq[0].Messages[1].Content, long) || !strings.Contains(sumReq[0].Messages[1].Content, "look things up") {
+		t.Fatalf("summarizer requests: %+v", sumReq)
+	}
+	events, _ := w.store.ListRunEvents(context.Background(), core.DefaultTenant, runID, 0, 0)
+	snapshots := 0
+	for _, ev := range events {
+		if ev.Type == core.EvSnapshot && strings.Contains(string(ev.Payload), `"scope":"task"`) && ev.TaskID != "" {
+			snapshots++
+		}
+	}
+	if snapshots != 1 {
+		t.Fatalf("%d task snapshots", snapshots)
+	}
+	ctx, cancel := waitCtx()
+	defer cancel()
+	if again, err := w.orch.ReExecute(ctx, core.DefaultTenant, runID, core.SystemPrincipal); err != nil || again.Outputs["s"] != "answer to look things up" {
+		t.Fatalf("re-execute: %+v %v", again, err)
+	}
+}
+
+func TestTaskCompactionDoesNotResummarizeItsSummary(t *testing.T) {
+	w := newCompactionWorld(t, runtime.Compaction{TaskMaxTokens: 20})
+	w.orch.Agents["main"] = runtime.Agent{Name: "main", Provider: w.answer, Tools: []string{"echo"}, MaxToolLoops: 6}
+	for i := range 3 {
+		w.answer.Push(model.MockResponse{Content: "planning step " + fmt.Sprint(i), ToolCalls: []model.ToolCall{{ID: fmt.Sprint(i), Name: "echo", Input: []byte(`{"text":"lookup ` + fmt.Sprint(i) + `"}`)}}})
+	}
+	w.answer.Push(model.MockResponse{Content: strings.Repeat("not json ", 20)})
+	w.answer.Push(model.MockResponse{Content: strings.Repeat("still not json ", 20)})
+	w.sum.Push(model.MockResponse{Content: "First summary."})
+	w.sum.Push(model.MockResponse{Content: "Second summary."})
+	w.answer.Push(model.MockResponse{Content: `{"ok":true}`})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := w.orch.StartRun(ctx, runtime.StartRunInput{SessionID: w.sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+		Name: "s", Agents: []runtime.AgentStep{{Name: "main", Prompt: "look things up"}},
+		OutputSchema: []byte(`{"type":"object","required":["ok"]}`),
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := w.orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	sums := w.sum.Calls()
+	if len(sums) != 2 {
+		t.Fatalf("%d summary calls, want one per new round", len(sums))
+	}
+	second := sums[1].Messages[1].Content
+	if !strings.Contains(second, "First summary.") || !strings.Contains(second, "planning step 1") {
+		t.Fatalf("the second summary request did not fold in the first and the assistant's text: %q", second)
+	}
+	calls := w.answer.Calls()
+	var seen strings.Builder
+	for _, m := range calls[len(calls)-1].Messages {
+		seen.WriteString(m.Content)
+	}
+	if strings.Contains(seen.String(), "First summary.") || !strings.Contains(seen.String(), "Second summary.") {
+		t.Fatalf("the model saw %q", seen.String())
+	}
+}

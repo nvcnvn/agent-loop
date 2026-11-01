@@ -573,6 +573,9 @@ func TestParseConfig(t *testing.T) {
 		loop.LoopResponse != runtime.LoopApprove || loop.ApproveAbove.TotalTokens != 100 {
 		t.Fatalf("loop config=%+v err=%v", loop, err)
 	}
+	if c, err := runtime.ParseConfig([]byte(`{"agents":[{"name":"a"}],"compaction":{"agent":"a","task_max_tokens":100}}`)); err != nil || c.Compaction.TaskMaxTokens != 100 {
+		t.Fatalf("task compaction config=%+v err=%v", c.Compaction, err)
+	}
 	if len(cfg.Agents) != 2 || cfg.Agents[0].Timeout != time.Minute || cfg.Workflows[0].Stages[1].HandBack.To != "plan" ||
 		cfg.ToolPolicy == nil || len(cfg.ToolPolicy.ApproveSideEffects) != 2 || cfg.ToolPolicy.Denylist[0] != "shell" {
 		t.Fatalf("config=%+v", cfg)

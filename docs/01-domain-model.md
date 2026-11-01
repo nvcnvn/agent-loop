@@ -360,6 +360,12 @@ Rules:
 - A run compacts when it starts, if the messages after the latest snapshot exceed
   `Compaction.MaxMessages` or `Compaction.MaxTokens` (characters / 4). The `Compaction.Agent`
   folds the previous summary and all but the last `KeepRecent` messages into a new summary.
+- Within a task, before each model call after the first, when the tool-loop rounds since the
+  task's prompt exceed `Compaction.TaskMaxTokens` (characters / 4), the `Compaction.Agent`
+  summarizes every round but the latest. The model then sees the instructions, history and prompt,
+  a user turn "Summary of your work on this task so far: …", the latest round and the turns after
+  it; a later summary folds this one in. The summary is
+  not a session message; its `snapshot_created` event has `scope: task` and the task's ID.
 - Raw messages and events are never deleted because a snapshot exists.
 - Generating a snapshot is a model call of the run, recorded like any other (request and response
   in `model_call_*` events, counted against the run's budget), followed by `snapshot_created` with

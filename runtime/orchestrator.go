@@ -1193,6 +1193,7 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 	}
 	messages = append(messages, in.history...)
 	messages = append(messages, model.Message{Role: model.RoleUser, Content: spec.prompt, Images: spec.images})
+	loopStart := len(messages)
 
 	toolSpecs := []model.ToolSpec{}
 	allowed := map[string]allowedTool{}
@@ -1269,6 +1270,10 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 	}
 
 	for range agent.MaxToolLoops {
+		var err error
+		if messages, err = o.compactTask(ctx, in, runID, taskID, spec.prompt, messages, loopStart); err != nil {
+			return "", fmt.Errorf("compact task: %w", err)
+		}
 		resp, err := o.modelCall(ctx, runID, in, taskID, agent, model.ChatRequest{
 			Messages:       messages,
 			Tools:          toolSpecs,

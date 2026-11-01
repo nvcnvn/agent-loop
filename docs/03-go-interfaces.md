@@ -201,6 +201,7 @@ type Compaction struct {
     MaxMessages int    // trigger: messages since the last summary
     MaxTokens   int64  // trigger: their estimated tokens (characters / 4)
     KeepRecent  int    // messages left verbatim after the summary
+    TaskMaxTokens int64 // trigger: a task's messages since its prompt; its rounds before the latest are summarized
 }
 ```
 

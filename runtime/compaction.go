@@ -14,8 +14,10 @@ import (
 )
 
 // Compaction summarizes older session history when a run starts, so agents
-// see the latest summary and the recent messages instead of everything.
-// The raw messages stay stored; the summary is an internal session message.
+// see the latest summary and the recent messages instead of everything, and
+// the older rounds of a task's tool loop when they grow too long. The raw
+// messages and model calls stay stored; a history summary is an internal
+// session message.
 type Compaction struct {
 	// Agent writes the summary with its provider, model and instructions;
 	// empty disables compaction.
@@ -27,6 +29,10 @@ type Compaction struct {
 	MaxTokens   int64 `json:"max_tokens,omitempty"`
 	// KeepRecent messages stay verbatim after the summary.
 	KeepRecent int `json:"keep_recent,omitempty"`
+	// TaskMaxTokens triggers, once a task's messages since its prompt pass this
+	// many estimated tokens, a summary of its tool-loop rounds before the
+	// latest; zero disables it.
+	TaskMaxTokens int64 `json:"task_max_tokens,omitempty"`
 }
 
 // snapshotRole marks the session message that holds a history summary.
@@ -177,4 +183,94 @@ func (o *Orchestrator) compact(ctx context.Context, in StartRunInput, runID core
 		HiddenPayload: mustJSON(map[string]any{"summary": next.Summary}),
 	})
 	return next, nil
+}
+
+const taskSummaryPrompt = "Write a summary of the work on this task so far for the assistant that continues it: " +
+	"what was tried, every tool result, fact, name, number and decision it still needs, and what is left to do. " +
+	"Reply with only the summary."
+
+// compactTask replaces the tool-loop rounds of a task before its latest with a
+// summary once the messages since its prompt, from messages[base], pass
+// TaskMaxTokens. A summary of earlier rounds is folded into the next one.
+func (o *Orchestrator) compactTask(ctx context.Context, in StartRunInput, runID core.RunID, taskID core.TaskID, prompt string, messages []model.Message, base int) ([]model.Message, error) {
+	c := o.Compaction
+	if c.Agent == "" || c.TaskMaxTokens <= 0 || estimateTokens(messages[base:]) <= c.TaskMaxTokens {
+		return messages, nil
+	}
+	cut := base
+	for i := len(messages) - 1; i > base; i-- {
+		if messages[i].Role == model.RoleAssistant && len(messages[i].ToolCalls) > 0 {
+			cut = i
+			break
+		}
+	}
+	if !slices.ContainsFunc(messages[base:cut], func(m model.Message) bool { return m.Role == model.RoleAssistant }) {
+		return messages, nil
+	}
+	agent, ok := o.Agents[c.Agent]
+	if !ok {
+		return nil, fmt.Errorf("compaction agent %q: %w", c.Agent, core.ErrNotFound)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Task:\n%s\n\nWork so far:\n", prompt)
+	for _, m := range messages[base:cut] {
+		writeTurn(&b, m)
+	}
+	b.WriteString("\n" + taskSummaryPrompt)
+	var msgs []model.Message
+	if agent.Instructions != "" {
+		msgs = append(msgs, model.Message{Role: model.RoleSystem, Content: agent.Instructions})
+	}
+	msgs = append(msgs, model.Message{Role: model.RoleUser, Content: b.String()})
+	resp, err := o.modelCall(ctx, runID, in, taskID, agent, model.ChatRequest{Messages: msgs})
+	if err != nil {
+		return nil, err
+	}
+	summary := strings.TrimSpace(resp.Message.Content)
+	if summary == "" {
+		return nil, fmt.Errorf("agent %s wrote an empty task summary", agent.Name)
+	}
+	o.emit(ctx, core.Event{
+		TenantID:      in.TenantID,
+		SessionID:     in.SessionID,
+		RunID:         runID,
+		TaskID:        taskID,
+		Type:          core.EvSnapshot,
+		Visibility:    core.VisibilityInternal,
+		ActorID:       core.AgentPrincipal(agent.Name),
+		Payload:       mustJSON(map[string]any{"scope": "task", "agent": agent.Name, "summarized": cut - base}),
+		HiddenPayload: mustJSON(map[string]any{"summary": summary}),
+	})
+	out := slices.Clone(messages[:base])
+	out = append(out, model.Message{Role: model.RoleUser, Content: "Summary of your work on this task so far:\n" + summary})
+	return append(out, messages[cut:]...), nil
+}
+
+// writeTurn writes a tool-loop message as a line of a summary prompt.
+func writeTurn(b *strings.Builder, m model.Message) {
+	switch {
+	case m.Role == model.RoleTool:
+		fmt.Fprintf(b, "[tool %s returned] %s\n", m.Name, m.Content)
+	case len(m.ToolCalls) > 0:
+		if m.Content != "" {
+			fmt.Fprintf(b, "[%s] %s\n", m.Role, m.Content)
+		}
+		for _, tc := range m.ToolCalls {
+			fmt.Fprintf(b, "[assistant called %s] %s\n", tc.Name, tc.Input)
+		}
+	default:
+		fmt.Fprintf(b, "[%s] %s\n", m.Role, m.Content)
+	}
+}
+
+// estimateTokens estimates tokens as characters / 4.
+func estimateTokens(msgs []model.Message) int64 {
+	var chars int
+	for _, m := range msgs {
+		chars += len(m.Content) + len(m.Thinking)
+		for _, tc := range m.ToolCalls {
+			chars += len(tc.Name) + len(tc.Input)
+		}
+	}
+	return int64(chars / 4)
 }

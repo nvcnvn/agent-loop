@@ -62,8 +62,8 @@ func (c Config) Validate() error {
 		if _, ok := agents[c.Agent]; !ok {
 			return fmt.Errorf("compaction: unknown agent %q", c.Agent)
 		}
-		if c.MaxMessages < 0 || c.MaxTokens < 0 || c.KeepRecent < 0 || c.MaxMessages == 0 && c.MaxTokens == 0 {
-			return errors.New("compaction: needs max_messages or max_tokens, and no negative values")
+		if c.MaxMessages < 0 || c.MaxTokens < 0 || c.KeepRecent < 0 || c.TaskMaxTokens < 0 || c.MaxMessages == 0 && c.MaxTokens == 0 && c.TaskMaxTokens == 0 {
+			return errors.New("compaction: needs max_messages, max_tokens or task_max_tokens, and no negative values")
 		}
 	}
 	if c.ToolPolicy != nil {

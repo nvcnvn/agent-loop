@@ -137,7 +137,8 @@ Support snapshots that summarize earlier context to control token growth.
 Requirements:
 - [x] Trigger snapshots by message count or token count, checked at the start of each run
   (`Orchestrator.Compaction`, or `compaction` in the `-config` file).
-- [ ] Compact within a run, when one task's tool loop grows its context.
+- [x] Compact within a run: a task's tool-loop rounds before its latest are summarized once they pass
+  `task_max_tokens`.
 - [x] Preserve the raw history even when summarized.
 - [x] Make snapshot generation auditable (a recorded model call and `snapshot_created`).
 - [x] Allow replay from raw history (strict replay) or from snapshot plus tail (re-execution
