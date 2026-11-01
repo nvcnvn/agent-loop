@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 
 	"github.com/nvcnvn/agent-loop/model"
 )
@@ -215,6 +216,32 @@ func TestLeadingThinkPassesOrdinaryContentThrough(t *testing.T) {
 	}
 	if c, _ := l.push(" more"); c != " more" {
 		t.Fatalf("content=%q", c)
+	}
+}
+
+func TestStreamCutOffMidwayIsUnexpectedEOF(t *testing.T) {
+	cut := io.MultiReader(strings.NewReader(`data: {"choices":[{"del`), iotest.ErrReader(io.ErrUnexpectedEOF))
+	_, err := readStream(cut, func(model.Delta) {})
+	if !errors.Is(err, io.ErrUnexpectedEOF) || !model.Transient(err) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestHTTP2StreamResetMidwayIsUnexpectedEOF(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"del`)
+		_ = http.NewResponseController(w).Flush()
+		panic(http.ErrAbortHandler)
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+	p := New(srv.URL+"/v1/", "k")
+	p.HTTP = srv.Client()
+	_, err := p.ChatStream(context.Background(), model.ChatRequest{Model: "glm"}, func(model.Delta) {})
+	if !errors.Is(err, io.ErrUnexpectedEOF) || !model.Transient(err) {
+		t.Fatalf("err=%v", err)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -140,6 +141,28 @@ func (p *Provider) ChatStream(ctx context.Context, req model.ChatRequest, onDelt
 	return resp, nil
 }
 
+// cutOff is the error of a reply whose body failed to read after it started,
+// which HTTP/2 reports as a stream reset rather than io.ErrUnexpectedEOF.
+func cutOff(err error) error {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("openai: stream: %w", err)
+	}
+	return fmt.Errorf("openai: stream: %w: %w", io.ErrUnexpectedEOF, err)
+}
+
+type readErr struct {
+	r   io.Reader
+	err error
+}
+
+func (e *readErr) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err != nil && err != io.EOF {
+		e.err = err
+	}
+	return n, err
+}
+
 type chunk struct {
 	Choices []struct {
 		Delta struct {
@@ -158,7 +181,8 @@ func readStream(r io.Reader, onDelta func(model.Delta)) (model.ChatResponse, err
 		calls              = map[int]*toolCall{}
 		u                  *usage
 	)
-	sc := bufio.NewScanner(r)
+	body := &readErr{r: r}
+	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 64<<10), 4<<20)
 	for sc.Scan() {
 		data, ok := strings.CutPrefix(sc.Text(), "data:")
@@ -171,6 +195,10 @@ func readStream(r io.Reader, onDelta func(model.Delta)) (model.ChatResponse, err
 		}
 		var c chunk
 		if err := json.Unmarshal([]byte(data), &c); err != nil {
+			// The scanner hands over a line cut off by a failed read as if it were whole.
+			if body.err != nil {
+				return model.ChatResponse{}, cutOff(body.err)
+			}
 			return model.ChatResponse{}, fmt.Errorf("openai: stream: %w", err)
 		}
 		if c.Usage != nil {
@@ -195,6 +223,9 @@ func readStream(r io.Reader, onDelta func(model.Delta)) (model.ChatResponse, err
 				acc.Function.Arguments += tc.Function.Arguments
 			}
 		}
+	}
+	if body.err != nil {
+		return model.ChatResponse{}, cutOff(body.err)
 	}
 	if err := sc.Err(); err != nil {
 		return model.ChatResponse{}, fmt.Errorf("openai: stream: %w", err)

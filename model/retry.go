@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -33,7 +34,7 @@ func NewStatusError(provider string, resp *http.Response, body []byte) *StatusEr
 }
 
 // Transient reports whether err is worth retrying: rate limits, server
-// errors, timeouts and dropped connections, but not cancellation.
+// errors, timeouts, dropped connections and replies cut off, but not cancellation.
 func Transient(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
@@ -42,7 +43,7 @@ func Transient(err error) bool {
 		return se.Code == http.StatusRequestTimeout || se.Code == http.StatusTooManyRequests || se.Code >= 500
 	}
 	_, isNet := errors.AsType[net.Error](err)
-	return isNet || errors.Is(err, net.ErrClosed)
+	return isNet || errors.Is(err, net.ErrClosed) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // Retry wraps a Provider so Chat retries transient failures with jittered

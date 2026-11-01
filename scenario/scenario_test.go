@@ -132,6 +132,7 @@ type world struct {
 	sid      core.SessionID
 	timeout  time.Duration
 	decision string // how approval requests are resolved; empty fails the run on one
+	saved    int    // runs saved as fixtures
 }
 
 func newWorld(t *testing.T, agents ...runtime.Agent) *world {
@@ -194,6 +195,9 @@ func (w *world) try(in runtime.StartRunInput) (runtime.Result, []core.Event) {
 	}
 	if again, _ := w.orch.ReExecute(ctx, core.DefaultTenant, runID, core.SystemPrincipal); again.Status != res.Status || !maps.Equal(again.Outputs, res.Outputs) {
 		w.t.Errorf("re-execution diverged: status=%s reason=%s outputs=%v, original status=%s outputs=%v", again.Status, again.FailureReason, again.Outputs, res.Status, res.Outputs)
+	}
+	if *recordRuns != "" && strings.HasSuffix(w.t.Name(), "/"+*recordRuns) {
+		w.saveRun(runID)
 	}
 	return res, events
 }

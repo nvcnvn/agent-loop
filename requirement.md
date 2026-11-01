@@ -430,9 +430,11 @@ Requirements:
 - [x] Contract tests for tool registration and MCP integration (against the MCP SDK's server over
   stdio, streamable HTTP and in-memory transports).
 - [x] Replay tests on runs produced in the test.
-- [ ] Replay tests using recorded run fixtures.
+- [x] Replay tests using recorded run fixtures: real scenario runs saved as stored
+  (`scenario/testdata/runs`, `-record-runs`) re-execute to the same result.
 - [x] Concurrency tests for fan-out and cancellation.
-- [ ] Failure injection tests for network loss, tool timeout, and process restart.
+- [x] Failure injection tests for network loss (model connections dropped or cut off before the reply
+  starts, MCP connections lost), tool timeout, and process restart.
 - [x] Fuzz tests for every decoder of external input: model responses, streams, structured output and
   embeddings, model capabilities, MCP tool definitions and results, tool arguments (including
   `delegate`), REST bodies and queries, and API key lists.
@@ -466,7 +468,8 @@ The product vision is met when the framework can:
 - [x] Spawn multiple agents concurrently and merge their outputs safely.
 - [x] Schedule multiple tool calls concurrently when policy permits.
 - [x] Persist enough state to inspect and audit any run.
-- [ ] Persist enough state to resume and deterministically replay any run.
+- [x] Persist enough state to resume and deterministically replay any run, given the agent and tool
+  definitions it ran with.
 - [x] Apply budgets, limits, and approval gates without relying on prompt discipline alone.
 - [x] Support long-term memory and retrieval with clear provenance.
 - [x] Expose operational telemetry sufficient for debugging and production monitoring.

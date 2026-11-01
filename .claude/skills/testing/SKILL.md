@@ -118,8 +118,8 @@ safely. A scenario fails with `model.ErrNoFixture` when:
 
 If the drift is intended, re-record every model whose fixtures it touches
 (`make record-host-ollama OLLAMA_MODEL=<tag>`, or narrow it with
-`OLLAMA_MODEL=<tag> go test -run 'TestXxx/<model>' ./scenario -args -record`)
-and review the fixture diffs.
+`OLLAMA_MODEL=<tag> go test -run 'TestXxx/<model>' ./scenario -args -record`),
+re-save the run fixtures (below) and review the fixture diffs.
 
 Adding a scenario:
 1. Write `TestXxx` with `forEachModel`, calling `run` (or `runWithImages`).
@@ -127,6 +127,23 @@ Adding a scenario:
    key tokens in the answer), never on exact model wording.
 2. Record it for every model: `make record-host-ollama OLLAMA_MODEL=<tag>`.
 3. Run `make test` and commit the fixtures with the code.
+
+## Run fixtures
+
+`scenario/testdata/runs/<TestName>/<model>-<n>.json` are finished runs as a
+store holds them (the run, its events, the session history it saw, its input
+images) with the agents and tool definitions that ran them.
+`TestRecordedRunsReExecute` loads each into a fresh store and re-executes it
+from its recorded model and tool outputs, so a change that stops runs stored
+by an earlier version from re-executing to the same result fails. Save them with
+`go test ./scenario -args -record-runs=z-ai_glm-5.3` and, for the image
+scenarios, `go test -run TestImage ./scenario -args -record-runs=qwen3-vl_2b`
+(they read the model fixtures, so they cost nothing; a scenario's old files for
+that model are replaced). Re-save them after re-recording model fixtures for an
+intended change to the requests the runtime builds, or when the stored format
+changes on purpose; otherwise a failure is the incompatibility they guard. They
+are compact JSON because indenting would also re-indent the stored tool outputs
+the replayed requests must match.
 
 Adding a model: add it to `models`, then record all scenarios for it.
 

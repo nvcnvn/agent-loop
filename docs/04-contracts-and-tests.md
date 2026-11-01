@@ -698,6 +698,9 @@ Each error should include:
 2a. Re-execute a run from its recorded model and tool outputs and reach the same result
     (`TestReExecuteReproducesRun`, and every scenario re-executes its runs); a changed prompt
     fails the copy (`TestReExecuteDetectsDivergence`).
+2b. Re-execute runs stored by earlier versions to the same result: real runs of the scenarios,
+    including image input, saved with their agents, tools, history, input images and events in
+    `scenario/testdata/runs` (`TestRecordedRunsReExecute`).
 3. Replay from snapshot plus tail events and verify the same terminal state.
 4. Detect replay mismatch when a stored tool result differs from a recomputed result.
 5. Retry a failed tool call only when the tool is idempotent (`TestTransientToolFailuresAreRetriedWhenSafe`,
@@ -765,6 +768,15 @@ Each error should include:
    `Wait` returns, and a run canceled while unheld ends with its tasks and approvals closed
    (`TestRunsLeasedAcrossProcesses`, `TestLeaseReleasedBeforeWaitReturns`,
    `TestLocalCancelIsRecorded`, `TestRecoverCancelsRequestedRunCleanly`, `storetest.Leases`).
+7. Survive injected failures: a model connection dropped before replying, or a reply cut off
+   before its first delta over HTTP/1.1 or HTTP/2, is retried (`TestModelNetworkLossIsRetried`,
+   `TestHTTP2StreamResetMidwayIsUnexpectedEOF`); a reply cut off later fails the call, since its
+   start already reached the client. An MCP server's lost connection is reopened and its
+   idempotent calls retried (`TestReconnectsAndRetriesIdempotentCalls`), a tool that times out
+   returns the error to the model or is retried when idempotent
+   (`TestToolTimeoutReturnsErrorToModel`, `TestTimedOutCallOfAnIdempotentToolIsRetried`), and a
+   process that stops mid-run has the run finished by the next one (`TestRecoverResumesInterruptedRun`,
+   `TestShutdownCheckpointsRunsForRecovery`, `TestRunsLeasedAcrossProcesses`).
 
 ### Security
 

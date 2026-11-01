@@ -3,6 +3,8 @@ package model
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"testing"
 	"time"
 )
@@ -35,6 +37,7 @@ func TestRetryRetriesOnlyTransientErrors(t *testing.T) {
 		{"gives up after Attempts", []error{busy, busy, busy, busy}, 3, true},
 		{"does not retry a client error", []error{&StatusError{Code: 400}}, 1, true},
 		{"does not retry cancellation", []error{context.Canceled}, 1, true},
+		{"retries a reply cut off", []error{fmt.Errorf("openai: stream: %w", io.ErrUnexpectedEOF)}, 2, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
