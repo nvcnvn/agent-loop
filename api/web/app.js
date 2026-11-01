@@ -78,11 +78,11 @@ function valueOf(obj, snake, title) {
 }
 
 function sessionID(session) {
-  return valueOf(session, "id", "ID");
+  return valueOf(session, "session_id", "ID");
 }
 
 function runID(run) {
-  return valueOf(run, "id", "ID");
+  return valueOf(run, "run_id", "ID");
 }
 
 function statusOf(run) {

@@ -15,8 +15,7 @@ Stability: each operation's `x-stability` is `stable` for the public API clients
 every `/v1` route except `/v1/debug/*`, or `internal` for operators and the bundled debug console:
 `/healthz`, `/readyz` and `/metrics`, and `/`, `/ui/` and `/v1/debug/*`, which only a server started
 with `-debug` serves. Within v1 stable routes change only compatibly; internal ones may change in
-any release. Run fields that name the process holding a run (`Owner`, `LeaseUntil`,
-`CancelRequested`) are runtime details even on stable routes.
+any release.
 
 Identity: every route except `/healthz`, `/readyz`, `/metrics`, `/`, `/ui/` and `/v1/openapi.json`
 needs one, and so does a request no route matches (401 otherwise). An
@@ -25,11 +24,10 @@ it as `?access_token=`, since `EventSource` cannot send headers), fixes the call
 principal and role. A server started with `-trust-identity-headers` instead trusts `X-Tenant-ID`,
 `X-Principal-ID` and `X-Role` as sent, for local development.
 
-Errors are `{"code", "message", "retryable", "correlation_id"}` with a code from §12. A request
-body over the server's cap (1 MiB by default) answers 413. `POST /v1/runs` and a message post that
-starts a run take an idempotency key as `idempotency_key` or the `Idempotency-Key` header. Run
-events page by run sequence (`?after=`, `?limit=`) and approvals by ID (`?after=`, `?limit=`,
-`next_after`); the other lists are not paged.
+Errors and their codes are in §12. A request body over the server's cap (1 MiB by default)
+answers 413. `POST /v1/runs` and a message post that starts a run take an idempotency key as
+`idempotency_key` or the `Idempotency-Key` header. Run events page by run sequence (`?after=`,
+`?limit=`); lists other than events and approvals are not paged.
 
 Approvals: `GET /v1/approvals` lists the caller's tenant's approvals that are still `requested`
 and not expired, oldest first, as `{"approvals": [{"approval_id", "tenant_id", "run_id",
@@ -91,7 +89,7 @@ without an embedding model 501.
 
 Participants: `GET /v1/sessions/{sid}/participants` lists `{"participants": [{"tenant_id",
 "session_id", "principal_id", "role", "joined_at"}]}`; `PUT
-/v1/sessions/{sid}/participants/{principal}` with `{"role": "owner" | "member" | "viewer"}` adds a
+/v1/sessions/{sid}/participants/{pid}` with `{"role": "owner" | "member" | "viewer"}` adds a
 participant or changes its role and answers the participant; `DELETE` removes one (204).
 
 Visibility: each role reads the event and message visibilities the deployment's `visibility` map
@@ -609,27 +607,20 @@ Decide v1 deployment mode explicitly:
 
 ### 12. Error Taxonomy
 
-Define stable error categories:
-- validation_error
-- unauthorized
-- forbidden
-- not_found
-- conflict
-- budget_exceeded
-- approval_required
-- policy_denied
-- overloaded
-- provider_unavailable
-- tool_failed
-- replay_mismatch
-- internal_error
+REST errors are `{"code", "message", "retryable"}`. `retryable` is true on 503, which also sends
+`Retry-After`. The codes:
+- `validation_error` (400, or 413 for a body or document over its cap)
+- `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict` (409)
+- `not_recorded` (422: a run stored before re-execution's records were)
+- `unsupported_media_type` (415: a binary artifact sent to memory)
+- `not_implemented` (501: memory without an embedding model)
+- `overloaded` and `not_ready` (503)
+- `internal_error` (500)
 
-Each error should include:
-- code
-- message
-- retryable flag
-- correlation ID
-- optional diagnostic details for internal visibility
+A run's or task's failure is recorded in an `error_recorded` event whose `code` is
+`budget_exceeded`, `policy_denied`, `provider_unavailable`, `unsupported_capability`,
+`loop_detected`, `paused`, `canceled`, `timed_out` or `failed`; a tool call's failure that fails its
+task carries the same code as `fatal` on `tool_call_completed`.
 
 ## Acceptance Test Scenarios
 

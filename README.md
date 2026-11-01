@@ -48,7 +48,7 @@ The recommended first vertical slice from
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
 | Re-execution of a finished run from its recorded model requests/responses and tool results (`POST /v1/runs/{rid}/reexecute`) | [runtime/reexecute.go](runtime/reexecute.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
-| OpenAPI 3.1 document of every route, served at `GET /v1/openapi.json`, marking each operation `x-stability: stable` (every `/v1` route except `/v1/debug/*`) or `internal` (probes, metrics, debug console); a test keeps it in step with the registered routes | [api/openapi.json](api/openapi.json) |
+| OpenAPI 3.1 document served at `/v1/openapi.json`, each operation marked stable or internal | [api/openapi.json](api/openapi.json) |
 | Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
 | MCP tools: servers over stdio or streamable HTTP, tools discovered and translated at startup and kept in step with the server, auth headers from the config file's `${VAR}`, reconnects, retries of idempotent calls, a circuit breaker; servers whose tools only one tenant sees (`tenant_mcp_servers`) | [tool/mcp/mcp.go](tool/mcp/mcp.go), [runtime/tenanttools.go](runtime/tenanttools.go) |
 | OpenTelemetry traces of runs, stages, tasks (including delegated ones), model calls, tool calls and approval waits | [runtime/orchestrator.go](runtime/orchestrator.go) |
@@ -135,7 +135,7 @@ are redacted from logs and trace errors, as are the config file's `redact` patte
 
 Admins and operators act on every session of their tenant; members and viewers only on the
 sessions they participate in. Whoever creates a session owns it and adds others as `owner`,
-`member` or `viewer` (`PUT /v1/sessions/{sid}/participants/{principal}`). Each role reads the event
+`member` or `viewer` (`PUT /v1/sessions/{sid}/participants/{pid}`). Each role reads the event
 visibilities that `visibility` in the `-config` file gives it (members and viewers: `public` and
 `participant`; operators also `internal` and `audit`; admins also `hidden_reasoning` and hidden
 payloads). [docs/04-contracts-and-tests.md](docs/04-contracts-and-tests.md) §1 has the full rules.
@@ -259,8 +259,8 @@ workflow on every push and PR.
 While implementing, the following gaps in `requirement.md` and `docs/`
 were resolved in code:
 
-1. **Concrete REST contract** — [api/openapi.json](api/openapi.json)
-   is the OpenAPI document doc 4 called for, each route marked stable or internal.
+1. **Concrete REST contract** — [api/openapi.json](api/openapi.json) is the REST contract
+   ([docs/04](docs/04-contracts-and-tests.md) §1).
 2. **CI-friendly persistence** — an in-memory `EventStore` /
    `RunStore` / `TaskStore` / `ApprovalStore` / `ArtifactStore` that
    satisfies the same interfaces a Postgres driver would. Tests run

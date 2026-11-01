@@ -18,15 +18,15 @@ import (
 
 // Session is the stored shape of a session.
 type Session struct {
-	ID        core.SessionID
-	TenantID  core.TenantID
-	CreatedBy core.PrincipalID
-	Title     string
-	Project   string // optional label; memories can be scoped to it
-	Status    string
-	Metadata  map[string]any
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        core.SessionID   `json:"session_id"`
+	TenantID  core.TenantID    `json:"tenant_id"`
+	CreatedBy core.PrincipalID `json:"created_by"`
+	Title     string           `json:"title"`
+	Project   string           `json:"project,omitempty"` // optional label; memories can be scoped to it
+	Status    string           `json:"status"`
+	Metadata  map[string]any   `json:"metadata,omitempty"`
+	CreatedAt time.Time        `json:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
 }
 
 // Participant is a principal's membership of a session, as owner, member or viewer.
@@ -58,28 +58,28 @@ type AgentStore interface {
 
 // Run is the stored shape of a run.
 type Run struct {
-	ID             core.RunID
-	TenantID       core.TenantID
-	SessionID      core.SessionID
-	ParentRunID    core.RunID
-	StartedBy      core.PrincipalID
-	Status         core.RunStatus
-	Limits         core.Limits
-	Usage          core.Usage
-	FailureReason  string
-	IdempotencyKey string
-	QueuedAt       time.Time
-	StartedAt      time.Time
-	EndedAt        time.Time
-	Workflow       json.RawMessage
-	Input          json.RawMessage
-	Output         json.RawMessage
+	ID             core.RunID       `json:"run_id"`
+	TenantID       core.TenantID    `json:"tenant_id"`
+	SessionID      core.SessionID   `json:"session_id"`
+	ParentRunID    core.RunID       `json:"parent_run_id,omitempty"`
+	StartedBy      core.PrincipalID `json:"started_by,omitempty"`
+	Status         core.RunStatus   `json:"status"`
+	Limits         core.Limits      `json:"limits"`
+	Usage          core.Usage       `json:"usage"`
+	FailureReason  string           `json:"failure_reason,omitempty"`
+	IdempotencyKey string           `json:"idempotency_key,omitempty"`
+	QueuedAt       time.Time        `json:"queued_at"`
+	StartedAt      time.Time        `json:"started_at"`
+	EndedAt        time.Time        `json:"ended_at"`
+	Workflow       json.RawMessage  `json:"workflow,omitempty"`
+	Input          json.RawMessage  `json:"input,omitempty"`
+	Output         json.RawMessage  `json:"output,omitempty"`
 	// Owner is the process executing the run while LeaseUntil has not passed;
 	// CancelRequested asks it to cancel the run. CreateRun sets Owner and
 	// LeaseUntil, ClaimRun and ReleaseRun change them, and UpdateRun leaves all three alone.
-	Owner           string
-	LeaseUntil      time.Time
-	CancelRequested bool
+	Owner           string    `json:"-"`
+	LeaseUntil      time.Time `json:"-"`
+	CancelRequested bool      `json:"cancel_requested"`
 }
 
 // Task is the stored shape of a task.
@@ -101,14 +101,14 @@ type Task struct {
 
 // MessageProjection is a chat-friendly projection of an event.
 type MessageProjection struct {
-	ID         string
-	SessionID  core.SessionID
-	RunID      core.RunID
-	EventID    core.EventID
-	Role       string
-	Visibility core.Visibility
-	Content    string
-	CreatedAt  time.Time
+	ID         string          `json:"message_id"`
+	SessionID  core.SessionID  `json:"session_id"`
+	RunID      core.RunID      `json:"run_id,omitempty"`
+	EventID    core.EventID    `json:"event_id,omitempty"`
+	Role       string          `json:"role"`
+	Visibility core.Visibility `json:"visibility"`
+	Content    string          `json:"content"`
+	CreatedAt  time.Time       `json:"created_at"`
 }
 
 // Approval is the stored shape of an approval request.

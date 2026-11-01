@@ -557,12 +557,16 @@ func TestStartRunOverloaded(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		var e struct {
+			Retryable bool `json:"retryable"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&e)
 		resp.Body.Close()
 		if resp.StatusCode != want {
 			t.Fatalf("run %d status=%d want %d", i, resp.StatusCode, want)
 		}
-		if want == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") == "" {
-			t.Fatal("503 without Retry-After")
+		if want == http.StatusServiceUnavailable && (resp.Header.Get("Retry-After") == "" || !e.Retryable) {
+			t.Fatalf("503 with Retry-After %q and retryable %v", resp.Header.Get("Retry-After"), e.Retryable)
 		}
 	}
 }

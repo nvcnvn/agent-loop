@@ -271,10 +271,9 @@ type startRunResp struct {
 }
 
 type errorResp struct {
-	Code        string `json:"code"`
-	Message     string `json:"message"`
-	Retryable   bool   `json:"retryable"`
-	Correlation string `json:"correlation_id,omitempty"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -284,7 +283,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeErr(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, errorResp{Code: code, Message: msg})
+	writeJSON(w, status, errorResp{Code: code, Message: msg, Retryable: status == http.StatusServiceUnavailable})
 }
 
 func writeDecodeErr(w http.ResponseWriter, err error) {
@@ -708,7 +707,6 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 	aid := core.ApprovalID(r.PathValue("aid"))
 	var req struct {
 		Decision string          `json:"decision"`
-		Reason   string          `json:"reason"`
 		Payload  json.RawMessage `json:"payload"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

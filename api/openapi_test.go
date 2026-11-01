@@ -49,8 +49,12 @@ func TestOpenAPIDescribesEveryRoute(t *testing.T) {
 			if err := json.Unmarshal(raw, &op); err != nil {
 				t.Fatalf("%s: %v", pattern, err)
 			}
-			if op.Stability != "stable" && op.Stability != "internal" {
-				t.Errorf("%s: x-stability = %q, want stable or internal", pattern, op.Stability)
+			want := "internal"
+			if strings.HasPrefix(path, "/v1/") && !strings.HasPrefix(path, "/v1/debug/") {
+				want = "stable"
+			}
+			if op.Stability != want {
+				t.Errorf("%s: x-stability = %q, want %s", pattern, op.Stability, want)
 			}
 			if public := op.Security != nil && len(*op.Security) == 0; public != publicRoutes[pattern] {
 				t.Errorf("%s: documented without identity = %v, served without one = %v", pattern, public, publicRoutes[pattern])

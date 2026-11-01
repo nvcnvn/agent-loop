@@ -64,11 +64,11 @@ type StartRunInput struct {
 
 // Result is the terminal state returned by Wait.
 type Result struct {
-	RunID         core.RunID
-	Status        core.RunStatus
-	Outputs       map[string]string // stage name -> aggregated output
-	Usage         core.Usage
-	FailureReason string
+	RunID         core.RunID        `json:"run_id"`
+	Status        core.RunStatus    `json:"status"`
+	Outputs       map[string]string `json:"outputs"` // stage name -> aggregated output
+	Usage         core.Usage        `json:"usage"`
+	FailureReason string            `json:"failure_reason,omitempty"`
 }
 
 // Orchestrator is the central runtime entry point.

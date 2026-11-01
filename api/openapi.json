@@ -269,6 +269,7 @@
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"},
           "413": {"$ref": "#/components/responses/TooLarge"},
+          "500": {"$ref": "#/components/responses/Internal"},
           "503": {"$ref": "#/components/responses/Overloaded"}
         }
       }
@@ -386,7 +387,7 @@
           "401": {"$ref": "#/components/responses/Unauthorized"},
           "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "413": {"$ref": "#/components/responses/TooLarge"},
+          "413": {"description": "The artifact's content is over 1 MiB (`validation_error`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "415": {"description": "A binary artifact (`unsupported_media_type`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "500": {"$ref": "#/components/responses/Internal"},
           "501": {"$ref": "#/components/responses/NoMemory"}
@@ -423,6 +424,7 @@
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"},
           "413": {"$ref": "#/components/responses/TooLarge"},
+          "500": {"$ref": "#/components/responses/Internal"},
           "503": {"$ref": "#/components/responses/Overloaded"}
         }
       }
@@ -549,7 +551,8 @@
           "403": {"$ref": "#/components/responses/Forbidden"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"description": "The run has finished (`conflict`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-          "413": {"$ref": "#/components/responses/TooLarge"}
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "500": {"$ref": "#/components/responses/Internal"}
         }
       }
     },
@@ -624,8 +627,7 @@
           "type": "object", "required": ["decision"],
           "properties": {
             "decision": {"enum": ["approved", "rejected"]},
-            "payload": {"description": "Stored as the resolution; an `ask_human` question takes its `answer`."},
-            "reason": {"type": "string", "description": "Accepted and not stored."}
+            "payload": {"description": "Stored as the resolution; an `ask_human` question takes its `answer`."}
           }
         }}}},
         "responses": {
@@ -679,14 +681,13 @@
         "properties": {
           "code": {"type": "string", "description": "`validation_error`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `overloaded`, `not_recorded`, `unsupported_media_type`, `not_implemented`, `not_ready` or `internal_error`."},
           "message": {"type": "string"},
-          "retryable": {"type": "boolean"},
-          "correlation_id": {"type": "string"}
+          "retryable": {"type": "boolean", "description": "True on 503, where the request may be sent again after `Retry-After`."}
         }
       },
       "RunStatus": {"enum": ["queued", "running", "awaiting_approval", "paused", "canceling", "canceled", "succeeded", "failed", "timed_out"]},
       "Visibility": {"enum": ["public", "participant", "internal", "hidden_reasoning", "audit"]},
       "SessionRole": {"enum": ["owner", "member", "viewer"]},
-      "MemoryScope": {"enum": ["session", "project", "workflow", "tenant"], "default": "session", "description": "`project` needs a session with a project; `tenant` needs an admin or operator."},
+      "MemoryScope": {"enum": ["session", "project", "tenant"], "default": "session", "description": "`project` needs a session with a project; `tenant` needs an admin or operator."},
       "Limits": {
         "type": "object",
         "properties": {
@@ -717,17 +718,16 @@
       },
       "Session": {
         "type": "object",
-        "description": "Field names are the Go field names of store.Session.",
         "properties": {
-          "ID": {"$ref": "#/components/schemas/ID"},
-          "TenantID": {"$ref": "#/components/schemas/ID"},
-          "CreatedBy": {"$ref": "#/components/schemas/ID"},
-          "Title": {"type": "string"},
-          "Project": {"type": "string"},
-          "Status": {"type": "string"},
-          "Metadata": {"type": ["object", "null"]},
-          "CreatedAt": {"$ref": "#/components/schemas/Time"},
-          "UpdatedAt": {"$ref": "#/components/schemas/Time"}
+          "session_id": {"$ref": "#/components/schemas/ID"},
+          "tenant_id": {"$ref": "#/components/schemas/ID"},
+          "created_by": {"$ref": "#/components/schemas/ID"},
+          "title": {"type": "string"},
+          "project": {"type": "string"},
+          "status": {"type": "string"},
+          "metadata": {"type": "object"},
+          "created_at": {"$ref": "#/components/schemas/Time"},
+          "updated_at": {"$ref": "#/components/schemas/Time"}
         }
       },
       "Participant": {
@@ -742,52 +742,47 @@
       },
       "Message": {
         "type": "object",
-        "description": "Field names are the Go field names of store.MessageProjection.",
         "properties": {
-          "ID": {"type": "string"},
-          "SessionID": {"$ref": "#/components/schemas/ID"},
-          "RunID": {"type": "string"},
-          "EventID": {"type": "string"},
-          "Role": {"type": "string"},
-          "Visibility": {"$ref": "#/components/schemas/Visibility"},
-          "Content": {"type": "string"},
-          "CreatedAt": {"$ref": "#/components/schemas/Time"}
+          "message_id": {"type": "string"},
+          "session_id": {"$ref": "#/components/schemas/ID"},
+          "run_id": {"type": "string"},
+          "event_id": {"type": "string"},
+          "role": {"type": "string"},
+          "visibility": {"$ref": "#/components/schemas/Visibility"},
+          "content": {"type": "string"},
+          "created_at": {"$ref": "#/components/schemas/Time"}
         }
       },
       "Run": {
         "type": "object",
-        "description": "Field names are the Go field names of store.Run. `Owner`, `LeaseUntil` and `CancelRequested` are the process holding the run and are runtime details.",
         "properties": {
-          "ID": {"$ref": "#/components/schemas/ID"},
-          "TenantID": {"$ref": "#/components/schemas/ID"},
-          "SessionID": {"$ref": "#/components/schemas/ID"},
-          "ParentRunID": {"type": "string", "description": "The original run of a re-execution; empty otherwise."},
-          "StartedBy": {"$ref": "#/components/schemas/ID"},
-          "Status": {"$ref": "#/components/schemas/RunStatus"},
-          "Limits": {"$ref": "#/components/schemas/Limits"},
-          "Usage": {"$ref": "#/components/schemas/Usage"},
-          "FailureReason": {"type": "string"},
-          "IdempotencyKey": {"type": "string"},
-          "QueuedAt": {"$ref": "#/components/schemas/Time"},
-          "StartedAt": {"$ref": "#/components/schemas/Time"},
-          "EndedAt": {"$ref": "#/components/schemas/Time"},
-          "Workflow": {"description": "The workflow the run started with."},
-          "Input": {"description": "The run input."},
-          "Output": {"description": "The stage outputs of a finished run."},
-          "Owner": {"type": "string"},
-          "LeaseUntil": {"$ref": "#/components/schemas/Time"},
-          "CancelRequested": {"type": "boolean"}
+          "run_id": {"$ref": "#/components/schemas/ID"},
+          "tenant_id": {"$ref": "#/components/schemas/ID"},
+          "session_id": {"$ref": "#/components/schemas/ID"},
+          "parent_run_id": {"type": "string", "description": "The original run of a re-execution."},
+          "started_by": {"$ref": "#/components/schemas/ID"},
+          "status": {"$ref": "#/components/schemas/RunStatus"},
+          "limits": {"$ref": "#/components/schemas/Limits"},
+          "usage": {"$ref": "#/components/schemas/Usage"},
+          "failure_reason": {"type": "string"},
+          "idempotency_key": {"type": "string"},
+          "queued_at": {"$ref": "#/components/schemas/Time"},
+          "started_at": {"$ref": "#/components/schemas/Time"},
+          "ended_at": {"$ref": "#/components/schemas/Time"},
+          "workflow": {"description": "The workflow the run started with."},
+          "input": {"description": "The run input."},
+          "output": {"description": "The stage outputs of a finished run."},
+          "cancel_requested": {"type": "boolean", "description": "Cancellation was asked for; the process executing the run stops it."}
         }
       },
       "Result": {
         "type": "object",
-        "description": "Field names are the Go field names of runtime.Result.",
         "properties": {
-          "RunID": {"$ref": "#/components/schemas/ID"},
-          "Status": {"$ref": "#/components/schemas/RunStatus"},
-          "Outputs": {"type": ["object", "null"], "additionalProperties": {"type": "string"}, "description": "Stage name to its output."},
-          "Usage": {"$ref": "#/components/schemas/Usage"},
-          "FailureReason": {"type": "string"}
+          "run_id": {"$ref": "#/components/schemas/ID"},
+          "status": {"$ref": "#/components/schemas/RunStatus"},
+          "outputs": {"type": ["object", "null"], "additionalProperties": {"type": "string"}, "description": "Stage name to its output."},
+          "usage": {"$ref": "#/components/schemas/Usage"},
+          "failure_reason": {"type": "string"}
         }
       },
       "Event": {
