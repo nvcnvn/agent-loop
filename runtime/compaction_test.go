@@ -117,7 +117,7 @@ func TestCompactionSummarizesOlderHistory(t *testing.T) {
 		t.Fatalf("snapshots=%d model calls=%d", snaps, modelCalls)
 	}
 
-	again, err := w.orch.ReExecute(ctx, core.DefaultTenant, runID)
+	again, err := w.orch.ReExecute(ctx, core.DefaultTenant, runID, core.SystemPrincipal)
 	if err != nil || again.Outputs["s"] != "answer to status?" {
 		t.Fatalf("re-execute: %+v %v", again, err)
 	}
@@ -181,7 +181,7 @@ func TestCompactionKeepsMessagesWrittenInTheSameInstant(t *testing.T) {
 	if got := contents(seen); len(got) != 4 || got[1] != "user: a4" {
 		t.Fatalf("history after the summary: %q", got)
 	}
-	again, err := w.orch.ReExecute(context.Background(), core.DefaultTenant, runID)
+	again, err := w.orch.ReExecute(context.Background(), core.DefaultTenant, runID, core.SystemPrincipal)
 	if err != nil || again.Outputs["s"] != "answer to q2" {
 		t.Fatalf("re-execute: %+v %v", again, err)
 	}

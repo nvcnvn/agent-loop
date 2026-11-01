@@ -520,7 +520,7 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 // reExecuteRun answers with the copy's result, whatever its status; an error
 // means the copy could not start.
 func (s *Server) reExecuteRun(w http.ResponseWriter, r *http.Request) {
-	res, err := s.Orch.ReExecute(r.Context(), tenantOf(r), core.RunID(r.PathValue("rid")))
+	res, err := s.Orch.ReExecute(r.Context(), tenantOf(r), core.RunID(r.PathValue("rid")), principalOf(r))
 	switch {
 	case res.RunID != "":
 		writeJSON(w, http.StatusOK, res)
@@ -537,7 +537,7 @@ func (s *Server) reExecuteRun(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) resumeRun(w http.ResponseWriter, r *http.Request) {
 	rid := core.RunID(r.PathValue("rid"))
-	switch err := s.Orch.Resume(r.Context(), tenantOf(r), rid); {
+	switch err := s.Orch.Resume(r.Context(), tenantOf(r), rid, principalOf(r)); {
 	case errors.Is(err, core.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, core.ErrConflict):
@@ -785,6 +785,7 @@ func writeSSE(w http.ResponseWriter, ev core.Event) {
 		"payload":        ev.Payload,
 		"event_id":       ev.ID,
 		"correlation_id": ev.CorrelationID,
+		"actor_id":       ev.ActorID,
 	}
 	if ev.ParentEventID != "" {
 		envelope["parent_event_id"] = ev.ParentEventID

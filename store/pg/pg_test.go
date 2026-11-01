@@ -185,7 +185,7 @@ func TestPg_RunIdempotency(t *testing.T) {
 	s := freshStore(t)
 	ctx := context.Background()
 	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
-	r := store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunQueued, IdempotencyKey: "k1"}
+	r := store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunQueued, IdempotencyKey: "k1", StartedBy: core.DefaultPrincipal}
 	id1, err := s.CreateRun(ctx, r)
 	if err != nil {
 		t.Fatal(err)
@@ -198,8 +198,8 @@ func TestPg_RunIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != id1 {
-		t.Fatalf("idempotency mismatch: %s vs %s", got.ID, id1)
+	if got.ID != id1 || got.StartedBy != core.DefaultPrincipal {
+		t.Fatalf("idempotency mismatch: %s vs %s, started by %q", got.ID, id1, got.StartedBy)
 	}
 }
 
@@ -423,7 +423,7 @@ func TestPg_EndToEndRunOverREST(t *testing.T) {
 	}
 
 	// Re-execution reads the stored requests and responses back out of Postgres.
-	again, err := orch.ReExecute(wctx, core.DefaultTenant, rresp.RunID)
+	again, err := orch.ReExecute(wctx, core.DefaultTenant, rresp.RunID, core.SystemPrincipal)
 	if err != nil || again.Outputs["s"] != "hello pg" {
 		t.Fatalf("re-execute: %+v err=%v", again, err)
 	}

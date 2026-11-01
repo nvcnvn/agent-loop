@@ -51,7 +51,8 @@ func TestReExecuteReproducesRun(t *testing.T) {
 	ctx, cancel := waitCtx()
 	defer cancel()
 
-	again, err := orch.ReExecute(ctx, core.DefaultTenant, runID)
+	asker := core.PrincipalID("00000000-0000-0000-0000-0000000000b7")
+	again, err := orch.ReExecute(ctx, core.DefaultTenant, runID, asker)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +60,7 @@ func TestReExecuteReproducesRun(t *testing.T) {
 		t.Fatalf("original=%+v re-executed=%+v", orig, again)
 	}
 	copyRun, err := s.GetRun(ctx, core.DefaultTenant, again.RunID)
-	if err != nil || copyRun.ParentRunID != runID {
+	if err != nil || copyRun.ParentRunID != runID || copyRun.StartedBy != asker {
 		t.Fatalf("copy parent=%q err=%v", copyRun.ParentRunID, err)
 	}
 	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, again.RunID, 0, 0)
@@ -86,7 +87,7 @@ func TestReExecuteDetectsDivergence(t *testing.T) {
 
 	ctx, cancel := waitCtx()
 	defer cancel()
-	again, err := orch.ReExecute(ctx, core.DefaultTenant, runID)
+	again, err := orch.ReExecute(ctx, core.DefaultTenant, runID, core.SystemPrincipal)
 	if again.Status != core.RunFailed || err == nil || !strings.Contains(again.FailureReason, model.ErrNoFixture.Error()) {
 		t.Fatalf("status=%s err=%v reason=%s", again.Status, err, again.FailureReason)
 	}
@@ -100,7 +101,7 @@ func TestReExecuteRefusesUnfinishedOrUnrecordedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orch.ReExecute(ctx, core.DefaultTenant, runID); !errors.Is(err, core.ErrConflict) {
+	if _, err := orch.ReExecute(ctx, core.DefaultTenant, runID, core.SystemPrincipal); !errors.Is(err, core.ErrConflict) {
 		t.Fatalf("running: err=%v", err)
 	}
 	if err := s.UpdateRunStatus(ctx, core.DefaultTenant, runID, core.RunSucceeded, ""); err != nil {
@@ -109,7 +110,7 @@ func TestReExecuteRefusesUnfinishedOrUnrecordedRuns(t *testing.T) {
 	if _, err := s.Append(ctx, []core.Event{{TenantID: core.DefaultTenant, SessionID: sid, RunID: runID, Type: core.EvModelStarted, Payload: json.RawMessage(`{}`)}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orch.ReExecute(ctx, core.DefaultTenant, runID); !errors.Is(err, runtime.ErrNotRecorded) {
+	if _, err := orch.ReExecute(ctx, core.DefaultTenant, runID, core.SystemPrincipal); !errors.Is(err, runtime.ErrNotRecorded) {
 		t.Fatalf("unrecorded: err=%v", err)
 	}
 }

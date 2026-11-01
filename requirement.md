@@ -124,7 +124,7 @@ Requirements:
 - [x] Every event has an explicit visibility.
 - [ ] Visibility rules are configurable, with an internal-scope reader for operators.
 - [x] Every event includes timestamps.
-- [ ] Every event includes actor identity (only human messages set it).
+- [x] Every event includes actor identity: the requesting principal, the agent, or the system principal.
 - [x] Events in one run share a correlation ID (the run ID).
 - [x] Events carry parent (the task's `task_spawned`) and causation (the step's previous event) references.
 

@@ -32,6 +32,16 @@ const DefaultTenant TenantID = "00000000-0000-0000-0000-000000000001"
 // DefaultPrincipal is used when no authenticated principal is provided.
 const DefaultPrincipal PrincipalID = "00000000-0000-0000-0000-000000000002"
 
+// SystemPrincipal is the actor of events the runtime causes itself.
+const SystemPrincipal PrincipalID = "00000000-0000-0000-0000-000000000003"
+
+var agentNamespace = uuid.MustParse("6f1d0c5e-8a3b-5f0e-9c47-2b7a4e1d9f60")
+
+// AgentPrincipal is the actor of the events an agent causes: a UUIDv5 of its name in agentNamespace.
+func AgentPrincipal(name string) PrincipalID {
+	return PrincipalID(uuid.NewSHA1(agentNamespace, []byte(name)).String())
+}
+
 // NewID returns a new uuidv7-shaped string. We use uuid.NewV7 when available
 // and fall back to uuid.New (v4) on error.
 func NewID() string {

@@ -33,6 +33,7 @@ type Run struct {
 	TenantID       core.TenantID
 	SessionID      core.SessionID
 	ParentRunID    core.RunID
+	StartedBy      core.PrincipalID
 	Status         core.RunStatus
 	Limits         core.Limits
 	Usage          core.Usage

@@ -151,6 +151,7 @@ CREATE TABLE runs (
     session_id uuid NOT NULL REFERENCES sessions(session_id),
     workflow_id uuid REFERENCES workflow_templates(workflow_id),
     parent_run_id uuid REFERENCES runs(run_id),
+    started_by uuid REFERENCES principals(principal_id),
     root_task_id uuid,
     status run_status NOT NULL DEFAULT 'queued',
     limits jsonb NOT NULL DEFAULT '{}'::jsonb,

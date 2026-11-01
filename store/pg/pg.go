@@ -239,12 +239,12 @@ func (s *Store) CreateRun(ctx context.Context, r store.Run) (core.RunID, error) 
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO runs (run_id, tenant_id, session_id, parent_run_id, status,
 		                  limits, usage_totals, failure_reason, idempotency_key,
-		                  workflow, input, output, queued_at, started_at, ended_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now())`,
+		                  workflow, input, output, queued_at, started_at, ended_at, started_by, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())`,
 		string(r.ID), string(r.TenantID), string(r.SessionID), nullableUUID(string(r.ParentRunID)),
 		string(r.Status), limits, usage, r.FailureReason, nullable(r.IdempotencyKey),
 		nullableJSON(r.Workflow), nullableJSON(r.Input), nullableJSON(r.Output),
-		r.QueuedAt, nullableTime(r.StartedAt), nullableTime(r.EndedAt),
+		r.QueuedAt, nullableTime(r.StartedAt), nullableTime(r.EndedAt), nullableUUID(string(r.StartedBy)),
 	)
 	if err != nil {
 		if errors.Is(mapErr(err), core.ErrConflict) && r.IdempotencyKey != "" {
@@ -261,7 +261,7 @@ func (s *Store) GetRun(ctx context.Context, tenant core.TenantID, id core.RunID)
 	row := s.pool.QueryRow(ctx, `
 		SELECT run_id, tenant_id, session_id, parent_run_id, status, limits, usage_totals,
 		       failure_reason, idempotency_key, workflow, input, output,
-		       queued_at, started_at, ended_at
+		       queued_at, started_at, ended_at, started_by
 		FROM runs WHERE run_id=$1 AND tenant_id=$2`, string(id), string(tenant))
 	return scanRun(row)
 }
@@ -328,7 +328,7 @@ func (s *Store) queryRuns(ctx context.Context, where string, args ...any) ([]sto
 	rows, err := s.pool.Query(ctx, `
 		SELECT run_id, tenant_id, session_id, parent_run_id, status, limits, usage_totals,
 		       failure_reason, idempotency_key, workflow, input, output,
-		       queued_at, started_at, ended_at
+		       queued_at, started_at, ended_at, started_by
 		FROM runs `+where+` ORDER BY queued_at`, args...)
 	if err != nil {
 		return nil, mapErr(err)
@@ -349,7 +349,7 @@ func (s *Store) FindByIdempotency(ctx context.Context, tenant core.TenantID, key
 	row := s.pool.QueryRow(ctx, `
 		SELECT run_id, tenant_id, session_id, parent_run_id, status, limits, usage_totals,
 		       failure_reason, idempotency_key, workflow, input, output,
-		       queued_at, started_at, ended_at
+		       queued_at, started_at, ended_at, started_by
 		FROM runs WHERE tenant_id=$1 AND idempotency_key=$2`, string(tenant), key)
 	return scanRun(row)
 }
@@ -367,10 +367,11 @@ func scanRun(row rowScanner) (store.Run, error) {
 		workflow, in, output []byte
 		started, ended       *time.Time
 		status               string
+		startedBy            *string
 	)
 	if err := row.Scan(&rid, &tid, &sid, &parent, &status, &limits, &usage,
 		&out.FailureReason, &idem, &workflow, &in, &output,
-		&out.QueuedAt, &started, &ended); err != nil {
+		&out.QueuedAt, &started, &ended, &startedBy); err != nil {
 		return store.Run{}, mapErr(err)
 	}
 	out.ID = core.RunID(rid)
@@ -385,6 +386,9 @@ func scanRun(row rowScanner) (store.Run, error) {
 	}
 	if started != nil {
 		out.StartedAt = *started
+	}
+	if startedBy != nil {
+		out.StartedBy = core.PrincipalID(*startedBy)
 	}
 	if ended != nil {
 		out.EndedAt = *ended

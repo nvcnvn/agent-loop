@@ -637,7 +637,7 @@ func TestRecoverResumesInterruptedRun(t *testing.T) {
 			t.Fatalf("interrupted task status=%s want failed", task.Status)
 		}
 	}
-	if err := orch.Resume(ctx, core.DefaultTenant, runID); !errors.Is(err, core.ErrConflict) {
+	if err := orch.Resume(ctx, core.DefaultTenant, runID, core.DefaultPrincipal); !errors.Is(err, core.ErrConflict) {
 		t.Fatalf("resume of finished run err=%v want ErrConflict", err)
 	}
 	events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
@@ -1498,7 +1498,7 @@ func TestSideEffectPolicyRequiresApproval(t *testing.T) {
 	if list, _ := s.ListApprovals(ctx, core.DefaultTenant, store.ApprovalFilter{RunID: runID}); len(list) != 1 {
 		t.Fatalf("approvals=%d want 1 (echo has no side effect)", len(list))
 	}
-	again, err := orch.ReExecute(ctx, core.DefaultTenant, runID)
+	again, err := orch.ReExecute(ctx, core.DefaultTenant, runID, core.SystemPrincipal)
 	if err != nil || again.Outputs["s"] != "sent" {
 		t.Fatalf("re-execute: %+v %v", again, err)
 	}
@@ -1727,7 +1727,7 @@ func TestRejectedApprovalReturnsToAgent(t *testing.T) {
 			statuses = append(statuses, p.Status)
 		}
 	}
-	if got := strings.Join(statuses, ","); got != "running,awaiting_approval,running,succeeded" {
+	if got := strings.Join(statuses, ","); got != "queued,running,awaiting_approval,running,succeeded" {
 		t.Fatalf("run states=%s", got)
 	}
 }
@@ -1769,6 +1769,12 @@ func TestApprovalExpires(t *testing.T) {
 	requested, resolved := approvalEvents(t, s, runID)
 	if requested["expires_at"] == nil || resolved["status"] != "expired" {
 		t.Fatalf("requested=%v resolved=%v", requested, resolved)
+	}
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	for _, ev := range events {
+		if ev.Type == core.EvApprovalRes && ev.ActorID != core.SystemPrincipal {
+			t.Fatalf("expired approval resolved by %q, want the system principal", ev.ActorID)
+		}
 	}
 }
 
@@ -2099,5 +2105,80 @@ func (s *slowProvider) Chat(ctx context.Context, _ model.ChatRequest) (model.Cha
 		return model.ChatResponse{}, ctx.Err()
 	case <-time.After(s.delay):
 		return model.ChatResponse{Message: model.Message{Role: model.RoleAssistant, Content: "slow"}}, nil
+	}
+}
+
+func TestEveryEventNamesItsActor(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{
+			{ID: "1", Name: "echo", Input: json.RawMessage(`{"text":"x"}`)},
+			{ID: "2", Name: "delegate", Input: json.RawMessage(`{"agent":"helper","task":"help"}`)},
+		}},
+		model.MockResponse{Content: "helped"},
+		model.MockResponse{Content: "done"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "lead", Model: "m", Provider: prov, Tools: []string{"echo"}, Children: []string{"helper"}},
+		{Name: "helper", Model: "m", Provider: prov},
+	})
+	orch.Policy.ApprovalRequired = []string{"echo"}
+	starter, approver := core.PrincipalID("00000000-0000-0000-0000-0000000000a1"), core.PrincipalID("00000000-0000-0000-0000-0000000000a2")
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid, PrincipalID: starter,
+		Workflow: runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "lead", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, awaitApprovalRequest(t, s, runID), "approved", approver, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.GetRun(ctx, core.DefaultTenant, runID)
+	if err != nil || run.StartedBy != starter {
+		t.Fatalf("started_by=%q err=%v", run.StartedBy, err)
+	}
+	events, err := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lead, helper := core.AgentPrincipal("lead"), core.AgentPrincipal("helper")
+	taskAgent := map[core.TaskID]core.PrincipalID{}
+	for _, ev := range events {
+		if ev.ActorID == "" {
+			t.Fatalf("%s has no actor", ev.Type)
+		}
+		var p struct {
+			Agent  string
+			Tool   string
+			Status string
+			Reason string
+		}
+		_ = json.Unmarshal(ev.Payload, &p)
+		want := core.SystemPrincipal
+		switch {
+		case ev.Type == core.EvRunStateChanged && p.Reason == "started":
+			want = starter
+		case ev.Type == core.EvApprovalRes:
+			want = approver
+		case ev.Type == core.EvTaskSpawned && p.Agent == "lead":
+			taskAgent[ev.TaskID] = lead
+		case ev.Type == core.EvTaskSpawned:
+			want = lead
+			taskAgent[ev.TaskID] = helper
+		}
+		if ev.Type != core.EvTaskSpawned && ev.TaskID != "" && ev.Type != core.EvApprovalRes {
+			want = taskAgent[ev.TaskID]
+		}
+		if ev.ActorID != want {
+			t.Errorf("%s %s: actor %s, want %s", ev.Type, ev.Payload, ev.ActorID, want)
+		}
+	}
+	if len(taskAgent) != 2 {
+		t.Fatalf("tasks: %v", taskAgent)
 	}
 }

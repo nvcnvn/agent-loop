@@ -113,6 +113,7 @@ Important fields:
 - `root_task_id`
 - `workflow_id`
 - `parent_run_id`
+- `started_by`
 - `status`
 - `limits`
 - `usage_totals`
@@ -274,6 +275,8 @@ Rules:
 - Events are append-only.
 - Events of a run share the run ID as correlation ID; an agent task's events name its `task_spawned`
   event as parent, and a step's events name the step's previous event as cause.
+- Every event names its actor: the human or service principal behind a request, the agent whose
+  task caused it, or the system principal for the runtime's own actions.
 - Event order is `(run_id, sequence)` for run-local ordering and `(session_id, sequence)` for session-local ordering.
 - Concurrent execution may finish out of order, but persisted event sequence is deterministic.
 

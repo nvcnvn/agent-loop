@@ -618,7 +618,8 @@ func TestResumeFailedRun(t *testing.T) {
 	writer.Push(model.MockResponse{Content: "text"})
 	ctx, cancel := waitCtx()
 	defer cancel()
-	if err := orch.Resume(ctx, core.DefaultTenant, res.RunID); err != nil {
+	resumer := core.PrincipalID("00000000-0000-0000-0000-0000000000b8")
+	if err := orch.Resume(ctx, core.DefaultTenant, res.RunID, resumer); err != nil {
 		t.Fatal(err)
 	}
 	res, err = orch.Wait(ctx, core.DefaultTenant, res.RunID)
@@ -635,7 +636,20 @@ func TestResumeFailedRun(t *testing.T) {
 	if replayed, err := runtime.Replay(ctx, s, core.DefaultTenant, res.RunID); err != nil || replayed.Status != core.RunSucceeded {
 		t.Fatalf("replay=%+v err=%v", replayed, err)
 	}
-	if err := orch.Resume(ctx, core.DefaultTenant, res.RunID); !errors.Is(err, core.ErrConflict) {
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, res.RunID, 0, 0)
+	byResumer := 0
+	for _, ev := range events {
+		if strings.Contains(string(ev.Payload), "resumed") {
+			if ev.ActorID != resumer {
+				t.Fatalf("%s %s: actor %s, want the resumer", ev.Type, ev.Payload, ev.ActorID)
+			}
+			byResumer++
+		}
+	}
+	if byResumer != 2 {
+		t.Fatalf("%d resumption events, want run_state_changed and run_resumed", byResumer)
+	}
+	if err := orch.Resume(ctx, core.DefaultTenant, res.RunID, core.DefaultPrincipal); !errors.Is(err, core.ErrConflict) {
 		t.Fatalf("resume of a succeeded run: err=%v want ErrConflict", err)
 	}
 }
@@ -656,7 +670,7 @@ func TestCanceledRunIsNotResumed(t *testing.T) {
 	if res, _ := orch.Wait(ctx, core.DefaultTenant, runID); res.Status != core.RunCanceled {
 		t.Fatalf("status=%s", res.Status)
 	}
-	if err := orch.Resume(ctx, core.DefaultTenant, runID); !errors.Is(err, core.ErrConflict) {
+	if err := orch.Resume(ctx, core.DefaultTenant, runID, core.DefaultPrincipal); !errors.Is(err, core.ErrConflict) {
 		t.Fatalf("resume of a canceled run: err=%v want ErrConflict", err)
 	}
 }
@@ -726,7 +740,7 @@ func TestInputImagesReachTheModelAndSurviveResume(t *testing.T) {
 	prov.Push(model.MockResponse{Content: "a photo"})
 	ctx, cancel := waitCtx()
 	defer cancel()
-	if err := orch.Resume(ctx, core.DefaultTenant, res.RunID); err != nil {
+	if err := orch.Resume(ctx, core.DefaultTenant, res.RunID, core.DefaultPrincipal); err != nil {
 		t.Fatal(err)
 	}
 	if res, err = orch.Wait(ctx, core.DefaultTenant, res.RunID); err != nil {

@@ -25,8 +25,8 @@ var ErrNotRecorded = errors.New("run was not recorded for re-execution")
 // recorded for the same tool and input; approvals are not asked again. The
 // copy ends like the original unless the runtime now builds different
 // requests or handles the same responses differently, and a request that was
-// never recorded fails it with model.ErrNoFixture.
-func (o *Orchestrator) ReExecute(ctx context.Context, tenant core.TenantID, runID core.RunID) (Result, error) {
+// never recorded fails it with model.ErrNoFixture. by is who asked, the copy's starter.
+func (o *Orchestrator) ReExecute(ctx context.Context, tenant core.TenantID, runID core.RunID, by core.PrincipalID) (Result, error) {
 	run, err := o.Store.GetRun(ctx, tenant, runID)
 	if err != nil {
 		return Result{}, err
@@ -43,7 +43,7 @@ func (o *Orchestrator) ReExecute(ctx context.Context, tenant core.TenantID, runI
 		return Result{}, err
 	}
 
-	in := StartRunInput{TenantID: tenant, Limits: run.Limits, parent: runID}
+	in := StartRunInput{TenantID: tenant, PrincipalID: by, Limits: run.Limits, parent: runID}
 	if err := json.Unmarshal(run.Workflow, &in.Workflow); err != nil {
 		return Result{}, fmt.Errorf("stored workflow: %w", err)
 	}

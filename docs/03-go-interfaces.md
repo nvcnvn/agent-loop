@@ -120,6 +120,11 @@ type RunHandle struct {
     Status RunStatus
 }
 
+// SystemPrincipal is the actor of the runtime's own events; AgentPrincipal(name)
+// is an agent's, a UUID derived from its name.
+const SystemPrincipal PrincipalID = "00000000-0000-0000-0000-000000000003"
+func AgentPrincipal(name string) PrincipalID
+
 type ToolDefinition struct {
     ID               ToolID
     Name             string
@@ -154,13 +159,14 @@ import (
 
 type Orchestrator interface {
     StartRun(ctx context.Context, input core.RunInput) (core.RunHandle, error)
-    ResumeRun(ctx context.Context, tenantID core.TenantID, runID core.RunID) error
+    // Resume records by as the actor of the events that mark the resumption.
+    Resume(ctx context.Context, tenantID core.TenantID, runID core.RunID, by core.PrincipalID) error
     // Cancel records by and reason in an audit event, then stops the run; a finished run gives
     // core.ErrConflict.
     Cancel(ctx context.Context, tenantID core.TenantID, runID core.RunID, by core.PrincipalID, reason string) error
     // ReExecute runs a finished run again as a child run, answering model and tool calls
     // from its recorded outputs, and waits for the copy's result.
-    ReExecute(ctx context.Context, tenantID core.TenantID, runID core.RunID) (Result, error)
+    ReExecute(ctx context.Context, tenantID core.TenantID, runID core.RunID, by core.PrincipalID) (Result, error)
 }
 
 type Scheduler interface {

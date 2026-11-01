@@ -30,8 +30,9 @@ the next. `request` holds the `tool` and its `input`, or the stage `gate`, `stag
 gates, `output`: whoever may approve sees what they approve, so any key of the tenant can read tool
 inputs this way, though `tool_call_scheduled` is internal. `POST /v1/approvals/{aid}` with
 `{"decision": "approved" | "rejected", "payload": {...}}` resolves one as the caller's principal,
-which `resolved_by` and the `actor_id` of the `approval_resolved` event record (both omitted when
-the runtime closes an approval that expired or whose run ended); an approval already resolved or
+which `resolved_by` and the `actor_id` of the `approval_resolved` event record (when the runtime
+closes an approval that expired or whose run ended, `resolved_by` is omitted and `actor_id` is the
+system principal); an approval already resolved or
 expired answers 409.
 
 Cancellation: `POST /v1/runs/{rid}/cancel`, with an optional `{"reason": "..."}` of at most 1024
@@ -65,6 +66,7 @@ Define a versioned event envelope:
     "payload": {},
     "event_id": "uuid",
     "correlation_id": "uuid",
+    "actor_id": "uuid",
     "parent_event_id": "uuid",
     "causation_id": "uuid"
   }
@@ -78,6 +80,15 @@ as `causation_id` (`model_call_started` → `model_call_completed`; `tool_call_s
 `approval_requested` → `approval_resolved` → `tool_call_started` → `tool_call_completed`). The
 referenced event may be internal and missing from a public stream. `parent_event_id` and
 `causation_id` are omitted when empty.
+
+`actor_id` names who caused the event: the principal behind a request (a human message, starting
+a run, which records `run_state_changed` `queued` with reason `started`, resuming, cancelling or
+resolving an approval), the agent whose task the event belongs to (`core.AgentPrincipal(name)`, the
+UUIDv5 of the agent name in namespace `6f1d0c5e-8a3b-5f0e-9c47-2b7a4e1d9f60`), or
+`core.SystemPrincipal` (`00000000-0000-0000-0000-000000000003`) for what the runtime does itself,
+such as state changes and approvals that expire. A `task_spawned` event names who started the task:
+the delegating agent, or the system for a stage's task. The run records who started it
+(`StartedBy`; for a re-execution, who asked for it).
 
 Required behavior:
 - `Last-Event-ID` resumes from the next event after the acknowledged sequence, with no gap

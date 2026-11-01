@@ -307,6 +307,9 @@ func TestSSEStream(t *testing.T) {
 	if !strings.Contains(string(stream), `"status":"succeeded"`) {
 		t.Fatalf("did not see terminal succeeded event over SSE: %s", stream)
 	}
+	if !strings.Contains(string(stream), `"actor_id":"`+string(core.DefaultPrincipal)+`"`) {
+		t.Fatalf("SSE does not name who started the run: %s", stream)
+	}
 	if strings.Contains(string(stream), "agent_message_delta") {
 		t.Fatalf("deltas sent without ?deltas=1: %s", stream)
 	}

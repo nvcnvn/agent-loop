@@ -131,6 +131,7 @@ type runState struct {
 	lastEvent   string
 	taskSpawned map[core.TaskID]core.EventID
 	lastInStep  map[core.StepID]core.EventID
+	taskActor   map[core.TaskID]core.PrincipalID
 
 	tenant  core.TenantID
 	cancel  context.CancelCauseFunc
@@ -256,6 +257,7 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		Limits:         in.Limits,
 		IdempotencyKey: in.IdempotencyKey,
 		ParentRunID:    in.parent,
+		StartedBy:      in.PrincipalID,
 		Workflow:       wfRaw,
 		Input:          inRaw,
 	}
@@ -285,6 +287,15 @@ func (o *Orchestrator) launch(runID core.RunID, in StartRunInput) error {
 	if err != nil {
 		return err
 	}
+	o.emit(runCtx, core.Event{
+		TenantID:   in.TenantID,
+		SessionID:  in.SessionID,
+		RunID:      runID,
+		Type:       core.EvRunStateChanged,
+		Visibility: core.VisibilityPublic,
+		ActorID:    in.PrincipalID,
+		Payload:    mustJSON(map[string]any{"status": core.RunQueued, "reason": "started"}),
+	})
 	go o.queueAndExecute(runCtx, runID, in, st)
 	return nil
 }
@@ -299,7 +310,7 @@ func (o *Orchestrator) claim(runID core.RunID, tenant core.TenantID) (context.Co
 	runCtx, cancel := context.WithCancelCause(parent)
 	st := &runState{
 		lastAt: time.Now(), tenant: tenant, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{},
-		taskSpawned: map[core.TaskID]core.EventID{}, lastInStep: map[core.StepID]core.EventID{},
+		taskSpawned: map[core.TaskID]core.EventID{}, lastInStep: map[core.StepID]core.EventID{}, taskActor: map[core.TaskID]core.PrincipalID{},
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -323,9 +334,10 @@ func (o *Orchestrator) unclaim(runID core.RunID, st *runState) {
 // Resume continues the tenant's run that is not executing in this process and
 // is unfinished, for example after a restart, or failed or timed out. Agent
 // tasks that completed are reused; a task that was interrupted or failed runs
-// again from its start. Succeeded and canceled runs give core.ErrConflict.
-func (o *Orchestrator) Resume(ctx context.Context, tenant core.TenantID, runID core.RunID) error {
-	return o.resume(ctx, tenant, runID, false)
+// again from its start. Succeeded and canceled runs give core.ErrConflict. by
+// is who asked, the actor of the events that record it.
+func (o *Orchestrator) Resume(ctx context.Context, tenant core.TenantID, runID core.RunID, by core.PrincipalID) error {
+	return o.resume(ctx, tenant, runID, by, false)
 }
 
 // Recover resumes every unfinished run in the store and returns how many it
@@ -339,7 +351,7 @@ func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 	var errs []error
 	resumed := 0
 	for _, run := range runs {
-		if err := o.resume(ctx, run.TenantID, run.ID, true); err != nil {
+		if err := o.resume(ctx, run.TenantID, run.ID, core.SystemPrincipal, true); err != nil {
 			errs = append(errs, fmt.Errorf("run %s: %w", run.ID, err))
 			continue
 		}
@@ -348,7 +360,7 @@ func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 	return resumed, errors.Join(errs...)
 }
 
-func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID core.RunID, force bool) error {
+func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID core.RunID, by core.PrincipalID, force bool) error {
 	runCtx, st, err := o.claim(runID, tenant)
 	if err != nil {
 		return err
@@ -415,6 +427,7 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 			RunID:      run.ID,
 			Type:       core.EvRunStateChanged,
 			Visibility: core.VisibilityPublic,
+			ActorID:    by,
 			Payload:    mustJSON(map[string]any{"status": core.RunQueued, "reason": "resumed"}),
 		})
 	}
@@ -430,6 +443,7 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 		RunID:      run.ID,
 		Type:       core.EvSystem,
 		Visibility: core.VisibilityInternal,
+		ActorID:    by,
 		Payload:    mustJSON(map[string]any{"event": "run_resumed", "from_status": run.Status, "reused_tasks": reuse.count()}),
 	})
 	started = true
@@ -966,6 +980,7 @@ type taskSpec struct {
 	prompt    string
 	images    []model.Image
 	parent    core.TaskID
+	spawnedBy core.PrincipalID // the delegating agent; empty for a stage task
 	depth     int
 	retry     RetryPolicy
 	schema    *jsonschema.Schema
@@ -1061,6 +1076,7 @@ func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in Sta
 		o.Budget.Release(runID, core.Usage{SubAgents: 1})
 		return "", "", err
 	}
+	o.setTaskActor(runID, taskID, core.AgentPrincipal(spec.agent.Name))
 	o.emit(ctx, core.Event{
 		TenantID:      in.TenantID,
 		SessionID:     in.SessionID,
@@ -1068,6 +1084,7 @@ func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in Sta
 		TaskID:        taskID,
 		Type:          core.EvTaskSpawned,
 		Visibility:    core.VisibilityInternal,
+		ActorID:       cmp.Or(spec.spawnedBy, core.SystemPrincipal),
 		ParentEventID: o.spawnedEvent(runID, spec.parent),
 		Payload: mustJSON(map[string]any{
 			"agent": spec.agent.Name, "stage": spec.stage, "prompt": spec.prompt,
@@ -1145,7 +1162,9 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			if !ok || !slices.Contains(agent.Children, req.Agent) {
 				return tool.Result{}, fmt.Errorf("%w: %s may not delegate to %q", core.ErrPolicyDenied, agent.Name, req.Agent)
 			}
-			out, err := o.runTask(ctx, runID, in, taskSpec{stage: spec.stage, agent: child, prompt: req.Task, parent: taskID, depth: spec.depth + 1}, false)
+			out, err := o.runTask(ctx, runID, in, taskSpec{
+				stage: spec.stage, agent: child, prompt: req.Task, parent: taskID, spawnedBy: core.AgentPrincipal(agent.Name), depth: spec.depth + 1,
+			}, false)
 			if err != nil {
 				return tool.Result{}, err
 			}
@@ -1231,6 +1250,7 @@ func (o *Orchestrator) modelCall(ctx context.Context, runID core.RunID, in Start
 		StepID:        stepID,
 		Type:          core.EvModelStarted,
 		Visibility:    core.VisibilityInternal,
+		ActorID:       core.AgentPrincipal(agent.Name),
 		Payload:       mustJSON(map[string]any{"model": agent.Model, "agent": agent.Name}),
 		HiddenPayload: mustJSON(map[string]any{"request": req}),
 	})
@@ -1270,6 +1290,7 @@ func (o *Orchestrator) modelCall(ctx context.Context, runID core.RunID, in Start
 		StepID:        stepID,
 		Type:          core.EvModelCompleted,
 		Visibility:    core.VisibilityInternal,
+		ActorID:       core.AgentPrincipal(agent.Name),
 		Payload:       mustJSON(map[string]any{"usage": resp.Usage, "tool_calls": len(resp.ToolCalls)}),
 		HiddenPayload: mustJSON(map[string]any{"content": resp.Message.Content, "thinking": resp.Message.Thinking, "response": withoutRaw(resp)}),
 	})
@@ -1655,7 +1676,7 @@ func (o *Orchestrator) awaitApproval(ctx context.Context, tenant core.TenantID, 
 		StepID:     stepID,
 		Type:       core.EvApprovalRes,
 		Visibility: core.VisibilityParticipant,
-		ActorID:    approval.ResolvedBy,
+		ActorID:    cmp.Or(approval.ResolvedBy, core.SystemPrincipal),
 		Payload:    mustJSON(withFields(subject, map[string]any{"approval_id": approvalID, "status": approval.Status, "resolved_by": approval.ResolvedBy})),
 	})
 	if ctx.Err() != nil {
@@ -1855,6 +1876,9 @@ func (o *Orchestrator) emit(ctx context.Context, ev core.Event) {
 		} else if ev.TaskID != "" {
 			ev.ParentEventID = st.taskSpawned[ev.TaskID]
 		}
+		if ev.ActorID == "" {
+			ev.ActorID = st.taskActor[ev.TaskID]
+		}
 		if ev.StepID != "" {
 			ev.CausationID = string(st.lastInStep[ev.StepID])
 			st.lastInStep[ev.StepID] = ev.ID
@@ -1879,8 +1903,24 @@ func (o *Orchestrator) spawnedEvent(runID core.RunID, task core.TaskID) core.Eve
 	return st.taskSpawned[task]
 }
 
-// appendEvent stores ev; the events of a run share its ID as correlation ID.
+func (o *Orchestrator) setTaskActor(runID core.RunID, task core.TaskID, actor core.PrincipalID) {
+	o.mu.Lock()
+	st := o.runs[runID]
+	o.mu.Unlock()
+	if st == nil {
+		return
+	}
+	st.activity.Lock()
+	st.taskActor[task] = actor
+	st.activity.Unlock()
+}
+
+// appendEvent stores ev, by default as the system principal's; the events of
+// a run share its ID as correlation ID.
 func (o *Orchestrator) appendEvent(ctx context.Context, ev core.Event) {
+	if ev.ActorID == "" {
+		ev.ActorID = core.SystemPrincipal
+	}
 	if ev.OccurredAt.IsZero() {
 		ev.OccurredAt = time.Now().UTC()
 	}

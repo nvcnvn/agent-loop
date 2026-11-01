@@ -172,6 +172,7 @@ func (o *Orchestrator) compact(ctx context.Context, in StartRunInput, runID core
 		RunID:         runID,
 		Type:          core.EvSnapshot,
 		Visibility:    core.VisibilityInternal,
+		ActorID:       core.AgentPrincipal(agent.Name),
 		Payload:       mustJSON(map[string]any{"agent": agent.Name, "summarized": len(older), "covers": next.Messages, "through": next.Through}),
 		HiddenPayload: mustJSON(map[string]any{"summary": next.Summary}),
 	})
