@@ -207,10 +207,12 @@ for output gates, `output`, where tool approvals have `tool`.
 ### 4. Agent Definition Contract
 
 Agents are `runtime.Agent` values registered in Go, or come from the JSON file passed to
-`cmd/agent-loop -config`, which also holds the named workflow templates, history compaction and the
-tool policy, and in `visibility` which event visibilities each role reads. `runtime.ParseConfig` rejects unknown fields, duplicate names, unknown child agents,
-invalid workflows, a compaction whose agent is unknown or that has no trigger, and an unknown
-side-effect level in the tool policy.
+`cmd/agent-loop -config`, which also holds the named workflow templates, history compaction, the
+tool policy, the loop response and cost approval threshold (§8), the artifact size cap
+(`max_artifact_bytes`, §10), and in `visibility` which event visibilities each role reads.
+`runtime.ParseConfig` rejects unknown fields, duplicate names, unknown child agents, invalid
+workflows, a compaction whose agent is unknown or that has no trigger, an unknown side-effect level
+in the tool policy, an unknown loop response, and negative thresholds or caps.
 
 ```json
 {
@@ -436,12 +438,18 @@ Decide v1 deployment mode explicitly:
   and saves the content, `text/plain` by default.
 - `GET /v1/runs/{rid}/artifacts` lists a run's artifacts without their content, as
   `{"artifacts": [{"artifact_id", "tenant_id", "session_id", "run_id", "task_id", "step_id",
-  "producer", "kind", "name", "mime_type", "size", "metadata", "created_at"}]}`, and `GET
+  "producer", "kind", "name", "version", "mime_type", "size", "metadata", "created_at"}]}`, and `GET
   /v1/artifacts/{aid}` returns the content with its MIME type, as an attachment with
   `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, since tools and models
   choose both.
-- Content is stored inline in PostgreSQL. Not yet: object storage for large files, checksums,
-  versions, and retention.
+- Saving a name again in a session stores its next `version` (1, 2, …), whatever its kind, so a run
+  input image named like an earlier one is its next version too; `GET
+  /v1/artifacts/{aid}/versions` lists every version of that artifact's name in its session, oldest
+  first, in the same shape. Lists never carry content.
+- Content is stored inline in PostgreSQL. A tool artifact or run input image larger than
+  `Orchestrator.MaxArtifactBytes` (`max_artifact_bytes` in the config file; 10 MiB by default, zero
+  for no cap) is refused: the tool call goes back to the model as an error, and a run with such an
+  image does not start. Not yet: object storage for large files, and checksums.
 - Re-execution answers tool calls from their recorded output, so its copy produces no artifacts.
 
 ### 11. Migration Contract

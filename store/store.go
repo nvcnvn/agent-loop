@@ -128,6 +128,7 @@ type Artifact struct {
 	Producer  string         `json:"producer,omitempty"` // the tool that produced it
 	Kind      string         `json:"kind"`
 	Name      string         `json:"name"`
+	Version   int            `json:"version"` // 1 + the latest version of the name in the session
 	MimeType  string         `json:"mime_type"`
 	Size      int64          `json:"size"`
 	Content   []byte         `json:"-"`
@@ -204,6 +205,8 @@ type ArtifactStore interface {
 	PutArtifact(ctx context.Context, a Artifact) (string, error)
 	GetArtifact(ctx context.Context, tenant core.TenantID, id string) (Artifact, error)
 	ListRunArtifacts(ctx context.Context, tenant core.TenantID, run core.RunID) ([]Artifact, error)
+	// ListArtifactVersions lists the versions of a name in a session, oldest first, maybe without their content.
+	ListArtifactVersions(ctx context.Context, tenant core.TenantID, session core.SessionID, name string) ([]Artifact, error)
 }
 
 // Store is the aggregate persistence interface used by runtime and api.
@@ -666,6 +669,12 @@ func (m *MemStore) PutArtifact(_ context.Context, a Artifact) (string, error) {
 		a.MimeType = "application/octet-stream"
 	}
 	a.Size = int64(len(a.Content))
+	a.Version = 1
+	for _, other := range m.artifacts {
+		if other.TenantID == a.TenantID && other.SessionID == a.SessionID && other.Name == a.Name {
+			a.Version = max(a.Version, other.Version+1)
+		}
+	}
 	m.artifacts[a.ID] = a
 	return a.ID, nil
 }
@@ -692,6 +701,19 @@ func (m *MemStore) ListRunArtifacts(_ context.Context, tenant core.TenantID, run
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].CreatedAt.Before(out[j].CreatedAt) || out[i].CreatedAt.Equal(out[j].CreatedAt) && out[i].ID < out[j].ID
 	})
+	return out, nil
+}
+
+func (m *MemStore) ListArtifactVersions(_ context.Context, tenant core.TenantID, session core.SessionID, name string) ([]Artifact, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []Artifact{}
+	for _, a := range m.artifacts {
+		if a.TenantID == tenant && a.SessionID == session && a.Name == name {
+			out = append(out, a)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
 	return out, nil
 }
 

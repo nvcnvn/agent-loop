@@ -397,7 +397,7 @@ Support artifact storage for:
   built-in `artifact.save` tool).
 
 Requirements:
-- [ ] Artifact versioning.
+- [x] Artifact versioning: saving a name again in a session stores its next version.
 - [x] MIME type and metadata.
 - [x] Link artifacts to run and task.
 - [x] Link artifacts to step and producer (the tool).
@@ -483,8 +483,10 @@ The product vision is met when the framework can:
   its start, so steps need no stored records. The interrupted attempt stays in the run's usage, and
   the resumed run gets a fresh `MaxRuntime`.
 
+- Artifacts: stored inline in PostgreSQL, and refused above `max_artifact_bytes` (10 MiB by default).
+
 Still open:
-- What is the storage strategy for large artifacts? (Today they are stored inline in PostgreSQL.)
+- Object storage for artifacts too large to keep inline.
 
 ## 18. First Implementation Milestones
 

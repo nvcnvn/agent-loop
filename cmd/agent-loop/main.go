@@ -97,6 +97,9 @@ func main() {
 	if cfg.ApproveAbove != nil {
 		orch.ApproveAbove = *cfg.ApproveAbove
 	}
+	if cfg.MaxArtifactBytes != nil {
+		orch.MaxArtifactBytes = *cfg.MaxArtifactBytes
+	}
 	if n, err := orch.Recover(context.Background()); err != nil {
 		slog.Error("recover runs", "resumed", n, "err", err)
 	} else if n > 0 {

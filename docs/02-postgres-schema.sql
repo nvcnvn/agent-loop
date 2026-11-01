@@ -392,7 +392,7 @@ CREATE TABLE artifacts (
     checksum text,
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, session_id, name, version),
+    UNIQUE (session_id, name, version),
     CHECK (storage_uri IS NOT NULL OR content IS NOT NULL)
 );
 

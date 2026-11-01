@@ -375,8 +375,9 @@ Rules:
   built-in `artifact.save` tool. Each links to its session, run, task and step, and names the tool
   that produced it (`producer`); the task gives the agent.
 - An artifact has a name, kind, MIME type, size and metadata. Its bytes are stored inline in
-  PostgreSQL.
-- Artifacts are not versioned: saving the same name again makes another artifact.
+  PostgreSQL, at most `Orchestrator.MaxArtifactBytes` (10 MiB by default) each.
+- Saving a name again in the same session makes its next version: each artifact has a `version`,
+  one more than the latest one of its name in the session, and every version stays readable.
 
 ### Memory
 

@@ -2182,3 +2182,32 @@ func TestEveryEventNamesItsActor(t *testing.T) {
 		t.Fatalf("tasks: %v", taskAgent)
 	}
 }
+
+func TestArtifactSizeIsCapped(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "artifact.save", Input: json.RawMessage(`{"name":"big.txt","content":"too long for the cap"}`)}}},
+		model.MockResponse{Content: "could not save"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "writer", Model: "m", Provider: prov, Tools: []string{"artifact.save"}}})
+	orch.MaxArtifactBytes = 8
+	ctx, cancel := waitCtx()
+	defer cancel()
+	wf := runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "writer", Prompt: "x"}}}}}
+	if _, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: wf, Images: map[string]model.Image{"p": {MimeType: "image/png", Data: make([]byte, 9)}}}); err == nil {
+		t.Fatal("accepted an input image over the cap")
+	}
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: wf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil || res.Outputs["s"] != "could not save" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if artifacts, _ := s.ListRunArtifacts(ctx, core.DefaultTenant, runID); len(artifacts) != 0 {
+		t.Fatalf("stored %+v", artifacts)
+	}
+	msgs := prov.Calls()[1].Messages
+	if last := msgs[len(msgs)-1]; !strings.Contains(last.Content, "more than the 8 an artifact may hold") {
+		t.Fatalf("the agent was told %q", last.Content)
+	}
+}

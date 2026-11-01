@@ -15,6 +15,7 @@
 //	GET    /v1/runs/{rid}/stream     (SSE; honours Last-Event-ID; ?deltas=1 adds reply deltas)
 //	GET    /v1/runs/{rid}/artifacts
 //	GET    /v1/artifacts/{aid}       (the content, as an attachment)
+//	GET    /v1/artifacts/{aid}/versions
 //	POST   /v1/runs/{rid}/cancel
 //	POST   /v1/runs/{rid}/resume
 //	POST   /v1/runs/{rid}/reexecute  (replays recorded model and tool outputs; waits)
@@ -136,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc(streamRoute, s.streamEvents)
 	mux.HandleFunc("GET /v1/runs/{rid}/artifacts", s.listArtifacts)
 	mux.HandleFunc("GET /v1/artifacts/{aid}", s.downloadArtifact)
+	mux.HandleFunc("GET /v1/artifacts/{aid}/versions", s.listArtifactVersions)
 	mux.HandleFunc("POST /v1/runs/{rid}/cancel", s.cancelRun)
 	mux.HandleFunc("POST /v1/runs/{rid}/resume", s.resumeRun)
 	mux.HandleFunc("POST /v1/runs/{rid}/reexecute", s.reExecuteRun)
@@ -523,6 +525,29 @@ func (s *Server) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "sandbox")
 	w.Header().Set("Content-Length", strconv.Itoa(len(a.Content)))
 	_, _ = w.Write(a.Content)
+}
+
+// listArtifactVersions lists every version of the artifact's name in its session.
+func (s *Server) listArtifactVersions(w http.ResponseWriter, r *http.Request) {
+	aid := r.PathValue("aid")
+	if uuid.Validate(aid) != nil {
+		writeNotFound(w)
+		return
+	}
+	a, err := s.Store.GetArtifact(r.Context(), tenantOf(r), aid)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if !s.allowSession(w, r, a.SessionID, needRead) {
+		return
+	}
+	versions, err := s.Store.ListArtifactVersions(r.Context(), a.TenantID, a.SessionID, a.Name)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"artifacts": versions})
 }
 
 func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {

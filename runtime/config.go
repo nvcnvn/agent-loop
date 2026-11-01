@@ -21,6 +21,8 @@ type Config struct {
 	// LoopResponse and ApproveAbove set the Orchestrator fields of the same names.
 	LoopResponse LoopResponse `json:"loop_response,omitempty"`
 	ApproveAbove *core.Usage  `json:"approve_above,omitempty"`
+	// MaxArtifactBytes, when set, replaces Orchestrator.MaxArtifactBytes.
+	MaxArtifactBytes *int64 `json:"max_artifact_bytes,omitempty"`
 }
 
 // ParseConfig decodes a JSON config and checks its agents and workflows against each other.
@@ -76,6 +78,9 @@ func (c Config) Validate() error {
 	case "", LoopFail, LoopPause, LoopApprove:
 	default:
 		return fmt.Errorf("loop_response %q is not fail, pause or approve", c.LoopResponse)
+	}
+	if c.MaxArtifactBytes != nil && *c.MaxArtifactBytes < 0 {
+		return errors.New("max_artifact_bytes must not be negative")
 	}
 	names := map[string]bool{}
 	for _, w := range c.Workflows {

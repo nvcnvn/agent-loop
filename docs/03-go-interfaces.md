@@ -283,6 +283,9 @@ type ArtifactStore interface {
     PutArtifact(ctx context.Context, artifact Artifact) (string, error)
     GetArtifact(ctx context.Context, tenantID core.TenantID, artifactID string) (Artifact, error)
     ListRunArtifacts(ctx context.Context, tenantID core.TenantID, runID core.RunID) ([]Artifact, error)
+    // ListArtifactVersions lists a name's versions in a session, oldest first; PutArtifact numbers
+    // each one 1 + the latest.
+    ListArtifactVersions(ctx context.Context, tenantID core.TenantID, sessionID core.SessionID, name string) ([]Artifact, error)
 }
 
 // MemoryStore keeps long-term memory. SearchMemories returns the tenant's memories made with

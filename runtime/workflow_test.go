@@ -586,6 +586,7 @@ func TestParseConfig(t *testing.T) {
 		"compaction agent": `{"agents":[{"name":"a"}],"compaction":{"agent":"b","max_messages":5}}`,
 		"compaction never": `{"agents":[{"name":"a"}],"compaction":{"agent":"a"}}`,
 		"side effect":      `{"agents":[{"name":"a"}],"tool_policy":{"approve_side_effects":["sends_email"]}}`,
+		"artifact cap":     `{"agents":[{"name":"a"}],"max_artifact_bytes":-1}`,
 		"loop response":    `{"agents":[{"name":"a"}],"loop_response":"panic"}`,
 		"approve above":    `{"agents":[{"name":"a"}],"approve_above":{"cost_units":-1}}`,
 	} {
@@ -598,6 +599,7 @@ func TestParseConfig(t *testing.T) {
 func FuzzParseConfig(f *testing.F) {
 	f.Add([]byte(sampleConfig))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"compaction":{"agent":"a","max_tokens":8000,"keep_recent":6}}`))
+	f.Add([]byte(`{"agents":[{"name":"a"}],"max_artifact_bytes":1048576}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"loop_response":"pause","approve_above":{"total_tokens":100,"cost_units":5}}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"workflows":[{"name":"w","stages":[{"name":"s","depends_on":["s"],"agents":[{"name":"a"}]}]}]}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"workflows":[{"name":"w","stages":[{"name":"s","output_schema":{"$ref":"#/x"},"agents":[{"name":"a"}]}]}]}`))

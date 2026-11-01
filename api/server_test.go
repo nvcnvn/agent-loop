@@ -884,10 +884,16 @@ func TestArtifactEndpoints(t *testing.T) {
 		resp.Header.Get("Content-Security-Policy") != "sandbox" {
 		t.Fatalf("download: %d %q %v", resp.StatusCode, body, resp.Header)
 	}
+	again, _ := s.PutArtifact(ctx, store.Artifact{TenantID: core.DefaultTenant, SessionID: sid, RunID: run, Kind: "report", Name: "rapport é.html", Content: []byte("v2")})
+	var versions struct{ Artifacts []store.Artifact }
+	_ = json.NewDecoder(get("/v1/artifacts/"+again+"/versions", "").Body).Decode(&versions)
+	if len(versions.Artifacts) != 2 || versions.Artifacts[0].ID != id || versions.Artifacts[1].ID != again || versions.Artifacts[1].Version != 2 {
+		t.Fatalf("versions=%+v", versions.Artifacts)
+	}
 	other := core.NewID()
-	for _, path := range []string{"/v1/artifacts/" + id, "/v1/runs/" + string(run) + "/artifacts", "/v1/artifacts/missing"} {
+	for _, path := range []string{"/v1/artifacts/" + id, "/v1/artifacts/" + id + "/versions", "/v1/runs/" + string(run) + "/artifacts", "/v1/artifacts/missing", "/v1/artifacts/missing/versions"} {
 		tenant := other
-		if path == "/v1/artifacts/missing" {
+		if strings.HasPrefix(path, "/v1/artifacts/missing") {
 			tenant = ""
 		}
 		if code := get(path, tenant).StatusCode; code != http.StatusNotFound {

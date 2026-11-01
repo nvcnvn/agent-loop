@@ -110,6 +110,8 @@ type Orchestrator struct {
 	LoopResponse LoopResponse
 	// ApproveAbove asks a human, once per execution, before a model call of a run whose total tokens or cost units passed its positive fields.
 	ApproveAbove core.Usage
+	// MaxArtifactBytes caps the content of each stored artifact, input images included; zero means no cap.
+	MaxArtifactBytes int64
 
 	mu        sync.Mutex
 	runs      map[core.RunID]*runState
@@ -174,6 +176,7 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		Log:                slog.Default(),
 		ApprovalTimeout:    15 * time.Minute,
 		IdleWarnAfter:      2 * time.Minute,
+		MaxArtifactBytes:   10 << 20,
 		MaxHistoryMessages: 50,
 		MaxActiveRuns:      64,
 		MaxQueuedRuns:      256,
@@ -242,6 +245,11 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 					return "", fmt.Errorf("stage %q: agent %s shows image %q, which the run input lacks", stage.Name, step.Name, name)
 				}
 			}
+		}
+	}
+	for name, img := range in.Images {
+		if err := o.checkArtifactSize("image "+name, len(img.Data)); err != nil {
+			return "", err
 		}
 	}
 	in.plan = p
@@ -1947,6 +1955,11 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 // storeArtifacts stores what a tool call produced, each with an
 // artifact_created event, and returns their IDs.
 func (o *Orchestrator) storeArtifacts(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, produced []tool.Artifact) ([]string, error) {
+	for _, p := range produced {
+		if err := o.checkArtifactSize(cmp.Or(p.Name, call.Tool.Name), len(p.Content)); err != nil {
+			return nil, err
+		}
+	}
 	var ids []string
 	for _, p := range produced {
 		a := store.Artifact{
@@ -1973,6 +1986,13 @@ func (o *Orchestrator) storeArtifacts(ctx context.Context, tenant core.TenantID,
 		})
 	}
 	return ids, nil
+}
+
+func (o *Orchestrator) checkArtifactSize(name string, size int) error {
+	if o.MaxArtifactBytes > 0 && int64(size) > o.MaxArtifactBytes {
+		return fmt.Errorf("%s is %d bytes, more than the %d an artifact may hold", name, size, o.MaxArtifactBytes)
+	}
+	return nil
 }
 
 func safeExecute(ctx context.Context, exec tool.Executor, call tool.Call) (res tool.Result, err error) {

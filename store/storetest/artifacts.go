@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/nvcnvn/agent-loop/core"
@@ -38,5 +39,35 @@ func Artifacts(t *testing.T, s store.ArtifactStore, session core.SessionID, run 
 	list, err := s.ListRunArtifacts(ctx, core.DefaultTenant, run)
 	if err != nil || len(list) != 2 || list[0].ID != first || list[1].ID != second || list[1].MimeType != "application/octet-stream" {
 		t.Fatalf("list=%+v err=%v", list, err)
+	}
+
+	revised := want
+	revised.Content = []byte("# done, revised")
+	third, err := s.PutArtifact(ctx, revised)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions, err := s.ListArtifactVersions(ctx, core.DefaultTenant, session, "report.md")
+	if err != nil || len(versions) != 2 || versions[0].ID != first || versions[0].Version != 1 || versions[1].ID != third || versions[1].Version != 2 {
+		t.Fatalf("versions=%+v err=%v", versions, err)
+	}
+	if versions, err := s.ListArtifactVersions(ctx, core.TenantID(core.NewID()), session, "report.md"); err != nil || len(versions) != 0 {
+		t.Fatalf("another tenant's versions=%+v err=%v", versions, err)
+	}
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range 16 {
+		wg.Go(func() {
+			<-start
+			if _, err := s.PutArtifact(ctx, store.Artifact{TenantID: core.DefaultTenant, SessionID: session, Kind: "file", Name: "busy"}); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+	busy, err := s.ListArtifactVersions(ctx, core.DefaultTenant, session, "busy")
+	if err != nil || len(busy) != 16 || busy[15].Version != 16 {
+		t.Fatalf("concurrent versions=%+v err=%v", busy, err)
 	}
 }

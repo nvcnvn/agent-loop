@@ -731,19 +731,32 @@ func (s *Store) PutArtifact(ctx context.Context, a store.Artifact) (string, erro
 		a.CreatedAt = time.Now().UTC()
 	}
 	a.Size = int64(len(a.Content))
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO artifacts (`+artifactColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-		a.ID, string(a.TenantID), string(a.SessionID), nullableUUID(string(a.RunID)), nullableUUID(string(a.TaskID)),
-		nullableUUID(string(a.StepID)), a.Producer, a.Kind, a.Name, a.MimeType, a.Size, a.Content, encJSON(a.Metadata), a.CreatedAt,
-	)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", mapErr(err)
 	}
-	return a.ID, nil
+	defer tx.Rollback(ctx)
+	// Puts of one name take turns, so each reads the version the one before it wrote.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text || '/' || $2, 0))`, string(a.SessionID), a.Name); err != nil {
+		return "", mapErr(err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO artifacts (`+artifactColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
+		        (SELECT COALESCE(max(version), 0) + 1 FROM artifacts WHERE session_id=$3 AND name=$9),
+		        $10,$11,$12,$13,$14)`,
+		a.ID, string(a.TenantID), string(a.SessionID), nullableUUID(string(a.RunID)), nullableUUID(string(a.TaskID)),
+		nullableUUID(string(a.StepID)), a.Producer, a.Kind, a.Name, a.MimeType, a.Size, a.Content, encJSON(a.Metadata), a.CreatedAt,
+	); err != nil {
+		return "", mapErr(err)
+	}
+	return a.ID, mapErr(tx.Commit(ctx))
 }
 
-const artifactColumns = `artifact_id, tenant_id, session_id, run_id, task_id, step_id, producer, kind, name, mime_type, size_bytes, content, metadata, created_at`
+const artifactColumns = `artifact_id, tenant_id, session_id, run_id, task_id, step_id, producer, kind, name, version, mime_type, size_bytes, content, metadata, created_at`
+
+// artifactListColumns are artifactColumns without the content, which lists leave out.
+const artifactListColumns = `artifact_id, tenant_id, session_id, run_id, task_id, step_id, producer, kind, name, version, mime_type, size_bytes, NULL::bytea, metadata, created_at`
 
 func scanArtifact(row rowScanner) (store.Artifact, error) {
 	var (
@@ -752,7 +765,7 @@ func scanArtifact(row rowScanner) (store.Artifact, error) {
 		rid, taskID, stepID *string
 		meta                []byte
 	)
-	if err := row.Scan(&a.ID, &tid, &sid, &rid, &taskID, &stepID, &a.Producer, &a.Kind, &a.Name, &a.MimeType, &a.Size, &a.Content, &meta, &a.CreatedAt); err != nil {
+	if err := row.Scan(&a.ID, &tid, &sid, &rid, &taskID, &stepID, &a.Producer, &a.Kind, &a.Name, &a.Version, &a.MimeType, &a.Size, &a.Content, &meta, &a.CreatedAt); err != nil {
 		return store.Artifact{}, mapErr(err)
 	}
 	a.TenantID, a.SessionID = core.TenantID(tid), core.SessionID(sid)
@@ -777,9 +790,19 @@ func (s *Store) GetArtifact(ctx context.Context, tenant core.TenantID, id string
 }
 
 func (s *Store) ListRunArtifacts(ctx context.Context, tenant core.TenantID, run core.RunID) ([]store.Artifact, error) {
-	rows, err := s.pool.Query(ctx, `
+	return s.queryArtifacts(ctx, `
 		SELECT `+artifactColumns+` FROM artifacts WHERE tenant_id=$1 AND run_id=$2 ORDER BY created_at, artifact_id`,
 		string(tenant), string(run))
+}
+
+func (s *Store) ListArtifactVersions(ctx context.Context, tenant core.TenantID, session core.SessionID, name string) ([]store.Artifact, error) {
+	return s.queryArtifacts(ctx, `
+		SELECT `+artifactListColumns+` FROM artifacts WHERE tenant_id=$1 AND session_id=$2 AND name=$3 ORDER BY version`,
+		string(tenant), string(session), name)
+}
+
+func (s *Store) queryArtifacts(ctx context.Context, q string, args ...any) ([]store.Artifact, error) {
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, mapErr(err)
 	}
