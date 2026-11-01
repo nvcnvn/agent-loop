@@ -468,8 +468,9 @@ func (o *Orchestrator) runStage(ctx context.Context, runID core.RunID, in StartR
 		err = o.stageGate(ctx, runID, in, stage.Name, "output", out)
 	}
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+		msg := o.Redactor.Redact(err.Error())
+		span.RecordError(errors.New(msg))
+		span.SetStatus(codes.Error, msg)
 	}
 	return out, err
 }

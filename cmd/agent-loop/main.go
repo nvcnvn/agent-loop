@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	"github.com/nvcnvn/agent-loop/model"
 	"github.com/nvcnvn/agent-loop/model/ollama"
 	"github.com/nvcnvn/agent-loop/model/openai"
+	"github.com/nvcnvn/agent-loop/observe"
 	"github.com/nvcnvn/agent-loop/policy"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
@@ -55,8 +57,15 @@ func main() {
 	configPath := flag.String("config", os.Getenv("AGENT_LOOP_CONFIG"), "JSON file of agents, workflow templates, compaction, tool policy, limits, worker pool and MCP servers, with ${VAR} read from the environment (see README); default $AGENT_LOOP_CONFIG; without one the server has one echo agent")
 	drain := flag.Duration("shutdown-timeout", 30*time.Second, "on SIGINT/SIGTERM, how long to let requests and runs finish before checkpointing runs")
 	flag.Parse()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
-	auth := authenticator(*trustHeaders)
+	redactor, err := observe.NewRedactor(observe.DefaultRedactPatterns...)
+	if err != nil {
+		panic(err)
+	}
+	for _, name := range []string{"LLM_API_KEY", "AGENT_LOOP_PG_DSN"} {
+		redactor.Add(os.Getenv(name))
+	}
+	slog.SetDefault(slog.New(redactor.Handler(slog.NewJSONHandler(os.Stdout, nil))))
+	auth := authenticator(*trustHeaders, redactor)
 	stopTracing := setupTracing()
 
 	persistence := openStore()
@@ -76,6 +85,18 @@ func main() {
 	if *configPath != "" {
 		cfg = loadConfig(*configPath)
 	}
+	for _, p := range cfg.Redact {
+		if err := redactor.AddPattern(p); err != nil {
+			fatal("config redact", err)
+		}
+	}
+	for _, s := range cfg.MCPServers {
+		for k, v := range s.Headers {
+			if credentialHeader(k) {
+				redactor.Add(v)
+			}
+		}
+	}
 	mcpClients := connectMCP(cfg.MCPServers, reg)
 	for i := range cfg.Agents {
 		cfg.Agents[i].Provider = prov
@@ -86,6 +107,7 @@ func main() {
 	orch := runtime.NewOrchestrator(persistence, reg, cfg.Agents)
 	orch.Provider, orch.Model = prov, modelName
 	cfg.Apply(orch)
+	orch.Redactor, orch.Secrets = redactor, toolSecrets()
 	if n, err := orch.Recover(context.Background()); err != nil {
 		slog.Error("recover runs", "resumed", n, "err", err)
 	} else if n > 0 {
@@ -133,6 +155,24 @@ type fileConfig struct {
 	MCPServers []mcp.Server `json:"mcp_servers,omitempty"`
 	// Visibility replaces, for each role it lists, the event visibilities that role reads.
 	Visibility policy.Visibility `json:"visibility,omitempty"`
+	// Redact lists more Go regular expressions whose matches logs and traces hide.
+	Redact []string `json:"redact,omitempty"`
+}
+
+// credentialHeader reports whether an HTTP header's value is a credential to redact.
+func credentialHeader(name string) bool {
+	name = strings.ToLower(name)
+	return strings.Contains(name, "auth") || strings.Contains(name, "key") || strings.Contains(name, "token") ||
+		strings.Contains(name, "secret") || strings.Contains(name, "cookie")
+}
+
+// toolSecrets reads tools' credentials from the files of AGENT_LOOP_SECRETS_DIR
+// when it is set, and otherwise from AGENT_LOOP_SECRET_<NAME> variables.
+func toolSecrets() tool.Secrets {
+	if dir := os.Getenv("AGENT_LOOP_SECRETS_DIR"); dir != "" {
+		return tool.DirSecrets{Dir: dir}
+	}
+	return tool.EnvSecrets{Prefix: "AGENT_LOOP_SECRET_"}
 }
 
 func loadConfig(path string) fileConfig {
@@ -203,11 +243,14 @@ func setupTracing() func(context.Context) {
 	}
 }
 
-func authenticator(trustHeaders bool) api.Authenticator {
+func authenticator(trustHeaders bool, redactor *observe.Redactor) api.Authenticator {
 	if spec := os.Getenv("AGENT_LOOP_API_KEYS"); spec != "" {
 		keys, err := api.ParseAPIKeys(spec)
 		if err != nil {
 			fatal("AGENT_LOOP_API_KEYS", err)
+		}
+		for key := range keys {
+			redactor.Add(key)
 		}
 		slog.Info("authenticating API keys", "keys", len(keys))
 		return api.APIKeys(keys)

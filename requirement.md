@@ -373,8 +373,10 @@ Requirements:
   `X-Tenant-ID`/`X-Principal-ID` needs `-trust-identity-headers`.
 - [x] Roles and permissions within a tenant: each API key has a role (`admin`, `operator`, `member`,
   `viewer`), combined with the principal's role in each session.
-- [ ] Secret management for tool credentials.
-- [ ] Redaction support for logs and traces.
+- [x] Secret management for tool credentials: tools ask for them by name (`tool.Call.Secrets`), from
+  a mounted secret directory, per tenant, or the environment; no secret is stored.
+- [x] Redaction support for logs and traces: known secrets and secret-shaped values, plus configured
+  patterns, become `[REDACTED]`.
 - [ ] Data retention policy.
 - [ ] Optional encryption at rest for sensitive fields.
 - [x] Debug console and `/v1/debug/*` endpoints are off unless enabled (`-debug`); they expose agent instructions.

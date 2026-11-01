@@ -244,8 +244,8 @@ artifact size cap (`max_artifact_bytes`, §10), the run `limits` (`default` fill
 not ask for, `max` caps what it may), the worker pool (`concurrency`: `max_active_runs` executing,
 `max_queued_runs` waiting in first-in-first-out order beyond them, and `per_tenant`,
 `per_workflow`, `per_agent` and `per_tool` bounds), `approval_timeout`, `idle_warn_after`,
-`max_history_messages`, `tool_retry`, the MCP servers, and in `visibility` which event
-visibilities each role reads. Durations are nanoseconds.
+`max_history_messages`, `tool_retry`, the MCP servers, in `visibility` which event visibilities
+each role reads, and in `redact` more patterns that logs and traces hide (§9). Durations are nanoseconds.
 
 `${NAME}` anywhere in the file, an MCP header included, is replaced by the environment variable
 `NAME` before parsing (an unset one stops startup), so values and secrets can come from the
@@ -277,7 +277,8 @@ but not lift them, and a `default` above `max` is capped to it.
   "approve_above": {"total_tokens": 200000},
   "limits": {"default": {"max_tool_calls": 32}, "max": {"max_runtime": 1800000000000}},
   "concurrency": {"max_active_runs": 32, "max_queued_runs": 512, "per_tenant": 8},
-  "visibility": {"member": ["public", "participant", "internal"]}
+  "visibility": {"member": ["public", "participant", "internal"]},
+  "redact": ["acct-[0-9]{8}"]
 }
 ```
 
@@ -515,8 +516,17 @@ Decide v1 deployment mode explicitly:
   `api.HeaderIdentity` trusts them and is for local development only
 - authorization: tenant-scoped checks on every store method, then the role and session membership
   rules of §1 (`policy.Access`)
-- secrets: stored outside normal config tables by reference
-- logs/traces: redaction before export
+- secrets: tools ask `tool.Call.Secrets` for credentials by name. `cmd/agent-loop` reads them from
+  `$AGENT_LOOP_SECRETS_DIR/<tenant>/<name>`, else `$AGENT_LOOP_SECRETS_DIR/<name>` (a mounted secret
+  volume), when that variable is set, and otherwise from `AGENT_LOOP_SECRET_<NAME>` variables. MCP
+  headers take theirs from the environment with `${VAR}` (§4). No secret is stored by the runtime.
+- logs/traces: an `observe.Redactor` replaces with `[REDACTED]`, in every log record (message and
+  attributes) and in the errors recorded on spans, each secret a tool was given, the API keys, the
+  model API key, the database URL and MCP credential headers, and every match of its patterns: bearer
+  tokens, `sk-` keys, `api_key=`/`token=`/`secret=`/`password=` values and passwords in Postgres
+  URLs, plus the config file's `redact` list of regular expressions. Errors of tool and model calls
+  are redacted where they occur, so the model, events, task errors and a run's failure reason never
+  hold the secrets they named; tool outputs and other stored data are not redacted.
 
 ### 10. Storage and Artifact Contract
 
@@ -720,7 +730,9 @@ Each error should include:
 
 1. Prevent cross-tenant reads for sessions, runs, events, tools, artifacts, and memory, and
    cross-tenant run cancellation.
-2. Redact secrets from logs and traces.
+2. Redact secrets from logs, traces and stored errors (`TestToolSecretsAreRedacted`,
+   `TestToolSecretsStayOutOfStoredEvents`, `TestRedactor`), and read tools' credentials per tenant
+   (`TestSecrets`).
 3. Verify audit records for user actions and approval decisions (`TestCancelRunIsAudited`,
    `TestResolveApprovalEndpoint`, `storetest.Approvals`).
 4. Enforce artifact retention policy.

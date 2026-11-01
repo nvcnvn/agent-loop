@@ -493,6 +493,14 @@ type Call struct {
     Input          json.RawMessage
     IdempotencyKey string
     Metadata       map[string]any
+    Secrets        Secrets // the call's credentials, redacted from logs and traces once given out
+}
+
+// Secrets gives tools credentials by name for a tenant: DirSecrets{Dir} reads <Dir>/<tenant>/<name>
+// or <Dir>/<name>, never outside Dir, and EnvSecrets{Prefix} reads <Prefix><NAME> (any character
+// but a letter or digit becomes "_"); both fail with ErrNoSecret.
+type Secrets interface {
+    Secret(ctx context.Context, tenant core.TenantID, name string) (string, error)
 }
 
 type Result struct {
@@ -675,6 +683,17 @@ func (m *Metrics) Add(name string, v float64, labels ...string)     // counter
 func (m *Metrics) Observe(name string, v float64, labels ...string) // histogram, seconds buckets
 func (m *Metrics) Gauge(name string, f func() float64)              // read at scrape
 func (m *Metrics) ServeHTTP(w http.ResponseWriter, r *http.Request)
+
+// Redactor replaces secrets (Add) and pattern matches (AddPattern, DefaultRedactPatterns) with
+// [REDACTED]; Handler wraps a slog.Handler with it, and Orchestrator.Redactor applies it to span
+// errors and failed tool calls.
+const Redacted = "[REDACTED]"
+var DefaultRedactPatterns []string
+func NewRedactor(patterns ...string) (*Redactor, error)
+func (r *Redactor) Add(secret string)        // values under six bytes are ignored
+func (r *Redactor) AddPattern(p string) error
+func (r *Redactor) Redact(s string) string
+func (r *Redactor) Handler(h slog.Handler) slog.Handler
 ```
 
 | Metric | Labels |

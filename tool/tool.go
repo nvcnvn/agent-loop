@@ -27,6 +27,8 @@ type Call struct {
 	Input          json.RawMessage
 	IdempotencyKey string
 	Metadata       map[string]any
+	// Secrets gives the call the credentials it needs; values it returns are redacted from logs and traces.
+	Secrets Secrets
 }
 
 // Result is the structured output of a tool invocation and the artifacts it produced.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -12,8 +13,12 @@ import (
 	"testing"
 	"time"
 
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
+	"github.com/nvcnvn/agent-loop/observe"
 	"github.com/nvcnvn/agent-loop/policy"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
@@ -2209,5 +2214,81 @@ func TestArtifactSizeIsCapped(t *testing.T) {
 	msgs := prov.Calls()[1].Messages
 	if last := msgs[len(msgs)-1]; !strings.Contains(last.Content, "more than the 8 an artifact may hold") {
 		t.Fatalf("the agent was told %q", last.Content)
+	}
+}
+
+// Acceptance: §Security #2 – a tool's secret stays out of logs and traces.
+func TestToolSecretsAreRedacted(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "crm", Input: json.RawMessage(`{}`)}}},
+		model.MockResponse{Content: "done"},
+	)
+	orch, _, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"crm"}}})
+	t.Setenv("TEST_SECRET_CRM_TOKEN", "tok-9f8e7d6c")
+	orch.Secrets = tool.EnvSecrets{Prefix: "TEST_SECRET_"}
+	orch.Redactor, _ = observe.NewRedactor()
+	var logs bytes.Buffer
+	orch.Log = slog.New(orch.Redactor.Handler(slog.NewJSONHandler(&logs, nil)))
+	rec := tracetest.NewSpanRecorder()
+	orch.Tracer = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)).Tracer("test")
+	if err := orch.Tools.Register(core.ToolDefinition{Name: "crm", SideEffect: core.SideNone}, tool.ExecutorFunc(func(ctx context.Context, c tool.Call) (tool.Result, error) {
+		token, err := c.Secrets.Secret(ctx, c.TenantID, "crm-token")
+		if err != nil {
+			return tool.Result{}, err
+		}
+		return tool.Result{}, errors.New("crm rejected token " + token)
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runWorkflow(t, orch, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "crm rejected token [REDACTED]") || strings.Contains(logs.String(), "tok-9f8e7d6c") {
+		t.Fatalf("logs: %s", logs.String())
+	}
+	if last := prov.Calls()[1].Messages; strings.Contains(last[len(last)-1].Content, "tok-9f8e7d6c") {
+		t.Fatalf("the model was told the secret: %s", last[len(last)-1].Content)
+	}
+	for _, span := range rec.Ended() {
+		for _, ev := range span.Events() {
+			for _, a := range ev.Attributes {
+				if strings.Contains(a.Value.Emit(), "tok-9f8e7d6c") {
+					t.Fatalf("span %s carries the secret: %s", span.Name(), a.Value.Emit())
+				}
+			}
+		}
+		if strings.Contains(span.Status().Description, "tok-9f8e7d6c") {
+			t.Fatalf("span %s status carries the secret", span.Name())
+		}
+	}
+}
+
+func TestToolSecretsStayOutOfStoredEvents(t *testing.T) {
+	prov := model.NewMockProvider(model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "crm", Input: json.RawMessage(`{}`)}}})
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"crm"}}})
+	t.Setenv("TEST_SECRET_CRM_TOKEN", "tok-1a2b3c4d")
+	orch.Secrets = tool.EnvSecrets{Prefix: "TEST_SECRET_"}
+	orch.Redactor, _ = observe.NewRedactor()
+	orch.LoopDet.RetryStorm = 2
+	orch.ToolRetry = runtime.RetryPolicy{MaxAttempts: 5, Backoff: time.Millisecond}
+	if err := orch.Tools.Register(core.ToolDefinition{Name: "crm", SideEffect: core.SideNone, Idempotency: core.IdemIdempotent}, tool.ExecutorFunc(func(ctx context.Context, c tool.Call) (tool.Result, error) {
+		token, _ := c.Secrets.Secret(ctx, c.TenantID, "crm-token")
+		return tool.Result{}, fmt.Errorf("%w: crm down for token %s", tool.ErrTransient, token)
+	})); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := runWorkflow(t, orch, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}}})
+	if res.Status != core.RunFailed || strings.Contains(res.FailureReason, "tok-1a2b3c4d") {
+		t.Fatalf("status %s, reason %q", res.Status, res.FailureReason)
+	}
+	events, _ := s.ListRunEvents(context.Background(), core.DefaultTenant, res.RunID, 0, 0)
+	for _, ev := range events {
+		if strings.Contains(string(ev.Payload)+string(ev.HiddenPayload), "tok-1a2b3c4d") {
+			t.Fatalf("%s carries the secret: %s", ev.Type, ev.Payload)
+		}
+	}
+	tasks, _ := s.ListRunTasks(context.Background(), core.DefaultTenant, res.RunID)
+	if strings.Contains(tasks[0].Error, "tok-1a2b3c4d") {
+		t.Fatalf("task error %q", tasks[0].Error)
 	}
 }

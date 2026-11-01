@@ -112,6 +112,11 @@ type Orchestrator struct {
 	Compaction Compaction
 	// IdleWarnAfter is how long a run may go without an event before it gets an idle_wait diagnostic; zero disables it.
 	IdleWarnAfter time.Duration
+	// Secrets gives tool calls their credentials (tool.Call.Secrets); nil gives them none.
+	Secrets tool.Secrets
+	// Redactor hides secrets, those Secrets returned included, in the errors of tool and model calls
+	// before anything records them, and in trace errors; nil hides nothing.
+	Redactor *observe.Redactor
 	// LoopResponse is what a detected runaway loop does to its run.
 	LoopResponse LoopResponse
 	// ApproveAbove asks a human, once per execution, before a model call of a run whose total tokens or cost units passed its positive fields.
@@ -847,7 +852,7 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		if finalStatus != core.RunSucceeded && failureReason != "" {
 			err = errors.New(failureReason)
 		}
-		endSpan(span, err)
+		o.endSpan(span, err)
 	}()
 	log := o.Log.With("run_id", runID, "tenant_id", in.TenantID, "session_id", in.SessionID)
 	if span.SpanContext().IsValid() {
@@ -1209,7 +1214,7 @@ func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in Sta
 	if err != nil && actx.Err() != nil && ctx.Err() == nil {
 		err = fmt.Errorf("agent %s timed out after %s: %w", spec.agent.Name, spec.agent.Timeout, context.DeadlineExceeded)
 	}
-	endSpan(span, err)
+	o.endSpan(span, err)
 	if err != nil {
 		return "", taskID, o.failTask(ctx, in.TenantID, taskID, err)
 	}
@@ -1397,12 +1402,12 @@ func (o *Orchestrator) modelCall(ctx context.Context, runID core.RunID, in Start
 		attribute.Int64("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
 		attribute.Int64("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
 		attribute.Int("agentloop.tool_calls", len(resp.ToolCalls)))
-	endSpan(span, err)
+	o.endSpan(span, err)
 	releaseAgent()
 	o.Metrics.Observe("agentloop_model_call_duration_seconds", time.Since(callStart).Seconds(), "model", agent.Model)
 	if err != nil {
 		o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "error")
-		return model.ChatResponse{}, fmt.Errorf("%w: %w", errModelCall, err)
+		return model.ChatResponse{}, fmt.Errorf("%w: %w", errModelCall, o.redactErr(err))
 	}
 	o.Metrics.Add("agentloop_model_calls_total", 1, "model", agent.Model, "outcome", "ok")
 	o.Metrics.Add("agentloop_tokens_total", float64(resp.Usage.PromptTokens), "model", agent.Model, "type", "prompt")
@@ -1743,6 +1748,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			Tool:           core.ToolDefinition{Name: tc.Name},
 			Input:          tc.Input,
 			IdempotencyKey: string(stepID),
+			Secrets:        o.toolSecrets(),
 		}
 		if exec, ok := builtins[tc.Name]; ok {
 			callRec.Tool = core.ToolDefinition{ID: core.ToolID(tc.Name), Name: tc.Name}
@@ -1955,7 +1961,7 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		attribute.String("gen_ai.operation.name", "execute_tool"),
 		attribute.String("gen_ai.tool.name", call.Tool.Name),
 		attribute.String("agentloop.step_id", string(call.StepID)))
-	defer func() { endSpan(span, err) }()
+	defer func() { o.endSpan(span, err) }()
 	// Built-ins take no slot: a delegating task holding one its descendants
 	// wait for would deadlock, and a question would block other runs' questions.
 	if string(call.Tool.ID) != call.Tool.Name {
@@ -1982,7 +1988,7 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 	callStart := time.Now()
 	res, took, cost, err := o.executeWithRetries(ctx, exec, call, budgets, tenant, session, runID, taskID)
 	if err != nil {
-		span.RecordError(err)
+		span.RecordError(errors.New(o.Redactor.Redact(err.Error())))
 	}
 	o.Metrics.Observe("agentloop_tool_call_duration_seconds", time.Since(callStart).Seconds(), "tool", call.Tool.Name)
 	o.Budget.CommitTool(runID, call.Tool.Name, took, cost)
@@ -2039,10 +2045,10 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 	}, nil
 }
 
-func failedPayload(name string, err error, fatal bool) map[string]any {
-	p := map[string]any{"tool": name, "error": err.Error()}
+func failedPayload(name, msg, code string, fatal bool) map[string]any {
+	p := map[string]any{"tool": name, "error": msg}
 	if fatal {
-		p["fatal"] = errorCode(err)
+		p["fatal"] = code
 	}
 	return p
 }
@@ -2117,6 +2123,7 @@ func (o *Orchestrator) executeWithRetries(ctx context.Context, exec tool.Executo
 		}
 		start := time.Now()
 		res, err = safeExecute(tctx, exec, call)
+		err = o.redactErr(err)
 		cancel()
 		took += time.Since(start)
 		cost += max(res.CostUnits, 0)
@@ -2190,13 +2197,13 @@ func (o *Orchestrator) toolFailed(ctx context.Context, tenant core.TenantID, ses
 		StepID:     call.StepID,
 		Type:       core.EvToolCompleted,
 		Visibility: core.VisibilityInternal,
-		Payload:    mustJSON(failedPayload(call.Tool.Name, err, fatal)),
+		Payload:    mustJSON(failedPayload(call.Tool.Name, o.Redactor.Redact(err.Error()), errorCode(err), fatal)),
 	})
 	return model.Message{
 		Role:       model.RoleTool,
 		Name:       call.Tool.Name,
 		ToolCallID: tc.ID,
-		Content:    string(mustJSON(map[string]string{"error": err.Error()})),
+		Content:    string(mustJSON(map[string]string{"error": o.Redactor.Redact(err.Error())})),
 	}
 }
 
@@ -2327,10 +2334,12 @@ func (o *Orchestrator) startSpan(ctx context.Context, name string, attrs ...attr
 	return o.Tracer.Start(ctx, name, trace.WithAttributes(attrs...))
 }
 
-func endSpan(span trace.Span, err error) {
+// endSpan records err, without its secrets, on span and ends it.
+func (o *Orchestrator) endSpan(span trace.Span, err error) {
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+		msg := o.Redactor.Redact(err.Error())
+		span.RecordError(errors.New(msg))
+		span.SetStatus(codes.Error, msg)
 	}
 	span.End()
 }
@@ -2347,3 +2356,43 @@ func hashInput(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:8])
 }
+
+// toolSecrets is Secrets, adding each secret it gives out to Redactor.
+func (o *Orchestrator) toolSecrets() tool.Secrets {
+	if o.Secrets == nil {
+		return nil
+	}
+	return redactedSecrets{o.Secrets, o.Redactor}
+}
+
+type redactedSecrets struct {
+	tool.Secrets
+	redactor *observe.Redactor
+}
+
+func (r redactedSecrets) Secret(ctx context.Context, tenant core.TenantID, name string) (string, error) {
+	v, err := r.Secrets.Secret(ctx, tenant, name)
+	if err == nil {
+		r.redactor.Add(v)
+	}
+	return v, err
+}
+
+// redactErr hides secrets in err's message, keeping err for errors.Is and errors.As.
+func (o *Orchestrator) redactErr(err error) error {
+	if err == nil || o.Redactor == nil {
+		return err
+	}
+	if msg := o.Redactor.Redact(err.Error()); msg != err.Error() {
+		return redactedError{msg: msg, err: err}
+	}
+	return err
+}
+
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e redactedError) Error() string { return e.msg }
+func (e redactedError) Unwrap() error { return e.err }

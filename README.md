@@ -36,6 +36,7 @@ The recommended first vertical slice from
 | Roles (`admin`, `operator`, `member`, `viewer`) on API keys, session participants (`owner`, `member`, `viewer`) and per-role event visibility | [policy/access.go](policy/access.go), [api/access.go](api/access.go) |
 | Tool policy (allow / deny / approval, by tool name or side-effect level; per-tool budgets and timeouts; `tool_policy` in the config file or a workflow) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost; per-tool calls, time and cost) | [policy/policy.go](policy/policy.go) |
+| Tool credentials by name from a mounted secret directory or the environment (`tool.Call.Secrets`); secrets and secret-shaped values redacted from logs and trace errors | [tool/secrets.go](tool/secrets.go), [observe/redact.go](observe/redact.go) |
 | Prometheus metrics at `/metrics` (runs, model calls, tokens, cost, tools, queue depth, HTTP latency) | [observe/metrics.go](observe/metrics.go) |
 | Loop / stall detector (identical tool calls, near-identical rejected answers, hand-back drafts and delegations, retry storms) that fails, pauses or asks approval for a run; approval past a cost threshold; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Workflows as stage graphs (`depends_on`) with hand-backs to earlier stages, stop conditions, retries, stage/agent/tool timeouts, stage approval gates, and JSON Schema for input and stage outputs; agents delegating to child agents at runtime (`delegate` tool, depth-limited) and asking the session's people a question that the next posted message answers (`ask_human`); runs started by posting a message; agents and named workflow templates loaded from a JSON config | [runtime/workflow.go](runtime/workflow.go), [runtime/config.go](runtime/config.go) |
@@ -123,7 +124,10 @@ authenticated. In production set `AGENT_LOOP_API_KEYS` to comma-separated
 <key>` (SSE clients may pass `?access_token=<key>` instead), and the key alone
 decides the tenant, principal and role. `-trust-identity-headers` takes them from
 `X-Tenant-ID`, `X-Principal-ID` (UUIDs) and `X-Role` (default `admin`) unchecked, for local
-development only. `/healthz`, `/readyz` and `/metrics` need no key.
+development only. `/healthz`, `/readyz` and `/metrics` need no key. Tools read their credentials by
+name from the files of `AGENT_LOOP_SECRETS_DIR` (`<tenant>/<name>`, else `<name>`) or, without it,
+from `AGENT_LOOP_SECRET_<NAME>` variables; those secrets, the API keys and other known credentials
+are redacted from logs and trace errors, as are the config file's `redact` patterns.
 
 Admins and operators act on every session of their tenant; members and viewers only on the
 sessions they participate in. Whoever creates a session owns it and adds others as `owner`,
