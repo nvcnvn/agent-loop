@@ -32,6 +32,7 @@ The recommended first vertical slice from
 | Streaming replies from both adapters; SSE `agent_message_delta` events with `?deltas=1` | [runtime/deltas.go](runtime/deltas.go), [api/server.go](api/server.go) |
 | Native Go tool registry + builtin tools (`echo`, `uppercase`, `math.add`, `artifact.save`) | [tool/tool.go](tool/tool.go), [tool/builtin.go](tool/builtin.go) |
 | Artifacts produced by tools and agents, linked to run, task, step and producing tool; listed with `GET /v1/runs/{rid}/artifacts` and downloaded with `GET /v1/artifacts/{aid}` | [runtime/orchestrator.go](runtime/orchestrator.go), [api/server.go](api/server.go) |
+| Roles (`admin`, `operator`, `member`, `viewer`) on API keys, session participants (`owner`, `member`, `viewer`) and per-role event visibility | [policy/access.go](policy/access.go), [api/access.go](api/access.go) |
 | Tool policy (allow / deny / approval, by tool name or side-effect level; `tool_policy` in the config file or a workflow) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost) | [policy/policy.go](policy/policy.go) |
 | Prometheus metrics at `/metrics` (runs, model calls, tokens, cost, tools, queue depth, HTTP latency) | [observe/metrics.go](observe/metrics.go) |
@@ -114,12 +115,19 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 OTEL_SERVICE_NAME=agent-loop \
 
 The server refuses to start until you choose how `/v1` requests are
 authenticated. In production set `AGENT_LOOP_API_KEYS` to comma-separated
-`<tenant>:<principal>:<key>` entries, where tenant and principal are UUIDs; clients send `Authorization: Bearer
+`[<role>:]<tenant>:<principal>:<key>` entries, where tenant and principal are UUIDs and the role is
+`admin`, `operator`, `member` (the default) or `viewer`; clients send `Authorization: Bearer
 <key>` (SSE clients may pass `?access_token=<key>` instead), and the key alone
-decides the tenant and principal. `-trust-identity-headers` takes them from
-`X-Tenant-ID` and `X-Principal-ID` (UUIDs) unchecked, for local development only.
-`/healthz`, `/readyz` and `/metrics` need no key. Any key of a tenant may act
-on everything in that tenant.
+decides the tenant, principal and role. `-trust-identity-headers` takes them from
+`X-Tenant-ID`, `X-Principal-ID` (UUIDs) and `X-Role` (default `admin`) unchecked, for local
+development only. `/healthz`, `/readyz` and `/metrics` need no key.
+
+Admins and operators act on every session of their tenant; members and viewers only on the
+sessions they participate in. Whoever creates a session owns it and adds others as `owner`,
+`member` or `viewer` (`PUT /v1/sessions/{sid}/participants/{principal}`). Each role reads the event
+visibilities that `visibility` in the `-config` file gives it (members and viewers: `public` and
+`participant`; operators also `internal` and `audit`; admins also `hidden_reasoning` and hidden
+payloads). [docs/04-contracts-and-tests.md](docs/04-contracts-and-tests.md) §1 has the full rules.
 
 The debug console is served by the same Go binary and has no separate
 frontend build step. It can create or resume sessions, send human

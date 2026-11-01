@@ -221,10 +221,19 @@ type EventStore interface {
     LoadReplayEvents(ctx context.Context, tenantID core.TenantID, runID core.RunID) ([]core.Event, error)
 }
 
+// SessionStore keeps sessions, their participants and messages. CreateSession makes the creator
+// the session's owner; ListSessions with a participant lists only the sessions it takes part in.
+// storetest.Participants is the conformance check.
 type SessionStore interface {
     CreateSession(ctx context.Context, session Session) (core.SessionID, error)
     GetSession(ctx context.Context, tenantID core.TenantID, sessionID core.SessionID) (Session, error)
-    AddMessageProjection(ctx context.Context, message MessageProjection) error
+    ListSessions(ctx context.Context, tenantID core.TenantID, participant core.PrincipalID) ([]Session, error)
+    PutParticipant(ctx context.Context, p Participant) error // adds one, or changes its role
+    GetParticipant(ctx context.Context, tenantID core.TenantID, sessionID core.SessionID, principal core.PrincipalID) (Participant, error)
+    ListParticipants(ctx context.Context, tenantID core.TenantID, sessionID core.SessionID) ([]Participant, error)
+    RemoveParticipant(ctx context.Context, tenantID core.TenantID, sessionID core.SessionID, principal core.PrincipalID) error
+    AddMessage(ctx context.Context, message MessageProjection) error
+    ListMessages(ctx context.Context, tenantID core.TenantID, sessionID core.SessionID) ([]MessageProjection, error)
 }
 
 type RunStore interface {
@@ -254,10 +263,11 @@ type ApprovalStore interface {
 
 // ApprovalFilter: empty fields select all; Status "requested" leaves out expired approvals.
 type ApprovalFilter struct {
-    RunID  core.RunID
-    Status string
-    After  core.ApprovalID
-    Limit  int
+    RunID       core.RunID
+    Status      string
+    After       core.ApprovalID
+    Limit       int
+    Participant core.PrincipalID // only runs in sessions it participates in
 }
 
 type ArtifactStore interface {
@@ -490,6 +500,19 @@ import (
     "github.com/nvcnvn/agent-loop/core"
 )
 
+// Role is a principal's tenant role: admin, operator, member or viewer. SessionRole is its role in
+// one session: owner, member or viewer. Access combines them; admins and operators may do
+// everything in every session.
+type Role string
+type SessionRole string
+type SessionAccess struct{ Read, Write, Manage bool }
+func Access(role Role, participant SessionRole) SessionAccess
+
+// Visibility maps each role to the event visibilities it reads; DefaultVisibility gives members
+// and viewers public and participant, operators also internal and audit, admins everything.
+type Visibility map[Role][]core.Visibility
+func DefaultVisibility() Visibility
+
 type Engine interface {
     AuthorizeRun(ctx context.Context, request RunAuthorization) (Decision, error)
     AuthorizeToolCall(ctx context.Context, request ToolAuthorization) (Decision, error)
@@ -534,13 +557,18 @@ package api
 type Identity struct {
     Tenant    core.TenantID
     Principal core.PrincipalID
+    Role      policy.Role
 }
 
 // Authenticator resolves the caller of a request to a non-public route; an error answers 401.
 type Authenticator func(*http.Request) (Identity, error)
 
-func APIKeys(keys map[string]Identity) Authenticator // Authorization: Bearer <key>
-func HeaderIdentity(r *http.Request) (Identity, error) // trusts X-Tenant-ID / X-Principal-ID
+func APIKeys(keys map[string]Identity) Authenticator // Authorization: Bearer <key>; no role means member
+func ParseAPIKeys(spec string) (map[string]Identity, error) // "[<role>:]<tenant>:<principal>:<key>,..."
+func HeaderIdentity(r *http.Request) (Identity, error) // trusts X-Tenant-ID / X-Principal-ID / X-Role (default admin)
+
+// Server.Visibility (policy.DefaultVisibility unless set) decides which events and messages each
+// role reads.
 ```
 
 ## Real-Time Delivery

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -288,6 +289,7 @@ func TestSSEStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/v1/runs/"+string(rresp.RunID)+"/stream", nil)
+	req.Header.Set("X-Role", "member")
 	r, err := c.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -696,7 +698,7 @@ func TestListRunEventsFiltersInternalVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = s.Append(ctx, []core.Event{
-		{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvModelStarted, Visibility: core.VisibilityInternal},
+		{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvModelStarted, Visibility: core.VisibilityInternal, HiddenPayload: json.RawMessage(`{"request":{}}`)},
 		{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvApprovalReq, Visibility: core.VisibilityParticipant},
 		{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvSystem, Visibility: core.VisibilityAudit},
 		{TenantID: core.DefaultTenant, SessionID: sid, RunID: rid, Type: core.EvAgentTrace, Visibility: core.VisibilityHiddenReasoning},
@@ -705,22 +707,35 @@ func TestListRunEventsFiltersInternalVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := srv.Client().Get(srv.URL + "/v1/runs/" + string(rid) + "/events")
-	if err != nil {
-		t.Fatal(err)
+	events := func(role string) []core.Event {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/runs/"+string(rid)+"/events", nil)
+		req.Header.Set("X-Role", role)
+		r, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Body.Close()
+		var body struct {
+			Events []core.Event `json:"events"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Events
 	}
-	defer r.Body.Close()
-	var body struct {
-		Events []core.Event `json:"events"`
+	if got := events("member"); len(got) != 1 || got[0].Type != core.EvApprovalReq {
+		t.Fatalf("member's events: %+v", got)
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		t.Fatal(err)
+	operator := events("operator")
+	if len(operator) != 3 || slices.ContainsFunc(operator, func(e core.Event) bool {
+		return e.Visibility == core.VisibilityHiddenReasoning || len(e.HiddenPayload) > 0
+	}) {
+		t.Fatalf("operator's events: %+v", operator)
 	}
-	if len(body.Events) != 1 {
-		t.Fatalf("events=%d want 1: %+v", len(body.Events), body.Events)
-	}
-	if body.Events[0].Type != core.EvApprovalReq || body.Events[0].Visibility != core.VisibilityParticipant {
-		t.Fatalf("unexpected event returned: %+v", body.Events[0])
+	admin := events("admin")
+	if len(admin) != 4 || len(admin[0].HiddenPayload) == 0 {
+		t.Fatalf("admin's events: %+v", admin)
 	}
 }
 
@@ -728,9 +743,11 @@ func TestResolveApprovalEndpoint(t *testing.T) {
 	srv, _, s := newTestServer(t)
 	defer srv.Close()
 	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	rid, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunAwaitingApproval})
 	aid, err := s.CreateApproval(ctx, store.Approval{
 		TenantID: core.DefaultTenant,
-		RunID:    core.RunID("run-api-approval"),
+		RunID:    rid,
 		Reason:   "debug console gate",
 		Request:  json.RawMessage(`{"tool":"echo"}`),
 	})
@@ -882,7 +899,9 @@ func TestArtifactEndpoints(t *testing.T) {
 func TestResolveApprovalConflicts(t *testing.T) {
 	srv, _, s := newTestServer(t)
 	defer srv.Close()
-	expired, err := s.CreateApproval(context.Background(), store.Approval{TenantID: core.DefaultTenant, ExpiresAt: time.Now().Add(-time.Second)})
+	sid, _ := s.CreateSession(context.Background(), store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	rid, _ := s.CreateRun(context.Background(), store.Run{TenantID: core.DefaultTenant, SessionID: sid, Status: core.RunRunning})
+	expired, err := s.CreateApproval(context.Background(), store.Approval{TenantID: core.DefaultTenant, RunID: rid, ExpiresAt: time.Now().Add(-time.Second)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1058,7 +1077,8 @@ func FuzzRESTBodies(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	paths := []string{"/v1/sessions", "/v1/sessions/" + string(sid) + "/messages", "/v1/approvals/missing", "/v1/runs", "/v1/runs/" + string(rid) + "/cancel"}
+	paths := []string{"/v1/sessions", "/v1/sessions/" + string(sid) + "/messages", "/v1/approvals/missing", "/v1/runs", "/v1/runs/" + string(rid) + "/cancel",
+		"/v1/sessions/" + string(sid) + "/participants/" + string(core.DefaultPrincipal)}
 	f.Add(uint8(0), []byte(`{"title":"demo"}`))
 	f.Add(uint8(0), []byte(``))
 	f.Add(uint8(1), []byte(`{"role":"user","content":"hi"}`))
@@ -1072,10 +1092,17 @@ func FuzzRESTBodies(f *testing.F) {
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","images":{"p":{"mime_type":"image/png","data":"not base64!"}},"workflow":{"stages":[{"name":"a","agents":[{"name":"x","images":["p","q"]}]}]}}`))
 	f.Add(uint8(4), []byte(`{"reason":"`+strings.Repeat("x", 2000)+`"}`))
 	f.Add(uint8(4), []byte(`{"reason":7}`))
+	f.Add(uint8(5), []byte(`{"role":"viewer"}`))
+	f.Add(uint8(5), []byte(`{"role":"boss"}`))
+	f.Add(uint8(5), []byte(`{"role":["owner"]}`))
 	f.Fuzz(func(t *testing.T, which uint8, body []byte) {
 		path := paths[int(which)%len(paths)]
+		method := http.MethodPost
+		if strings.Contains(path, "/participants/") {
+			method = http.MethodPut
+		}
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)))
+		h.ServeHTTP(rec, httptest.NewRequest(method, path, bytes.NewReader(body)))
 		if rec.Code >= 500 {
 			t.Fatalf("POST %s %q: status %d: %s", path, body, rec.Code, rec.Body)
 		}
@@ -1136,7 +1163,9 @@ func TestListMessagesHidesInternalMessages(t *testing.T) {
 	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
 	_ = s.AddMessage(ctx, store.MessageProjection{SessionID: sid, Role: "user", Visibility: core.VisibilityParticipant, Content: "hi"})
 	_ = s.AddMessage(ctx, store.MessageProjection{SessionID: sid, Role: "snapshot", Visibility: core.VisibilityInternal, Content: `{"summary":"secret"}`})
-	resp, err := srv.Client().Get(srv.URL + "/v1/sessions/" + string(sid) + "/messages")
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/sessions/"+string(sid)+"/messages", nil)
+	req.Header.Set("X-Role", "member")
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1188,6 +1217,7 @@ func FuzzRESTQueries(f *testing.F) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 		req.URL.RawQuery = query
 		req.Header.Set("Last-Event-ID", lastEventID)
+		req.Header.Set("X-Role", "member")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code >= 500 {

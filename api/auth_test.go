@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/nvcnvn/agent-loop/api"
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
+	"github.com/nvcnvn/agent-loop/policy"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 	"github.com/nvcnvn/agent-loop/tool"
@@ -26,14 +28,15 @@ const (
 )
 
 func TestParseAPIKeys(t *testing.T) {
-	keys, err := api.ParseAPIKeys(string(tenantA) + ":" + string(userA) + ":s3cret:with:colons, " + string(core.DefaultTenant) + ":" + string(core.DefaultPrincipal) + ":other")
+	keys, err := api.ParseAPIKeys(string(tenantA) + ":" + string(userA) + ":s3cret:with:colons, operator:" + string(core.DefaultTenant) + ":" + string(core.DefaultPrincipal) + ":admin:key")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if keys["s3cret:with:colons"] != (api.Identity{Tenant: tenantA, Principal: userA}) || len(keys) != 2 {
+	if keys["s3cret:with:colons"] != (api.Identity{Tenant: tenantA, Principal: userA, Role: policy.RoleMember}) ||
+		keys["admin:key"] != (api.Identity{Tenant: core.DefaultTenant, Principal: core.DefaultPrincipal, Role: policy.RoleOperator}) || len(keys) != 2 {
 		t.Fatalf("keys=%v", keys)
 	}
-	for _, bad := range []string{"", "tenant:principal", "a:b:", ":b:secretkey", "a::secretkey", "a:b:secretkey,a:b:secretkey", string(tenantA) + ":bot:secretkey"} {
+	for _, bad := range []string{"", "tenant:principal", "a:b:", ":b:secretkey", "a::secretkey", "a:b:secretkey,a:b:secretkey", string(tenantA) + ":bot:secretkey", "root:" + string(tenantA) + ":" + string(userA) + ":secretkey"} {
 		_, err := api.ParseAPIKeys(bad)
 		if err == nil {
 			t.Fatalf("ParseAPIKeys(%q) accepted", bad)
@@ -154,4 +157,88 @@ func FuzzParseAPIKeys(f *testing.F) {
 			}
 		}
 	})
+}
+
+// Acceptance: §Security #6 – roles and session membership.
+func TestRolesAndSessionMembership(t *testing.T) {
+	s := store.NewMemStore()
+	orch := runtime.NewOrchestrator(s, tool.NewRegistry(), []runtime.Agent{{Name: "echo", Model: "m", Provider: model.NewMockProvider()}})
+	srv := api.NewServer(orch, s)
+	srv.Debug = true
+	principal := func(n int) core.PrincipalID {
+		return core.PrincipalID(fmt.Sprintf("00000000-0000-0000-0000-0000000001%02d", n))
+	}
+	srv.Auth = api.APIKeys(map[string]api.Identity{
+		"owner":    {Tenant: tenantA, Principal: principal(1), Role: policy.RoleMember},
+		"member":   {Tenant: tenantA, Principal: principal(2), Role: policy.RoleMember},
+		"viewer":   {Tenant: tenantA, Principal: principal(3), Role: policy.RoleViewer},
+		"operator": {Tenant: tenantA, Principal: principal(4), Role: policy.RoleOperator},
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	call := func(key, method, path, body string, want int) []byte {
+		t.Helper()
+		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		out, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != want {
+			t.Fatalf("%s %s %s: status %d want %d: %s", key, method, path, resp.StatusCode, want, out)
+		}
+		return out
+	}
+	var created struct {
+		SessionID core.SessionID `json:"session_id"`
+	}
+	_ = json.Unmarshal(call("owner", http.MethodPost, "/v1/sessions", `{}`, http.StatusCreated), &created)
+	sess := "/v1/sessions/" + string(created.SessionID)
+	call("viewer", http.MethodPost, "/v1/sessions", `{}`, http.StatusForbidden)
+
+	call("operator", http.MethodGet, sess, "", http.StatusOK)
+	call("member", http.MethodGet, sess, "", http.StatusNotFound)
+	call("member", http.MethodPost, sess+"/messages", `{"role":"user","content":"hi"}`, http.StatusNotFound)
+	if out := call("member", http.MethodGet, "/v1/sessions", "", http.StatusOK); strings.Contains(string(out), string(created.SessionID)) {
+		t.Fatalf("a non-participant lists the session: %s", out)
+	}
+
+	call("owner", http.MethodPut, sess+"/participants/"+string(principal(2)), `{"role":"viewer"}`, http.StatusOK)
+	call("owner", http.MethodPut, sess+"/participants/"+string(principal(3)), `{"role":"member"}`, http.StatusOK)
+	call("owner", http.MethodPut, sess+"/participants/"+string(principal(3)), `{"role":"boss"}`, http.StatusBadRequest)
+	call("member", http.MethodGet, sess+"/messages", "", http.StatusOK)
+	call("member", http.MethodPost, sess+"/messages", `{"role":"user","content":"hi"}`, http.StatusForbidden)
+	call("member", http.MethodPut, sess+"/participants/"+string(principal(2)), `{"role":"owner"}`, http.StatusForbidden)
+	call("viewer", http.MethodPost, sess+"/messages", `{"role":"user","content":"hi"}`, http.StatusForbidden)
+	if out := call("member", http.MethodGet, "/v1/sessions", "", http.StatusOK); !strings.Contains(string(out), string(created.SessionID)) {
+		t.Fatalf("a participant does not list the session: %s", out)
+	}
+
+	call("owner", http.MethodPut, sess+"/participants/"+string(principal(2)), `{"role":"member"}`, http.StatusOK)
+	call("member", http.MethodPost, sess+"/messages", `{"role":"user","content":"hi"}`, http.StatusCreated)
+	if out := call("viewer", http.MethodGet, sess+"/participants", "", http.StatusOK); strings.Count(string(out), `"principal_id"`) != 3 {
+		t.Fatalf("participants: %s", out)
+	}
+	call("operator", http.MethodDelete, sess+"/participants/"+string(principal(2)), "", http.StatusNoContent)
+	call("member", http.MethodGet, sess, "", http.StatusNotFound)
+	call("owner", http.MethodDelete, sess+"/participants/"+string(principal(2)), "", http.StatusNotFound)
+
+	notFound := string(call("member", http.MethodGet, "/v1/sessions/"+core.NewID(), "", http.StatusNotFound))
+	if hidden := string(call("member", http.MethodGet, sess, "", http.StatusNotFound)); hidden != notFound {
+		t.Fatalf("a session the caller may not see answers %s, a missing one %s", hidden, notFound)
+	}
+	call("member", http.MethodGet, "/v1/runs/not-a-uuid", "", http.StatusNotFound)
+
+	run := `{"session_id":"` + string(created.SessionID) + `","idempotency_key":"k","workflow":{"stages":[{"name":"s","agents":[{"name":"echo","prompt":"x"}]}]}}`
+	call("owner", http.MethodPost, "/v1/runs", run, http.StatusAccepted)
+	var mine struct {
+		SessionID core.SessionID `json:"session_id"`
+	}
+	_ = json.Unmarshal(call("member", http.MethodPost, "/v1/sessions", `{}`, http.StatusCreated), &mine)
+	call("member", http.MethodPost, "/v1/runs", strings.Replace(run, string(created.SessionID), string(mine.SessionID), 1), http.StatusConflict)
+
+	call("member", http.MethodGet, "/v1/debug/agents", "", http.StatusForbidden)
+	call("operator", http.MethodGet, "/v1/debug/agents", "", http.StatusOK)
 }

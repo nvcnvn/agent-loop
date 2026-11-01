@@ -87,7 +87,8 @@ Workflow definitions should support:
 
 A session is a shared container that may include:
 - [x] Human messages attributed to the principal that posted them.
-- [ ] Session participants and membership.
+- [x] Session participants and membership: the creator owns a session and adds owners, members
+  and viewers; members and viewers reach only the sessions they participate in.
 - [x] Multiple agents.
 - [x] Multiple runs over time.
 - [x] Full event history.
@@ -122,7 +123,8 @@ Support at least these message and event types:
 Requirements:
 - [x] Hidden reasoning is stored separately from user-visible messages (`hidden_payload`).
 - [x] Every event has an explicit visibility.
-- [ ] Visibility rules are configurable, with an internal-scope reader for operators.
+- [x] Visibility rules are configurable per role (`visibility` in the `-config` file); operators read
+  internal and audit events, admins also hidden reasoning.
 - [x] Every event includes timestamps.
 - [x] Every event includes actor identity: the requesting principal, the agent, or the system principal.
 - [x] Events in one run share a correlation ID (the run ID).
@@ -359,7 +361,8 @@ Requirements:
 - [x] Authentication and authorization: `/v1` requests authenticate with an API key that fixes their
   tenant and principal (`AGENT_LOOP_API_KEYS`), and every store call is scoped to that tenant. Trusting
   `X-Tenant-ID`/`X-Principal-ID` needs `-trust-identity-headers`.
-- [ ] Roles and permissions within a tenant (any of its keys may do anything in it).
+- [x] Roles and permissions within a tenant: each API key has a role (`admin`, `operator`, `member`,
+  `viewer`), combined with the principal's role in each session.
 - [ ] Secret management for tool credentials.
 - [ ] Redaction support for logs and traces.
 - [ ] Data retention policy.

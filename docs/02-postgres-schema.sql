@@ -66,12 +66,14 @@ CREATE INDEX sessions_tenant_status_created_idx ON sessions (tenant_id, status, 
 
 CREATE TABLE session_participants (
     session_id uuid NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    tenant_id uuid NOT NULL REFERENCES tenants(tenant_id),
     principal_id uuid NOT NULL REFERENCES principals(principal_id),
-    role text NOT NULL,
+    role text NOT NULL CHECK (role IN ('owner', 'member', 'viewer')),
     joined_at timestamptz NOT NULL DEFAULT now(),
-    left_at timestamptz,
     PRIMARY KEY (session_id, principal_id)
 );
+
+CREATE INDEX session_participants_principal_idx ON session_participants (tenant_id, principal_id);
 
 CREATE TABLE model_profiles (
     model_profile_id uuid PRIMARY KEY DEFAULT uuidv7(),

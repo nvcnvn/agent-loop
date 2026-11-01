@@ -206,6 +206,9 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 
 	if in.IdempotencyKey != "" {
 		if existing, err := o.Store.FindByIdempotency(ctx, in.TenantID, in.IdempotencyKey); err == nil {
+			if existing.SessionID != in.SessionID {
+				return "", fmt.Errorf("idempotency key used by a run of another session: %w", core.ErrConflict)
+			}
 			return existing.ID, nil
 		}
 	}

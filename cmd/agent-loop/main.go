@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,6 +39,7 @@ import (
 	"github.com/nvcnvn/agent-loop/model"
 	"github.com/nvcnvn/agent-loop/model/ollama"
 	"github.com/nvcnvn/agent-loop/model/openai"
+	"github.com/nvcnvn/agent-loop/policy"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 	pgstore "github.com/nvcnvn/agent-loop/store/pg"
@@ -100,6 +102,7 @@ func main() {
 	srv := api.NewServer(orch, persistence)
 	srv.Debug = *debug
 	srv.Auth = auth
+	maps.Copy(srv.Visibility, cfg.Visibility)
 	hs := srv.HTTPServer(*addr)
 	signals, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -132,6 +135,8 @@ func main() {
 type fileConfig struct {
 	runtime.Config
 	MCPServers []mcp.Server `json:"mcp_servers,omitempty"`
+	// Visibility replaces, for each role it lists, the event visibilities that role reads.
+	Visibility policy.Visibility `json:"visibility,omitempty"`
 }
 
 func loadConfig(path string) fileConfig {
@@ -146,6 +151,9 @@ func loadConfig(path string) fileConfig {
 		fatal("config "+path, err)
 	}
 	if err := cfg.Validate(); err != nil {
+		fatal("config "+path, err)
+	}
+	if err := cfg.Visibility.Validate(); err != nil {
 		fatal("config "+path, err)
 	}
 	slog.Info("loaded config", "path", path, "agents", len(cfg.Agents), "workflows", len(cfg.Workflows), "mcp_servers", len(cfg.MCPServers))

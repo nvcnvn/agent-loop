@@ -5,6 +5,9 @@
 //
 //	POST   /v1/sessions
 //	GET    /v1/sessions/{sid}
+//	GET    /v1/sessions/{sid}/participants
+//	PUT    /v1/sessions/{sid}/participants/{pid}
+//	DELETE /v1/sessions/{sid}/participants/{pid}
 //	POST   /v1/sessions/{sid}/messages
 //	POST   /v1/runs
 //	GET    /v1/runs/{rid}
@@ -51,6 +54,7 @@ import (
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
 	"github.com/nvcnvn/agent-loop/observe"
+	"github.com/nvcnvn/agent-loop/policy"
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 )
@@ -72,13 +76,18 @@ type Server struct {
 	Log *slog.Logger
 	// Metrics, when set, is served at /metrics and records HTTP requests; NewServer uses Orch.Metrics.
 	Metrics *observe.Metrics
+	// Visibility is which event and message visibilities each role reads; NewServer sets policy.DefaultVisibility.
+	Visibility policy.Visibility
 
 	streamsClosed chan struct{}
 	closeStreams  sync.Once
 }
 
 func NewServer(orch *runtime.Orchestrator, s store.Store) *Server {
-	return &Server{Orch: orch, Store: s, Auth: HeaderIdentity, MaxBodyBytes: 1 << 20, Log: slog.Default(), Metrics: orch.Metrics, streamsClosed: make(chan struct{})}
+	return &Server{
+		Orch: orch, Store: s, Auth: HeaderIdentity, MaxBodyBytes: 1 << 20, Log: slog.Default(), Metrics: orch.Metrics,
+		Visibility: policy.DefaultVisibility(), streamsClosed: make(chan struct{}),
+	}
 }
 
 // HTTPServer returns an http.Server for Handler with read and idle timeouts.
@@ -117,6 +126,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{sid}", s.getSession)
 	mux.HandleFunc("GET /v1/sessions/{sid}/messages", s.listMessages)
 	mux.HandleFunc("GET /v1/sessions/{sid}/runs", s.listRuns)
+	mux.HandleFunc("GET /v1/sessions/{sid}/participants", s.listParticipants)
+	mux.HandleFunc("PUT /v1/sessions/{sid}/participants/{pid}", s.putParticipant)
+	mux.HandleFunc("DELETE /v1/sessions/{sid}/participants/{pid}", s.removeParticipant)
 	mux.HandleFunc("POST /v1/sessions/{sid}/messages", s.postMessage)
 	mux.HandleFunc("POST /v1/runs", s.startRun)
 	mux.HandleFunc("GET /v1/runs/{rid}", s.getRun)
@@ -277,6 +289,9 @@ func principalOf(r *http.Request) core.PrincipalID { return identityOf(r).Princi
 // ---- handlers ----
 
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
+	if !allowRole(w, identityOf(r).Role.CreatesSessions()) {
+		return
+	}
 	var req createSessionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeDecodeErr(w, err)
@@ -296,16 +311,24 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	sid := core.SessionID(r.PathValue("sid"))
+	if !s.allowSession(w, r, sid, needRead) {
+		return
+	}
 	sess, err := s.Store.GetSession(r.Context(), tenantOf(r), sid)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+		writeStoreErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, sess)
 }
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
-	sessions, err := s.Store.ListSessions(r.Context(), tenantOf(r))
+	id := identityOf(r)
+	var participant core.PrincipalID
+	if !id.Role.Operates() {
+		participant = id.Principal
+	}
+	sessions, err := s.Store.ListSessions(r.Context(), id.Tenant, participant)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -315,19 +338,21 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	sid := core.SessionID(r.PathValue("sid"))
-	messages, err := s.Store.ListMessages(r.Context(), tenantOf(r), sid)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+	if !s.allowSession(w, r, sid, needRead) {
 		return
 	}
-	messages = slices.DeleteFunc(messages, func(m store.MessageProjection) bool { return !externallyVisible(m.Visibility) })
+	messages, err := s.Store.ListMessages(r.Context(), tenantOf(r), sid)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	messages = slices.DeleteFunc(messages, func(m store.MessageProjection) bool { return !s.visible(r, m.Visibility) })
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
 }
 
 func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 	sid := core.SessionID(r.PathValue("sid"))
-	if _, err := s.Store.GetSession(r.Context(), tenantOf(r), sid); err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+	if !s.allowSession(w, r, sid, needRead) {
 		return
 	}
 	runs, err := s.Store.ListRuns(r.Context(), tenantOf(r), sid)
@@ -346,8 +371,7 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	sid := core.SessionID(r.PathValue("sid"))
 	tenant := tenantOf(r)
-	if _, err := s.Store.GetSession(r.Context(), tenant, sid); err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+	if !s.allowSession(w, r, sid, needWrite) {
 		return
 	}
 	ev := core.Event{
@@ -391,6 +415,9 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "validation_error", "workflow.stages or template required")
 		return
 	}
+	if !s.allowSession(w, r, req.SessionID, needWrite) {
+		return
+	}
 	idemFromHeader := r.Header.Get("Idempotency-Key")
 	if req.IdempotencyKey == "" {
 		req.IdempotencyKey = idemFromHeader
@@ -411,6 +438,10 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "overloaded", err.Error())
 		return
 	}
+	if errors.Is(err, core.ErrConflict) {
+		writeErr(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
 		return
@@ -419,10 +450,8 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
-	rid := core.RunID(r.PathValue("rid"))
-	run, err := s.Store.GetRun(r.Context(), tenantOf(r), rid)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+	run, ok := s.allowRun(w, r, core.RunID(r.PathValue("rid")), needRead)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
@@ -430,8 +459,7 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	rid := core.RunID(r.PathValue("rid"))
-	if _, err := s.Store.GetRun(r.Context(), tenantOf(r), rid); err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+	if _, ok := s.allowRun(w, r, rid, needRead); !ok {
 		return
 	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
@@ -441,12 +469,14 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	// Strip hidden_reasoning for the public-style endpoint; clients with
-	// internal scope would use a different handler.
+	hidden := s.Visibility.HiddenPayload(identityOf(r).Role)
 	visible := events[:0]
 	for _, e := range events {
-		if !externallyVisible(e.Visibility) {
+		if !s.visible(r, e.Visibility) {
 			continue
+		}
+		if !hidden {
+			e.HiddenPayload = nil
 		}
 		visible = append(visible, e)
 	}
@@ -455,8 +485,7 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listArtifacts(w http.ResponseWriter, r *http.Request) {
 	rid := core.RunID(r.PathValue("rid"))
-	if _, err := s.Store.GetRun(r.Context(), tenantOf(r), rid); err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+	if _, ok := s.allowRun(w, r, rid, needRead); !ok {
 		return
 	}
 	// ponytail: the store reads every artifact's content to list them; add a metadata-only query if runs hold large files.
@@ -478,7 +507,10 @@ func (s *Server) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	a, err := s.Store.GetArtifact(r.Context(), tenantOf(r), aid)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+		writeStoreErr(w, err)
+		return
+	}
+	if !s.allowSession(w, r, a.SessionID, needRead) {
 		return
 	}
 	contentType := "application/octet-stream"
@@ -506,6 +538,9 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "validation_error", "reason is longer than 1024 bytes")
 		return
 	}
+	if _, ok := s.allowRun(w, r, rid, needWrite); !ok {
+		return
+	}
 	switch err := s.Orch.Cancel(r.Context(), tenantOf(r), rid, principalOf(r), req.Reason); {
 	case errors.Is(err, core.ErrConflict):
 		writeErr(w, http.StatusConflict, "conflict", err.Error())
@@ -520,7 +555,11 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {
 // reExecuteRun answers with the copy's result, whatever its status; an error
 // means the copy could not start.
 func (s *Server) reExecuteRun(w http.ResponseWriter, r *http.Request) {
-	res, err := s.Orch.ReExecute(r.Context(), tenantOf(r), core.RunID(r.PathValue("rid")), principalOf(r))
+	rid := core.RunID(r.PathValue("rid"))
+	if _, ok := s.allowRun(w, r, rid, needWrite); !ok {
+		return
+	}
+	res, err := s.Orch.ReExecute(r.Context(), tenantOf(r), rid, principalOf(r))
 	switch {
 	case res.RunID != "":
 		writeJSON(w, http.StatusOK, res)
@@ -537,6 +576,9 @@ func (s *Server) reExecuteRun(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) resumeRun(w http.ResponseWriter, r *http.Request) {
 	rid := core.RunID(r.PathValue("rid"))
+	if _, ok := s.allowRun(w, r, rid, needWrite); !ok {
+		return
+	}
 	switch err := s.Orch.Resume(r.Context(), tenantOf(r), rid, principalOf(r)); {
 	case errors.Is(err, core.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not_found", err.Error())
@@ -581,10 +623,12 @@ func (s *Server) listApprovals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.RunID != "" {
-		if _, err := s.Store.GetRun(r.Context(), tenantOf(r), f.RunID); err != nil {
-			writeErr(w, http.StatusNotFound, "not_found", err.Error())
+		if _, ok := s.allowRun(w, r, f.RunID, needRead); !ok {
 			return
 		}
+	}
+	if id := identityOf(r); !id.Role.Operates() {
+		f.Participant = id.Principal
 	}
 	approvals, err := s.Store.ListApprovals(r.Context(), tenantOf(r), f)
 	if err != nil {
@@ -613,6 +657,18 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "validation_error", "decision must be approved|rejected")
 		return
 	}
+	if uuid.Validate(string(aid)) != nil {
+		writeNotFound(w)
+		return
+	}
+	approval, err := s.Store.GetApproval(r.Context(), tenantOf(r), aid)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if _, ok := s.allowRun(w, r, approval.RunID, needWrite); !ok {
+		return
+	}
 	switch err := s.Store.ResolveApproval(r.Context(), tenantOf(r), aid, req.Decision, principalOf(r), req.Payload); {
 	case errors.Is(err, core.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not_found", err.Error())
@@ -627,7 +683,10 @@ func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Server) listAgents(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
+	if !allowRole(w, identityOf(r).Role.Operates()) {
+		return
+	}
 	type agentDebug struct {
 		Name         string   `json:"name"`
 		Role         string   `json:"role,omitempty"`
@@ -653,7 +712,10 @@ func (s *Server) listAgents(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 }
 
-func (s *Server) listTools(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
+	if !allowRole(w, identityOf(r).Role.Operates()) {
+		return
+	}
 	tools := s.Orch.Tools.List()
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	writeJSON(w, http.StatusOK, map[string]any{"tools": tools})
@@ -670,10 +732,10 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	rid := core.RunID(r.PathValue("rid"))
 	tenant := tenantOf(r)
-	if _, err := s.Store.GetRun(r.Context(), tenant, rid); err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+	if _, ok := s.allowRun(w, r, rid, needRead); !ok {
 		return
 	}
+	visible := func(v core.Visibility) bool { return s.visible(r, v) }
 	var deltas <-chan runtime.Delta
 	if r.URL.Query().Get("deltas") == "1" {
 		var stop func()
@@ -696,7 +758,7 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	// attempt of a run that was resumed later.
 	history, _ := s.Store.ListRunEvents(r.Context(), tenant, rid, afterSeq, 0)
 	for i, ev := range history {
-		writeSSE(w, ev)
+		writeSSE(w, ev, visible)
 		afterSeq = ev.Sequence
 		if endsRun(ev) && i == len(history)-1 {
 			flusher.Flush()
@@ -733,7 +795,7 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 					drained = true
 				}
 			}
-			writeSSE(w, ev)
+			writeSSE(w, ev, visible)
 			afterSeq = ev.Sequence
 			flusher.Flush()
 			if endsRun(ev) {
@@ -769,9 +831,8 @@ func endsRun(ev core.Event) bool {
 	return p.Status.Terminal()
 }
 
-func writeSSE(w http.ResponseWriter, ev core.Event) {
-	if !externallyVisible(ev.Visibility) {
-		// Hidden + audit events stay out of public SSE per requirements §5.2.
+func writeSSE(w http.ResponseWriter, ev core.Event, visible func(core.Visibility) bool) {
+	if !visible(ev.Visibility) {
 		return
 	}
 	envelope := map[string]any{
@@ -795,15 +856,6 @@ func writeSSE(w http.ResponseWriter, ev core.Event) {
 	}
 	body, _ := json.Marshal(envelope)
 	_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Sequence, ev.Type, body)
-}
-
-func externallyVisible(v core.Visibility) bool {
-	switch v {
-	case core.VisibilityHiddenReasoning, core.VisibilityAudit, core.VisibilityInternal:
-		return false
-	default:
-		return true
-	}
 }
 
 func mustJSON(v any) json.RawMessage {

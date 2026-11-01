@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -25,6 +26,15 @@ type Session struct {
 	Metadata  map[string]any
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Participant is a principal's membership of a session, as owner, member or viewer.
+type Participant struct {
+	TenantID    core.TenantID    `json:"tenant_id"`
+	SessionID   core.SessionID   `json:"session_id"`
+	PrincipalID core.PrincipalID `json:"principal_id"`
+	Role        string           `json:"role"`
+	JoinedAt    time.Time        `json:"joined_at"`
 }
 
 // Run is the stored shape of a run.
@@ -102,6 +112,8 @@ type ApprovalFilter struct {
 	Status string
 	After  core.ApprovalID // only approvals after this one
 	Limit  int             // zero means no limit
+	// Participant, when set, keeps the approvals of runs in sessions it participates in.
+	Participant core.PrincipalID
 }
 
 // Artifact is the stored shape of an artifact: a run's input image, or an
@@ -134,11 +146,18 @@ type EventStore interface {
 	Subscribe(ctx context.Context, run core.RunID, afterSeq int64) (<-chan core.Event, func())
 }
 
-// SessionStore manages sessions and message projections.
+// SessionStore manages sessions, their participants (the creator owns a session) and message projections.
 type SessionStore interface {
 	CreateSession(ctx context.Context, s Session) (core.SessionID, error)
 	GetSession(ctx context.Context, tenant core.TenantID, id core.SessionID) (Session, error)
-	ListSessions(ctx context.Context, tenant core.TenantID) ([]Session, error)
+	// ListSessions lists the tenant's sessions, newest first, or only those
+	// participant takes part in when it is set.
+	ListSessions(ctx context.Context, tenant core.TenantID, participant core.PrincipalID) ([]Session, error)
+	// PutParticipant adds a participant to a session of its tenant, or changes its role.
+	PutParticipant(ctx context.Context, p Participant) error
+	GetParticipant(ctx context.Context, tenant core.TenantID, session core.SessionID, principal core.PrincipalID) (Participant, error)
+	ListParticipants(ctx context.Context, tenant core.TenantID, session core.SessionID) ([]Participant, error)
+	RemoveParticipant(ctx context.Context, tenant core.TenantID, session core.SessionID, principal core.PrincipalID) error
 	AddMessage(ctx context.Context, m MessageProjection) error
 	ListMessages(ctx context.Context, tenant core.TenantID, id core.SessionID) ([]MessageProjection, error)
 }
@@ -207,6 +226,7 @@ type MemStore struct {
 	mu sync.RWMutex
 
 	sessions  map[core.SessionID]Session
+	members   map[core.SessionID]map[core.PrincipalID]Participant
 	runs      map[core.RunID]Run
 	runByIdem map[string]core.RunID
 	tasks     map[core.TaskID]Task
@@ -231,6 +251,7 @@ type approvalEntry struct {
 func NewMemStore() *MemStore {
 	return &MemStore{
 		sessions:   map[core.SessionID]Session{},
+		members:    map[core.SessionID]map[core.PrincipalID]Participant{},
 		runs:       map[core.RunID]Run{},
 		runByIdem:  map[string]core.RunID{},
 		tasks:      map[core.TaskID]Task{},
@@ -262,6 +283,10 @@ func (m *MemStore) CreateSession(_ context.Context, s Session) (core.SessionID, 
 		s.Status = "active"
 	}
 	m.sessions[s.ID] = s
+	m.members[s.ID] = map[core.PrincipalID]Participant{}
+	if s.CreatedBy != "" {
+		m.members[s.ID][s.CreatedBy] = Participant{TenantID: s.TenantID, SessionID: s.ID, PrincipalID: s.CreatedBy, Role: "owner", JoinedAt: s.CreatedAt}
+	}
 	return s.ID, nil
 }
 
@@ -275,17 +300,70 @@ func (m *MemStore) GetSession(_ context.Context, tenant core.TenantID, id core.S
 	return s, nil
 }
 
-func (m *MemStore) ListSessions(_ context.Context, tenant core.TenantID) ([]Session, error) {
+func (m *MemStore) ListSessions(_ context.Context, tenant core.TenantID, participant core.PrincipalID) ([]Session, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := []Session{}
 	for _, s := range m.sessions {
-		if s.TenantID == tenant {
+		if _, member := m.members[s.ID][participant]; s.TenantID == tenant && (participant == "" || member) {
 			out = append(out, s)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
+}
+
+func (m *MemStore) PutParticipant(_ context.Context, p Participant) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s, ok := m.sessions[p.SessionID]; !ok || s.TenantID != p.TenantID {
+		return core.ErrNotFound
+	}
+	if p.Role != "owner" && p.Role != "member" && p.Role != "viewer" {
+		return fmt.Errorf("participant role %q is not owner, member or viewer", p.Role)
+	}
+	p.JoinedAt = time.Now().UTC()
+	if old, ok := m.members[p.SessionID][p.PrincipalID]; ok {
+		p.JoinedAt = old.JoinedAt
+	}
+	m.members[p.SessionID][p.PrincipalID] = p
+	return nil
+}
+
+func (m *MemStore) GetParticipant(_ context.Context, tenant core.TenantID, session core.SessionID, principal core.PrincipalID) (Participant, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.members[session][principal]
+	if !ok || p.TenantID != tenant {
+		return Participant{}, core.ErrNotFound
+	}
+	return p, nil
+}
+
+func (m *MemStore) ListParticipants(_ context.Context, tenant core.TenantID, session core.SessionID) ([]Participant, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if s, ok := m.sessions[session]; !ok || s.TenantID != tenant {
+		return nil, core.ErrNotFound
+	}
+	out := make([]Participant, 0, len(m.members[session]))
+	for _, p := range m.members[session] {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].JoinedAt.Before(out[j].JoinedAt) || out[i].JoinedAt.Equal(out[j].JoinedAt) && out[i].PrincipalID < out[j].PrincipalID
+	})
+	return out, nil
+}
+
+func (m *MemStore) RemoveParticipant(_ context.Context, tenant core.TenantID, session core.SessionID, principal core.PrincipalID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p, ok := m.members[session][principal]; !ok || p.TenantID != tenant {
+		return core.ErrNotFound
+	}
+	delete(m.members[session], principal)
+	return nil
 }
 
 func (m *MemStore) AddMessage(_ context.Context, msg MessageProjection) error {
@@ -539,6 +617,9 @@ func (m *MemStore) ListApprovals(_ context.Context, tenant core.TenantID, f Appr
 	for _, e := range m.approvals {
 		a := e.approval
 		if a.TenantID != tenant || f.RunID != "" && a.RunID != f.RunID || f.Status != "" && a.Status != f.Status || a.ID <= f.After {
+			continue
+		}
+		if _, member := m.members[m.runs[a.RunID].SessionID][f.Participant]; f.Participant != "" && !member {
 			continue
 		}
 		if f.Status == "requested" && !a.ExpiresAt.IsZero() && !now.Before(a.ExpiresAt) {

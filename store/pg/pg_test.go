@@ -448,3 +448,7 @@ func TestPg_Artifacts(t *testing.T) {
 	run, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid})
 	storetest.Artifacts(t, s, sid, run)
 }
+
+func TestPg_Participants(t *testing.T) {
+	storetest.Participants(t, freshStore(t))
+}

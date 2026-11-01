@@ -114,8 +114,12 @@ func (s *Store) CreateSession(ctx context.Context, sess store.Session) (core.Ses
 	}
 	sess.UpdatedAt = now
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO sessions (session_id, tenant_id, created_by, title, status, metadata, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		WITH created AS (
+			INSERT INTO sessions (session_id, tenant_id, created_by, title, status, metadata, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			RETURNING session_id, tenant_id, created_by, created_at)
+		INSERT INTO session_participants (session_id, tenant_id, principal_id, role, joined_at)
+		SELECT session_id, tenant_id, created_by, 'owner', created_at FROM created`,
 		string(sess.ID), string(sess.TenantID), string(sess.CreatedBy),
 		sess.Title, sess.Status, encJSON(sess.Metadata), sess.CreatedAt, sess.UpdatedAt,
 	)
@@ -145,10 +149,13 @@ func (s *Store) GetSession(ctx context.Context, tenant core.TenantID, id core.Se
 	return out, nil
 }
 
-func (s *Store) ListSessions(ctx context.Context, tenant core.TenantID) ([]store.Session, error) {
+func (s *Store) ListSessions(ctx context.Context, tenant core.TenantID, participant core.PrincipalID) ([]store.Session, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT session_id, tenant_id, created_by, title, status, metadata, created_at, updated_at
-		FROM sessions WHERE tenant_id=$1 ORDER BY created_at DESC`, string(tenant))
+		FROM sessions s WHERE tenant_id=$1
+		  AND ($2::uuid IS NULL OR EXISTS (
+		      SELECT 1 FROM session_participants p WHERE p.session_id = s.session_id AND p.principal_id = $2::uuid))
+		ORDER BY created_at DESC`, string(tenant), nullableUUID(string(participant)))
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -170,6 +177,74 @@ func (s *Store) ListSessions(ctx context.Context, tenant core.TenantID) ([]store
 		out = append(out, sess)
 	}
 	return out, nil
+}
+
+func (s *Store) PutParticipant(ctx context.Context, p store.Participant) error {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO session_participants (session_id, tenant_id, principal_id, role)
+		SELECT session_id, tenant_id, $3, $4 FROM sessions WHERE session_id=$1 AND tenant_id=$2
+		ON CONFLICT (session_id, principal_id) DO UPDATE SET role = EXCLUDED.role`,
+		string(p.SessionID), string(p.TenantID), string(p.PrincipalID), p.Role)
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return core.ErrNotFound
+	}
+	return nil
+}
+
+const participantColumns = `tenant_id, session_id, principal_id, role, joined_at`
+
+func scanParticipant(row rowScanner) (store.Participant, error) {
+	var p store.Participant
+	var tid, sid, pid string
+	if err := row.Scan(&tid, &sid, &pid, &p.Role, &p.JoinedAt); err != nil {
+		return store.Participant{}, mapErr(err)
+	}
+	p.TenantID, p.SessionID, p.PrincipalID = core.TenantID(tid), core.SessionID(sid), core.PrincipalID(pid)
+	return p, nil
+}
+
+func (s *Store) GetParticipant(ctx context.Context, tenant core.TenantID, session core.SessionID, principal core.PrincipalID) (store.Participant, error) {
+	return scanParticipant(s.pool.QueryRow(ctx, `
+		SELECT `+participantColumns+` FROM session_participants
+		WHERE session_id=$1 AND tenant_id=$2 AND principal_id=$3`, string(session), string(tenant), string(principal)))
+}
+
+func (s *Store) ListParticipants(ctx context.Context, tenant core.TenantID, session core.SessionID) ([]store.Participant, error) {
+	if _, err := s.GetSession(ctx, tenant, session); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+participantColumns+` FROM session_participants
+		WHERE session_id=$1 AND tenant_id=$2 ORDER BY joined_at, principal_id`, string(session), string(tenant))
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []store.Participant{}
+	for rows.Next() {
+		p, err := scanParticipant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, mapErr(rows.Err())
+}
+
+func (s *Store) RemoveParticipant(ctx context.Context, tenant core.TenantID, session core.SessionID, principal core.PrincipalID) error {
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM session_participants WHERE session_id=$1 AND tenant_id=$2 AND principal_id=$3`,
+		string(session), string(tenant), string(principal))
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return core.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) AddMessage(ctx context.Context, m store.MessageProjection) error {
@@ -587,8 +662,11 @@ func (s *Store) ListApprovals(ctx context.Context, tenant core.TenantID, f store
 		WHERE tenant_id=$1 AND ($2::uuid IS NULL OR run_id = $2::uuid) AND ($3 = '' OR status = $3)
 		  AND ($3 <> 'requested' OR expires_at IS NULL OR expires_at > now())
 		  AND ($4::uuid IS NULL OR approval_id > $4::uuid)
+		  AND ($6::uuid IS NULL OR run_id IN (
+		      SELECT r.run_id FROM runs r JOIN session_participants p ON p.session_id = r.session_id
+		      WHERE r.tenant_id = $1 AND p.tenant_id = $1 AND p.principal_id = $6::uuid))
 		ORDER BY approval_id
-		LIMIT $5`, string(tenant), nullableUUID(string(f.RunID)), f.Status, nullableUUID(string(f.After)), limit)
+		LIMIT $5`, string(tenant), nullableUUID(string(f.RunID)), f.Status, nullableUUID(string(f.After)), limit, nullableUUID(string(f.Participant)))
 	if err != nil {
 		return nil, mapErr(err)
 	}

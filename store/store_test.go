@@ -185,3 +185,7 @@ func TestMemStoreApprovals(t *testing.T) {
 func TestMemStoreArtifacts(t *testing.T) {
 	storetest.Artifacts(t, store.NewMemStore(), core.SessionID(core.NewID()), core.RunID(core.NewID()))
 }
+
+func TestMemStoreParticipants(t *testing.T) {
+	storetest.Participants(t, store.NewMemStore())
+}

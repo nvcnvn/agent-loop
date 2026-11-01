@@ -38,6 +38,12 @@ active -> archived -> deleted
 active -> deleted
 ```
 
+A session's participants each have a role in it: `owner` (also manages participants), `member`
+(posts messages, starts and steers runs, resolves approvals) or `viewer` (reads). Its creator is its
+first owner. A principal's tenant role (`admin`, `operator`, `member`, `viewer`, fixed by its API
+key) decides whether participation matters: admins and operators act on every session of the
+tenant, members as their session role allows, viewers only read.
+
 Rules:
 - Only `active` sessions can accept human messages or start runs.
 - `archived` sessions are read-only but replayable.
@@ -270,6 +276,9 @@ Visibility classes:
 - `internal`: visible to operators and replay tools
 - `hidden_reasoning`: stored separately and never mixed into public messages
 - `audit`: immutable operational record
+
+Which roles read which visibility is the deployment's `visibility` setting (see
+`docs/04-contracts-and-tests.md` §1).
 
 Rules:
 - Events are append-only.

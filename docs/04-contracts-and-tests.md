@@ -27,7 +27,7 @@ such run), and `?status=` picks `approved`, `rejected`, `expired`, `canceled` or
 approval that expired before anyone closed it still shows as `requested`). Pages hold `?limit=`
 approvals (1 to 100, default 100); a full page carries `next_after`, which `?after=` takes to get
 the next. `request` holds the `tool` and its `input`, or the stage `gate`, `stage` and, for output
-gates, `output`: whoever may approve sees what they approve, so any key of the tenant can read tool
+gates, `output`: whoever may approve sees what they approve, so anyone who can read the session can read tool
 inputs this way, though `tool_call_scheduled` is internal. `POST /v1/approvals/{aid}` with
 `{"decision": "approved" | "rejected", "payload": {...}}` resolves one as the caller's principal,
 which `resolved_by` and the `actor_id` of the `approval_resolved` event record (when the runtime
@@ -35,10 +35,34 @@ closes an approval that expired or whose run ended, `resolved_by` is omitted and
 system principal); an approval already resolved or
 expired answers 409.
 
+Roles and membership: an API key fixes its principal's tenant role. `admin` and `operator` act on
+every session of the tenant; `member` creates sessions and acts
+in the sessions it participates in as its session role allows; `viewer` only reads the sessions it
+participates in. A session's creator is its `owner`. Session roles: `owner` also manages
+participants, `member` posts messages, starts, cancels, resumes and re-executes runs and resolves
+their approvals, `viewer` reads the session, its messages, runs, events and artifacts. A caller who
+may not read a session gets 404 for it and everything in it, as if it did not exist; one who may
+read but not do more gets 403. Access is checked when a request arrives, so an SSE stream opened
+before its caller was removed from the session runs on until the run ends. A run's idempotency key
+belongs to its session: reusing it in another session answers 409. `GET /v1/sessions` and `GET /v1/approvals` list only what the caller
+participates in, unless it is an admin or operator. The `/v1/debug/*` endpoints need admin or
+operator.
+
+Participants: `GET /v1/sessions/{sid}/participants` lists `{"participants": [{"tenant_id",
+"session_id", "principal_id", "role", "joined_at"}]}`; `PUT
+/v1/sessions/{sid}/participants/{principal}` with `{"role": "owner" | "member" | "viewer"}` adds a
+participant or changes its role and answers the participant; `DELETE` removes one (204).
+
+Visibility: each role reads the event and message visibilities the deployment's `visibility` map
+gives it, in `GET /v1/runs/{rid}/events`, the SSE stream and `GET /v1/sessions/{sid}/messages`.
+By default members and viewers read `public` and `participant`, operators also `internal` and
+`audit`, and admins also `hidden_reasoning`. Events carry their `hidden_payload` only for roles that
+read `hidden_reasoning`; the SSE envelope never does.
+
 Cancellation: `POST /v1/runs/{rid}/cancel`, with an optional `{"reason": "..."}` of at most 1024
 bytes, records an `audit` `system_event_recorded` event (`"event": "run_cancel_requested"`,
 `reason`) whose `actor_id` is the caller's principal, then stops the run; a finished run answers
-409. Audit events are kept in the event store and served by no endpoint yet.
+409. Audit events are served to the roles that read `audit` visibility.
 
 Key decisions:
 - idempotency headers for `POST` endpoints
@@ -96,7 +120,7 @@ Required behavior:
 - The stream closes after the run's terminal `run_state_changed` event, whether it is
   replayed from history or delivered live. A terminal event that later events follow ended an
   attempt of a run that was resumed afterwards, and does not close the stream.
-- Public streams exclude `internal`, `hidden_reasoning`, and `audit` visibility.
+- A stream carries only the visibilities the caller's role reads (§1), never hidden payloads.
 - Heartbeats do not advance run sequence.
 - With `?deltas=1` the stream also carries `agent_message_delta` events while a model writes a
   reply: `{"run_id", "task_id", "step_id", "agent", "content"}`, without an `id`. They are not
@@ -181,7 +205,7 @@ for output gates, `output`, where tool approvals have `tool`.
 
 Agents are `runtime.Agent` values registered in Go, or come from the JSON file passed to
 `cmd/agent-loop -config`, which also holds the named workflow templates, history compaction and the
-tool policy. `runtime.ParseConfig` rejects unknown fields, duplicate names, unknown child agents,
+tool policy, and in `visibility` which event visibilities each role reads. `runtime.ParseConfig` rejects unknown fields, duplicate names, unknown child agents,
 invalid workflows, a compaction whose agent is unknown or that has no trigger, and an unknown
 side-effect level in the tool policy.
 
@@ -196,7 +220,8 @@ side-effect level in the tool policy.
     {"name": "research", "stages": [{"name": "answer", "agents": [{"name": "lead", "prompt": "{{input.question}}"}]}]}
   ],
   "compaction": {"agent": "lead", "max_tokens": 6000, "keep_recent": 6},
-  "tool_policy": {"approve_side_effects": ["write_external", "dangerous"]}
+  "tool_policy": {"approve_side_effects": ["write_external", "dangerous"]},
+  "visibility": {"member": ["public", "participant", "internal"]}
 }
 ```
 
@@ -365,8 +390,8 @@ Decide v1 deployment mode explicitly:
   `/metrics`, the debug console's static files) to a tenant and principal, or answers 401.
   `api.APIKeys` maps a bearer key to one identity and ignores identity headers;
   `api.HeaderIdentity` trusts them and is for local development only
-- authorization: tenant-scoped checks on every store method; any identity of a tenant may act on
-  all of that tenant's data
+- authorization: tenant-scoped checks on every store method, then the role and session membership
+  rules of §1 (`policy.Access`)
 - secrets: stored outside normal config tables by reference
 - logs/traces: redaction before export
 
@@ -543,6 +568,9 @@ Each error should include:
 4. Enforce artifact retention policy.
 5. Reject a request without a valid API key with 401; a valid key fixes the tenant and principal,
    whatever identity headers say.
+6. Keep members and viewers to the sessions they participate in, and to what their session role
+   allows; serve each role only the visibilities it may read (`TestRolesAndSessionMembership`,
+   `TestListRunEventsFiltersInternalVisibility`, `storetest.Participants`).
 
 ## Recommended First Development Slice
 
