@@ -308,6 +308,27 @@ func TestSSEStream(t *testing.T) {
 	if strings.Contains(string(stream), "agent_message_delta") {
 		t.Fatalf("deltas sent without ?deltas=1: %s", stream)
 	}
+	envelopes := map[string]map[string]any{}
+	var event string
+	for line := range strings.Lines(string(stream)) {
+		if v, ok := strings.CutPrefix(line, "event: "); ok {
+			event = strings.TrimSpace(v)
+		}
+		if v, ok := strings.CutPrefix(line, "data: "); ok {
+			var env map[string]any
+			if err := json.Unmarshal([]byte(v), &env); err != nil {
+				t.Fatal(err)
+			}
+			envelopes[event] = env
+		}
+	}
+	msg, state := envelopes[core.EvAgentMessage], envelopes[core.EvRunStateChanged]
+	if msg["event_id"] == "" || msg["event_id"] == nil || msg["correlation_id"] != string(rresp.RunID) || msg["parent_event_id"] == nil {
+		t.Fatalf("agent message envelope lacks its IDs: %v", msg)
+	}
+	if _, ok := state["parent_event_id"]; ok || state["causation_id"] != nil || state["correlation_id"] != string(rresp.RunID) {
+		t.Fatalf("run state envelope: %v", state)
+	}
 }
 
 // gatedStreamer streams "done" as two deltas once released.

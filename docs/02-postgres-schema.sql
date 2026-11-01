@@ -250,7 +250,7 @@ CREATE TABLE run_events (
     actor_principal_id uuid REFERENCES principals(principal_id),
     task_id uuid REFERENCES tasks(task_id),
     step_id uuid REFERENCES steps(step_id),
-    parent_event_id uuid REFERENCES run_events(event_id),
+    parent_event_id uuid,
     correlation_id uuid NOT NULL DEFAULT uuidv7(),
     causation_id uuid,
     payload jsonb NOT NULL DEFAULT '{}'::jsonb,

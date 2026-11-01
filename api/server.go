@@ -676,6 +676,14 @@ func writeSSE(w http.ResponseWriter, ev core.Event) {
 		"visibility":     ev.Visibility,
 		"occurred_at":    ev.OccurredAt,
 		"payload":        ev.Payload,
+		"event_id":       ev.ID,
+		"correlation_id": ev.CorrelationID,
+	}
+	if ev.ParentEventID != "" {
+		envelope["parent_event_id"] = ev.ParentEventID
+	}
+	if ev.CausationID != "" {
+		envelope["causation_id"] = ev.CausationID
 	}
 	body, _ := json.Marshal(envelope)
 	_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Sequence, ev.Type, body)

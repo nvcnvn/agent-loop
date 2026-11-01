@@ -272,6 +272,8 @@ Visibility classes:
 
 Rules:
 - Events are append-only.
+- Events of a run share the run ID as correlation ID; an agent task's events name its `task_spawned`
+  event as parent, and a step's events name the step's previous event as cause.
 - Event order is `(run_id, sequence)` for run-local ordering and `(session_id, sequence)` for session-local ordering.
 - Concurrent execution may finish out of order, but persisted event sequence is deterministic.
 

@@ -125,8 +125,8 @@ Requirements:
 - [ ] Visibility rules are configurable, with an internal-scope reader for operators.
 - [x] Every event includes timestamps.
 - [ ] Every event includes actor identity (only human messages set it).
-- [ ] Events in one run share a correlation ID (each event gets a fresh random one).
-- [ ] Events carry parent and causation references.
+- [x] Events in one run share a correlation ID (the run ID).
+- [x] Events carry parent (the task's `task_spawned`) and causation (the step's previous event) references.
 
 ### 5.3 Snapshot and Compaction
 

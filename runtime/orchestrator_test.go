@@ -1440,6 +1440,23 @@ func TestApprovalRequiredToolWaitsForResolution(t *testing.T) {
 	if !foundResolution {
 		t.Fatal("approval resolution event was not emitted")
 	}
+	byID := map[core.EventID]core.Event{}
+	var chain []string
+	for _, ev := range events {
+		byID[ev.ID] = ev
+		if ev.Type == core.EvToolCompleted {
+			for cur := ev; ; cur = byID[core.EventID(cur.CausationID)] {
+				chain = append([]string{cur.Type}, chain...)
+				if cur.CausationID == "" {
+					break
+				}
+			}
+		}
+	}
+	want := []string{core.EvToolScheduled, core.EvApprovalReq, core.EvApprovalRes, core.EvToolStarted, core.EvToolCompleted}
+	if !slices.Equal(chain, want) {
+		t.Fatalf("causation chain=%v want %v", chain, want)
+	}
 }
 
 func awaitApprovalRequest(t *testing.T, s store.Store, runID core.RunID) core.ApprovalID {

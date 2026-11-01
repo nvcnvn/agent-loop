@@ -41,10 +41,22 @@ Define a versioned event envelope:
     "sequence": 42,
     "visibility": "public",
     "occurred_at": "2026-05-09T00:00:00Z",
-    "payload": {}
+    "payload": {},
+    "event_id": "uuid",
+    "correlation_id": "uuid",
+    "parent_event_id": "uuid",
+    "causation_id": "uuid"
   }
 }
 ```
+
+Every event of a run has the run's ID as `correlation_id`. An event of an agent task has that
+task's `task_spawned` event as `parent_event_id`, and a delegated task's `task_spawned` has its
+parent task's. An event of a model or tool call step after the first has the step's previous event
+as `causation_id` (`model_call_started` → `model_call_completed`; `tool_call_scheduled` →
+`approval_requested` → `approval_resolved` → `tool_call_started` → `tool_call_completed`). The
+referenced event may be internal and missing from a public stream. `parent_event_id` and
+`causation_id` are omitted when empty.
 
 Required behavior:
 - `Last-Event-ID` resumes from the next event after the acknowledged sequence, with no gap

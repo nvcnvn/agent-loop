@@ -381,6 +381,62 @@ func TestDelegateRunsChildTask(t *testing.T) {
 	}
 }
 
+func TestEventsShareCorrelationAndLinkParentAndCause(t *testing.T) {
+	lead := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{delegateCall("1", "researcher", "find X")}},
+		model.MockResponse{Content: "summary"},
+	)
+	researcher := model.NewMockProvider(model.MockResponse{Content: "X is 42"})
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "lead", Model: "m", Provider: lead, Children: []string{"researcher"}},
+		{Name: "researcher", Model: "m", Provider: researcher},
+	})
+	res, err := runWorkflow(t, orch, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{
+		{Name: "s", Agents: []runtime.AgentStep{{Name: "lead", Prompt: "answer"}}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, _ := s.ListRunEvents(context.Background(), core.DefaultTenant, res.RunID, 0, 0)
+	byID := map[core.EventID]core.Event{}
+	spawned := map[core.TaskID]core.Event{}
+	for _, ev := range events {
+		byID[ev.ID] = ev
+		if ev.Type == core.EvTaskSpawned {
+			spawned[ev.TaskID] = ev
+		}
+	}
+	tasks, _ := s.ListRunTasks(context.Background(), core.DefaultTenant, res.RunID)
+	parent, child := tasks[0], tasks[1]
+	if spawned[child.ID].ParentEventID != spawned[parent.ID].ID || spawned[parent.ID].ParentEventID != "" {
+		t.Fatalf("child task_spawned parent=%s, want the parent task's %s", spawned[child.ID].ParentEventID, spawned[parent.ID].ID)
+	}
+	causes := map[string]string{}
+	for _, ev := range events {
+		if ev.CorrelationID != string(res.RunID) {
+			t.Fatalf("%s correlation=%s, want the run ID", ev.Type, ev.CorrelationID)
+		}
+		if ev.TaskID != "" && ev.Type != core.EvTaskSpawned && ev.ParentEventID != spawned[ev.TaskID].ID {
+			t.Fatalf("%s parent=%s, want its task's task_spawned", ev.Type, ev.ParentEventID)
+		}
+		if ev.CausationID != "" {
+			cause := byID[core.EventID(ev.CausationID)]
+			if cause.StepID != ev.StepID || cause.Sequence >= ev.Sequence {
+				t.Fatalf("%s caused by %s of another step or later", ev.Type, cause.Type)
+			}
+			causes[ev.Type] = cause.Type
+		}
+	}
+	want := map[string]string{
+		core.EvModelCompleted: core.EvModelStarted,
+		core.EvToolStarted:    core.EvToolScheduled,
+		core.EvToolCompleted:  core.EvToolStarted,
+	}
+	if !maps.Equal(causes, want) {
+		t.Fatalf("causes=%v want %v", causes, want)
+	}
+}
+
 func TestDelegationLimits(t *testing.T) {
 	lead := model.NewMockProvider(
 		model.MockResponse{ToolCalls: []model.ToolCall{delegateCall("1", "leaf", "skip a level")}},

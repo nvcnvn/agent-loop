@@ -123,9 +123,11 @@ type Orchestrator struct {
 }
 
 type runState struct {
-	activity  sync.Mutex
-	lastAt    time.Time
-	lastEvent string
+	activity    sync.Mutex
+	lastAt      time.Time
+	lastEvent   string
+	taskSpawned map[core.TaskID]core.EventID
+	lastInStep  map[core.StepID]core.EventID
 
 	tenant  core.TenantID
 	cancel  context.CancelCauseFunc
@@ -292,7 +294,10 @@ func (o *Orchestrator) claim(runID core.RunID, tenant core.TenantID) (context.Co
 		parent = context.Background()
 	}
 	runCtx, cancel := context.WithCancelCause(parent)
-	st := &runState{lastAt: time.Now(), tenant: tenant, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{}}
+	st := &runState{
+		lastAt: time.Now(), tenant: tenant, cancel: cancel, done: make(chan struct{}), outputs: map[string]string{},
+		taskSpawned: map[core.TaskID]core.EventID{}, lastInStep: map[core.StepID]core.EventID{},
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if _, running := o.runs[runID]; running {
@@ -1037,12 +1042,13 @@ func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in Sta
 		return "", "", err
 	}
 	o.emit(ctx, core.Event{
-		TenantID:   in.TenantID,
-		SessionID:  in.SessionID,
-		RunID:      runID,
-		TaskID:     taskID,
-		Type:       core.EvTaskSpawned,
-		Visibility: core.VisibilityInternal,
+		TenantID:      in.TenantID,
+		SessionID:     in.SessionID,
+		RunID:         runID,
+		TaskID:        taskID,
+		Type:          core.EvTaskSpawned,
+		Visibility:    core.VisibilityInternal,
+		ParentEventID: o.spawnedEvent(runID, spec.parent),
 		Payload: mustJSON(map[string]any{
 			"agent": spec.agent.Name, "stage": spec.stage, "prompt": spec.prompt,
 			"parent_task_id": spec.parent, "depth": spec.depth, "attempt": attempt,
@@ -1755,21 +1761,52 @@ func (o *Orchestrator) transitionRun(ctx context.Context, runID core.RunID, tena
 	})
 }
 
+// emit appends ev, linking it to the task_spawned event of its task as parent
+// and to the previous event of its step as cause.
 func (o *Orchestrator) emit(ctx context.Context, ev core.Event) {
-	o.appendEvent(ctx, ev)
+	ev.ID = core.EventID(core.NewID())
 	o.mu.Lock()
 	st := o.runs[ev.RunID]
 	o.mu.Unlock()
 	if st != nil {
 		st.activity.Lock()
 		st.lastAt, st.lastEvent = time.Now(), ev.Type
+		if ev.Type == core.EvTaskSpawned {
+			st.taskSpawned[ev.TaskID] = ev.ID
+		} else if ev.TaskID != "" {
+			ev.ParentEventID = st.taskSpawned[ev.TaskID]
+		}
+		if ev.StepID != "" {
+			ev.CausationID = string(st.lastInStep[ev.StepID])
+			st.lastInStep[ev.StepID] = ev.ID
+			if ev.Type == core.EvModelCompleted || ev.Type == core.EvToolCompleted {
+				delete(st.lastInStep, ev.StepID)
+			}
+		}
 		st.activity.Unlock()
 	}
+	o.appendEvent(ctx, ev)
 }
 
+func (o *Orchestrator) spawnedEvent(runID core.RunID, task core.TaskID) core.EventID {
+	o.mu.Lock()
+	st := o.runs[runID]
+	o.mu.Unlock()
+	if st == nil || task == "" {
+		return ""
+	}
+	st.activity.Lock()
+	defer st.activity.Unlock()
+	return st.taskSpawned[task]
+}
+
+// appendEvent stores ev; the events of a run share its ID as correlation ID.
 func (o *Orchestrator) appendEvent(ctx context.Context, ev core.Event) {
 	if ev.OccurredAt.IsZero() {
 		ev.OccurredAt = time.Now().UTC()
+	}
+	if ev.CorrelationID == "" && ev.RunID != "" {
+		ev.CorrelationID = string(ev.RunID)
 	}
 	_, err := o.Store.Append(ctx, []core.Event{ev})
 	o.logErr(ctx, "append event", err, "run_id", ev.RunID, "type", ev.Type)
