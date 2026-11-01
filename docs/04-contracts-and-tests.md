@@ -273,8 +273,12 @@ MCP servers are listed under `mcp_servers` in the `-config` file (§4):
   `${VAR}` in a header value is read from the environment at startup.
 - At startup each server's tools are listed and registered as `<server>.<tool>`, the names agents
   list in `tools`. A server that cannot be reached, or a header naming an unset variable, stops
-  startup; a tool whose input schema does not compile is skipped with a warning. Tools a server
-  adds later are not picked up until a restart.
+  startup; a tool whose input schema does not compile is skipped with a warning. When the server
+  sends `notifications/tools/list_changed`, and after every reconnect, the list is read again:
+  new and changed tools are registered and tools the server dropped are unregistered, so a later
+  call to one goes back to the model as an unknown tool. A task offers the model the tools
+  registered when it started. A server tool whose name another tool already has (another server's,
+  or a builtin) is skipped with a warning, and two servers may not share a name.
 - The schemas are copied (a missing input schema becomes `{"type": "object"}`), the version is the
   one the server reports, and the timeout is the
   server's `timeout` (default 30s). The tool's annotations, which are hints the server is trusted to
@@ -531,6 +535,9 @@ Each error should include:
 2. Translate MCP schemas into internal tool definitions.
 3. Invoke an MCP tool with timeout and retry policy.
 4. Trip a circuit breaker after repeated MCP failures.
+5. Pick up tools a server adds, changes or removes after startup, leaving other tools alone
+   (`TestRegistryFollowsServerToolChanges`, `TestReconnectRefreshesTools`,
+   `TestToolNamesOfOthersAreLeftAlone`).
 
 ### Model Abstraction
 

@@ -45,7 +45,7 @@ The recommended first vertical slice from
 | Re-execution of a finished run from its recorded model requests/responses and tool results (`POST /v1/runs/{rid}/reexecute`) | [runtime/reexecute.go](runtime/reexecute.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
 | Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
-| MCP tools: servers over stdio or streamable HTTP, tools discovered and translated at startup, auth headers from the environment, reconnects, retries of idempotent calls, a circuit breaker | [tool/mcp/mcp.go](tool/mcp/mcp.go) |
+| MCP tools: servers over stdio or streamable HTTP, tools discovered and translated at startup and kept in step with the server, auth headers from the environment, reconnects, retries of idempotent calls, a circuit breaker | [tool/mcp/mcp.go](tool/mcp/mcp.go) |
 | OpenTelemetry traces of runs, stages, tasks (including delegated ones), model calls, tool calls and approval waits | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | HTTP server example: JSON logs (`log/slog`) to stdout, resumes unfinished runs at startup, graceful shutdown on SIGINT/SIGTERM (`-shutdown-timeout`) | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
 | Programmatic example: planner -> parallel researchers -> synthesizer + replay | [cmd/example-workflow/main.go](cmd/example-workflow/main.go) |

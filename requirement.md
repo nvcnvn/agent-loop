@@ -178,7 +178,8 @@ Support MCP-based tools and remote MCP servers.
 
 Requirements:
 - [x] Tool discovery (at startup, from the servers under `mcp_servers` in the `-config` file).
-- [ ] Picking up tools a server adds after startup.
+- [x] Picking up tools a server adds or removes after startup (its `tools/list_changed`
+  notification, and every reconnect).
 - [x] Schema translation into the framework's internal tool model.
 - [x] Authentication (HTTP headers whose secrets come from the environment) and connection lifecycle
   handling (reconnect after a lost connection).

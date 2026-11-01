@@ -441,6 +441,7 @@ type Registry struct{}
 
 func NewRegistry() *Registry
 func (r *Registry) Register(def core.ToolDefinition, exec Executor) error
+func (r *Registry) Unregister(name string)
 func (r *Registry) Get(name string) (core.ToolDefinition, Executor, bool)
 func (r *Registry) List() []core.ToolDefinition
 func (r *Registry) CheckInput(name string, input json.RawMessage) error
@@ -497,6 +498,8 @@ type Server struct {
 var ErrCircuitOpen error
 
 func New(cfg Server) (*Client, error)
+// Register lists the server's tools into reg and keeps reg in step: on tools/list_changed and
+// after each reconnect it registers new and changed tools and unregisters dropped ones.
 func (c *Client) Register(ctx context.Context, reg *tool.Registry) ([]string, error)
 func (c *Client) Close() error
 ```

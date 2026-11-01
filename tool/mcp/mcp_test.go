@@ -333,3 +333,83 @@ func FuzzCallResult(f *testing.F) {
 		}
 	})
 }
+
+// Acceptance: §MCP Integration #5 – tools a server adds, changes or removes after startup are picked up.
+func TestRegistryFollowsServerToolChanges(t *testing.T) {
+	_, reg, srv := registered(t, Server{Name: "calc"})
+	before, _, _ := reg.Get("calc.add")
+	sdk.AddTool(srv.server, &sdk.Tool{Name: "mul", Description: "multiplies"}, func(_ context.Context, _ *sdk.CallToolRequest, in sumIn) (*sdk.CallToolResult, sumOut, error) {
+		return nil, sumOut{Sum: in.A * in.B}, nil
+	})
+	waitFor(t, func() bool { _, _, ok := reg.Get("calc.mul"); return ok })
+	if res, err := call(t, reg, "calc.mul", `{"a":6,"b":7}`); err != nil || !strings.Contains(string(res.Output), "42") {
+		t.Fatalf("calc.mul: %s %v", res.Output, err)
+	}
+	sdk.AddTool(srv.server, &sdk.Tool{Name: "add", Description: "adds, now documented"}, func(_ context.Context, _ *sdk.CallToolRequest, in sumIn) (*sdk.CallToolResult, sumOut, error) {
+		return nil, sumOut{Sum: in.A + in.B}, nil
+	})
+	waitFor(t, func() bool { def, _, _ := reg.Get("calc.add"); return def.Description == "adds, now documented" })
+	if after, _, _ := reg.Get("calc.add"); after.ID != before.ID {
+		t.Fatalf("a changed tool got a new ID: %s, was %s", after.ID, before.ID)
+	}
+	srv.server.RemoveTools("add")
+	waitFor(t, func() bool { _, _, ok := reg.Get("calc.add"); return !ok })
+}
+
+func TestToolNamesOfOthersAreLeftAlone(t *testing.T) {
+	reg := tool.NewRegistry()
+	mine := tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) {
+		return tool.Result{Output: json.RawMessage(`"mine"`)}, nil
+	})
+	if err := reg.Register(core.ToolDefinition{Name: "calc.add"}, mine); err != nil {
+		t.Fatal(err)
+	}
+	srv := &inMemory{server: testServer()}
+	c := newClient(Server{Name: "calc"}, srv.transport)
+	t.Cleanup(func() { _ = c.Close() })
+	if _, err := c.Register(context.Background(), reg); err != nil {
+		t.Fatal(err)
+	}
+	srv.server.RemoveTools("add")
+	sdk.AddTool(srv.server, &sdk.Tool{Name: "mul"}, func(context.Context, *sdk.CallToolRequest, sumIn) (*sdk.CallToolResult, sumOut, error) {
+		return nil, sumOut{}, nil
+	})
+	waitFor(t, func() bool { _, _, ok := reg.Get("calc.mul"); return ok })
+	if res, err := call(t, reg, "calc.add", `{}`); err != nil || string(res.Output) != `"mine"` {
+		t.Fatalf("the other tool was replaced or removed: %s %v", res.Output, err)
+	}
+}
+
+func TestClosedClientStaysClosed(t *testing.T) {
+	c, _, srv := registered(t, Server{Name: "calc"})
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	connects := srv.connects()
+	c.resync()
+	time.Sleep(100 * time.Millisecond)
+	if srv.connects() != connects {
+		t.Fatal("a resync reconnected a closed client")
+	}
+}
+
+// Acceptance: §MCP Integration #5 – a reconnect picks up what changed while the connection was down.
+func TestReconnectRefreshesTools(t *testing.T) {
+	_, reg, srv := registered(t, Server{Name: "calc"})
+	srv.cut()
+	srv.server.RemoveTools("write")
+	if _, err := call(t, reg, "calc.add", `{"a":1,"b":2}`); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { _, _, ok := reg.Get("calc.write"); return !ok })
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatal("condition not met in time")
+}

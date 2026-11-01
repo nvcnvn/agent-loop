@@ -169,7 +169,12 @@ func loadConfig(path string) fileConfig {
 
 func connectMCP(servers []mcp.Server, reg *tool.Registry) []*mcp.Client {
 	var clients []*mcp.Client
+	seen := map[string]bool{}
 	for _, s := range servers {
+		if seen[s.Name] {
+			fatal("mcp", fmt.Errorf("mcp server name %q is used twice", s.Name))
+		}
+		seen[s.Name] = true
 		c, err := mcp.New(s)
 		if err != nil {
 			fatal("mcp", err)

@@ -108,6 +108,13 @@ func (r *Registry) Register(def core.ToolDefinition, exec Executor) error {
 	return nil
 }
 
+// Unregister removes a tool; calls already holding its executor finish.
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
 func (r *Registry) Get(name string) (core.ToolDefinition, Executor, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
