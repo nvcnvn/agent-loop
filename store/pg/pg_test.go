@@ -60,7 +60,7 @@ func freshStore(t *testing.T) *pg.Store {
 		t.Fatalf("migrate: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`TRUNCATE memories, messages, run_events, event_counters, approvals, artifacts, tasks, runs, sessions RESTART IDENTITY CASCADE`,
+		`TRUNCATE agents, memories, messages, run_events, event_counters, approvals, artifacts, tasks, runs, sessions RESTART IDENTITY CASCADE`,
 	); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -525,4 +525,8 @@ func TestPg_PushesEventsAndApprovals(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("approval decision was not pushed")
 	}
+}
+
+func TestPg_Agents(t *testing.T) {
+	storetest.Agents(t, freshStore(t))
 }

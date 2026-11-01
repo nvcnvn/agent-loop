@@ -189,3 +189,7 @@ func TestMemStoreArtifacts(t *testing.T) {
 func TestMemStoreParticipants(t *testing.T) {
 	storetest.Participants(t, store.NewMemStore())
 }
+
+func TestMemStoreAgents(t *testing.T) {
+	storetest.Agents(t, store.NewMemStore())
+}

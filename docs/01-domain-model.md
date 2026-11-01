@@ -54,33 +54,18 @@ Rules:
 
 ### Agent Definition
 
-An `agent_definition` is a configured reasoning unit. It is not itself an execution instance.
+An agent is a configured reasoning unit, not an execution instance: a `name`, `role`,
+`instructions`, `model`, the `tools` it may call, the `children` it may delegate to,
+`max_tool_loops`, a per-attempt `timeout` and whether it may `ask_human`.
 
-Important fields:
-- `agent_id`
-- `tenant_id`
-- `name`
-- `role`
-- `instructions`
-- `model_ref`
-- `tool_policy_id`
-- `memory_policy_id`
-- `default_limits`
-- `allowed_child_agents`
-- `status`
-
-Agent definition state:
-
-```text
-draft -> active -> deprecated -> disabled
-draft -> disabled
-active -> disabled
-deprecated -> disabled
-```
+Agents come from the server's config file, shared by every tenant and changed only by a restart,
+or from a tenant: defined over the API by its admins, stored as JSON with a `version` that each
+change increments, and visible to that tenant's runs only. A tenant's agent cannot take a
+configured agent's name. Agents have no lifecycle status, model profile or per-agent policies.
 
 Rules:
-- A run should pin the exact agent definition version used.
-- Deprecated agents can resume old runs but cannot start new runs unless explicitly allowed.
+- A run resolves its agents when it starts and again when it resumes or is re-executed; it does
+  not pin definition versions.
 
 ### Workflow Template
 

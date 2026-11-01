@@ -29,6 +29,9 @@ func (r Role) Valid() bool {
 // Operates reports whether r acts on every session of its tenant and sees the deployment's setup.
 func (r Role) Operates() bool { return r == RoleAdmin || r == RoleOperator }
 
+// ManagesAgents reports whether r may define the tenant's agents.
+func (r Role) ManagesAgents() bool { return r == RoleAdmin }
+
 // CreatesSessions reports whether r may create sessions.
 func (r Role) CreatesSessions() bool { return r.Valid() && r != RoleViewer }
 

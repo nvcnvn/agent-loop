@@ -116,22 +116,14 @@ CREATE TABLE memory_policies (
     UNIQUE (tenant_id, name)
 );
 
-CREATE TABLE agent_definitions (
-    agent_id uuid PRIMARY KEY DEFAULT uuidv7(),
+-- A tenant's agents, as the runtime's JSON definition; config-file agents are not stored.
+CREATE TABLE agents (
     tenant_id uuid NOT NULL REFERENCES tenants(tenant_id),
     name text NOT NULL,
+    definition jsonb NOT NULL,
     version integer NOT NULL DEFAULT 1,
-    role text NOT NULL,
-    instructions text NOT NULL,
-    model_profile_id uuid NOT NULL REFERENCES model_profiles(model_profile_id),
-    tool_policy_id uuid REFERENCES tool_policies(tool_policy_id),
-    memory_policy_id uuid REFERENCES memory_policies(memory_policy_id),
-    default_limits jsonb NOT NULL DEFAULT '{}'::jsonb,
-    allowed_child_agents uuid[] NOT NULL DEFAULT '{}',
-    status lifecycle_status NOT NULL DEFAULT 'draft',
-    created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, name, version)
+    PRIMARY KEY (tenant_id, name)
 );
 
 CREATE TABLE workflow_templates (
@@ -177,7 +169,7 @@ CREATE TABLE tasks (
     tenant_id uuid NOT NULL REFERENCES tenants(tenant_id),
     run_id uuid NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
     parent_task_id uuid REFERENCES tasks(task_id),
-    agent_id uuid NOT NULL REFERENCES agent_definitions(agent_id),
+    agent_name text NOT NULL,
     status task_status NOT NULL DEFAULT 'pending',
     depth integer NOT NULL DEFAULT 0 CHECK (depth >= 0),
     attempt integer NOT NULL DEFAULT 1 CHECK (attempt >= 1),

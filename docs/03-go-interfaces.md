@@ -195,6 +195,13 @@ type LoopResponse string
 // Orchestrator.ApproveAbove (core.Usage): a run past that many total tokens or cost units asks a
 // human once before its next model call.
 
+// Tenants' agents: Orchestrator.ListAgents, PutAgent (ErrInvalidAgent, or core.ErrConflict for a
+// configured name) and DeleteAgent, over store.AgentStore; they run on Orchestrator.Provider and
+// Orchestrator.Model.
+func (o *Orchestrator) ListAgents(ctx context.Context, tenant core.TenantID) ([]AgentInfo, error)
+func (o *Orchestrator) PutAgent(ctx context.Context, tenant core.TenantID, a Agent) (int, error)
+func (o *Orchestrator) DeleteAgent(ctx context.Context, tenant core.TenantID, name string) error
+
 // Compaction (Orchestrator.Compaction) summarizes session history when a run starts.
 type Compaction struct {
     Agent       string // writes the summary; empty disables compaction
@@ -305,6 +312,13 @@ type MemoryStore interface {
 // into parts and saves each at session, project or tenant scope with its provenance.
 func (t Tools) Ingest(ctx context.Context, tenant core.TenantID, session core.SessionID, scope MemoryScope, text string, src MemorySource) ([]string, error)
 
+// AgentStore keeps tenants' agent definitions (runtime JSON), versioned per put.
+type AgentStore interface {
+    PutAgent(ctx context.Context, a AgentDefinition) (int, error)
+    ListAgents(ctx context.Context, tenantID core.TenantID) ([]AgentDefinition, error)
+    DeleteAgent(ctx context.Context, tenantID core.TenantID, name string) error
+}
+
 // Store is what runtime and api take; /readyz calls Ping.
 type Store interface {
     Ping(ctx context.Context) error
@@ -315,6 +329,7 @@ type Store interface {
     ApprovalStore
     ArtifactStore
     MemoryStore
+    AgentStore
 }
 ```
 

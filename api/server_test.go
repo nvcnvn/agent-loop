@@ -1085,7 +1085,7 @@ func FuzzRESTBodies(f *testing.F) {
 		f.Fatal(err)
 	}
 	paths := []string{"/v1/sessions", "/v1/sessions/" + string(sid) + "/messages", "/v1/approvals/missing", "/v1/runs", "/v1/runs/" + string(rid) + "/cancel",
-		"/v1/sessions/" + string(sid) + "/participants/" + string(core.DefaultPrincipal), "/v1/sessions/" + string(sid) + "/memories"}
+		"/v1/sessions/" + string(sid) + "/participants/" + string(core.DefaultPrincipal), "/v1/sessions/" + string(sid) + "/memories", "/v1/agents/fuzzed"}
 	srv.Memory = &memory.Tools{Store: s, Embedder: model.NewMockProvider(), Model: "bow"}
 	f.Add(uint8(0), []byte(`{"title":"demo"}`))
 	f.Add(uint8(0), []byte(``))
@@ -1100,6 +1100,8 @@ func FuzzRESTBodies(f *testing.F) {
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","images":{"p":{"mime_type":"image/png","data":"not base64!"}},"workflow":{"stages":[{"name":"a","agents":[{"name":"x","images":["p","q"]}]}]}}`))
 	f.Add(uint8(4), []byte(`{"reason":"`+strings.Repeat("x", 2000)+`"}`))
 	f.Add(uint8(4), []byte(`{"reason":7}`))
+	f.Add(uint8(7), []byte(`{"instructions":"x","tools":["echo"],"children":["x"],"timeout":-1}`))
+	f.Add(uint8(7), []byte(`{"max_tool_loops":"many"}`))
 	f.Add(uint8(5), []byte(`{"role":"viewer"}`))
 	f.Add(uint8(5), []byte(`{"role":"boss"}`))
 	f.Add(uint8(5), []byte(`{"role":["owner"]}`))
@@ -1109,7 +1111,7 @@ func FuzzRESTBodies(f *testing.F) {
 	f.Fuzz(func(t *testing.T, which uint8, body []byte) {
 		path := paths[int(which)%len(paths)]
 		method := http.MethodPost
-		if strings.Contains(path, "/participants/") {
+		if strings.Contains(path, "/participants/") || strings.HasPrefix(path, "/v1/agents/") {
 			method = http.MethodPut
 		}
 		rec := httptest.NewRecorder()

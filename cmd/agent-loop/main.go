@@ -84,6 +84,7 @@ func main() {
 		}
 	}
 	orch := runtime.NewOrchestrator(persistence, reg, cfg.Agents)
+	orch.Provider, orch.Model = prov, modelName
 	for _, wf := range cfg.Workflows {
 		orch.Workflows[wf.Name] = wf
 	}

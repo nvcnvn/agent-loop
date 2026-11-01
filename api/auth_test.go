@@ -242,3 +242,45 @@ func TestRolesAndSessionMembership(t *testing.T) {
 	call("member", http.MethodGet, "/v1/debug/agents", "", http.StatusForbidden)
 	call("operator", http.MethodGet, "/v1/debug/agents", "", http.StatusOK)
 }
+
+func TestAgentsOverREST(t *testing.T) {
+	s := store.NewMemStore()
+	reg := tool.NewRegistry()
+	_ = tool.RegisterBuiltins(reg)
+	orch := runtime.NewOrchestrator(s, reg, []runtime.Agent{{Name: "echo", Instructions: "secret plan", Provider: model.NewMockProvider()}})
+	orch.Provider = model.NewMockProvider()
+	srv := api.NewServer(orch, s)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	call := func(method, path, role, body string, want int) string {
+		t.Helper()
+		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("X-Role", role)
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		out, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != want {
+			t.Fatalf("%s %s as %s: %d want %d: %s", method, path, role, resp.StatusCode, want, out)
+		}
+		return string(out)
+	}
+	call(http.MethodPut, "/v1/agents/writer", "member", `{"instructions":"x"}`, http.StatusForbidden)
+	if out := call(http.MethodPut, "/v1/agents/writer", "admin", `{"instructions":"Write well.","tools":["echo"]}`, http.StatusOK); !strings.Contains(out, `"version":1`) {
+		t.Fatalf("put: %s", out)
+	}
+	call(http.MethodPut, "/v1/agents/writer", "admin", `{"tools":["nope"]}`, http.StatusBadRequest)
+	call(http.MethodPut, "/v1/agents/echo", "admin", `{}`, http.StatusConflict)
+	if out := call(http.MethodGet, "/v1/agents", "member", "", http.StatusOK); strings.Contains(out, "secret plan") || strings.Contains(out, "Write well.") || !strings.Contains(out, `"writer"`) {
+		t.Fatalf("a member's list: %s", out)
+	}
+	if out := call(http.MethodGet, "/v1/agents", "operator", "", http.StatusOK); !strings.Contains(out, "Write well.") || strings.Contains(out, "secret plan") {
+		t.Fatalf("an operator's list: %s", out)
+	}
+	call(http.MethodPut, "/v1/agents/critic", "admin", `{"instruction":"typo"}`, http.StatusBadRequest)
+	call(http.MethodDelete, "/v1/agents/writer", "admin", "", http.StatusNoContent)
+	call(http.MethodDelete, "/v1/agents/writer", "admin", "", http.StatusNotFound)
+	call(http.MethodDelete, "/v1/agents/echo", "admin", "", http.StatusConflict)
+}

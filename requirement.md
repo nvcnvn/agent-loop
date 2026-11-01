@@ -69,7 +69,7 @@ The framework must support two ways to define behavior:
 Workflow definitions should support:
 - [x] Agent role and instruction.
 - [x] Agent definitions loaded from configuration (`cmd/agent-loop -config`).
-- [ ] Agent definitions managed through the API.
+- [x] Agent definitions managed through the API (`/v1/agents`, per tenant, by admins).
 - [x] Allowed tools per agent.
 - [x] Allowed child agents.
 - [x] Retry policy (per stage: attempts and backoff).

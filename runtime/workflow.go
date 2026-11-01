@@ -33,6 +33,8 @@ type Agent struct {
 	MaxToolLoops int            `json:"max_tool_loops,omitempty"`
 	// Timeout bounds each attempt of a task the agent runs; zero means no bound.
 	Timeout time.Duration `json:"timeout,omitempty"`
+
+	tenant core.TenantID // the tenant that defined the agent over the API; empty for a configured one
 }
 
 // StageKind picks between sequential and parallel execution within a stage.

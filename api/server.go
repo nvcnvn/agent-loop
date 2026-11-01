@@ -3,6 +3,9 @@
 // The handler set covers the first-slice contract from
 // docs/04-contracts-and-tests.md:
 //
+//	GET    /v1/agents
+//	PUT    /v1/agents/{name}         (admin)
+//	DELETE /v1/agents/{name}         (admin)
 //	POST   /v1/sessions
 //	GET    /v1/sessions/{sid}
 //	POST   /v1/sessions/{sid}/memories   (ingest a document into memory)
@@ -126,6 +129,9 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /v1/debug/agents", s.listAgents)
 		mux.HandleFunc("GET /v1/debug/tools", s.listTools)
 	}
+	mux.HandleFunc("GET /v1/agents", s.listTenantAgents)
+	mux.HandleFunc("PUT /v1/agents/{name}", s.putAgent)
+	mux.HandleFunc("DELETE /v1/agents/{name}", s.deleteAgent)
 	mux.HandleFunc("POST /v1/sessions", s.createSession)
 	mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	mux.HandleFunc("GET /v1/sessions/{sid}", s.getSession)

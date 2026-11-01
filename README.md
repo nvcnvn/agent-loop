@@ -32,6 +32,7 @@ The recommended first vertical slice from
 | Streaming replies from both adapters; SSE `agent_message_delta` events with `?deltas=1` | [runtime/deltas.go](runtime/deltas.go), [api/server.go](api/server.go) |
 | Native Go tool registry + builtin tools (`echo`, `uppercase`, `math.add`, `artifact.save`) | [tool/tool.go](tool/tool.go), [tool/builtin.go](tool/builtin.go) |
 | Artifacts produced by tools and agents, linked to run, task, step and producing tool; versioned by name within a session; listed with `GET /v1/runs/{rid}/artifacts` and `GET /v1/artifacts/{aid}/versions`, downloaded with `GET /v1/artifacts/{aid}`; capped at `max_artifact_bytes` | [runtime/orchestrator.go](runtime/orchestrator.go), [api/server.go](api/server.go) |
+| Agents defined per tenant over REST (`GET`/`PUT`/`DELETE /v1/agents`), next to the config file's | [runtime/agents.go](runtime/agents.go), [api/agents.go](api/agents.go) |
 | Roles (`admin`, `operator`, `member`, `viewer`) on API keys, session participants (`owner`, `member`, `viewer`) and per-role event visibility | [policy/access.go](policy/access.go), [api/access.go](api/access.go) |
 | Tool policy (allow / deny / approval, by tool name or side-effect level; `tool_policy` in the config file or a workflow) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost; per-tool calls, time and cost) | [policy/policy.go](policy/policy.go) |

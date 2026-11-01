@@ -38,6 +38,24 @@ type Participant struct {
 	JoinedAt    time.Time        `json:"joined_at"`
 }
 
+// AgentDefinition is an agent a tenant defined over the API, its definition
+// the runtime's JSON for it; Version counts its puts.
+type AgentDefinition struct {
+	TenantID   core.TenantID   `json:"tenant_id"`
+	Name       string          `json:"name"`
+	Definition json.RawMessage `json:"definition"`
+	Version    int             `json:"version"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+}
+
+// AgentStore keeps tenants' agent definitions.
+type AgentStore interface {
+	// PutAgent creates or replaces a definition and returns its new version.
+	PutAgent(ctx context.Context, a AgentDefinition) (int, error)
+	ListAgents(ctx context.Context, tenant core.TenantID) ([]AgentDefinition, error)
+	DeleteAgent(ctx context.Context, tenant core.TenantID, name string) error
+}
+
 // Run is the stored shape of a run.
 type Run struct {
 	ID             core.RunID
@@ -223,6 +241,7 @@ type Store interface {
 	ApprovalStore
 	ArtifactStore
 	MemoryStore
+	AgentStore
 }
 
 // MemStore aggregates an in-memory implementation of every store interface.
@@ -231,6 +250,7 @@ type MemStore struct {
 
 	sessions  map[core.SessionID]Session
 	members   map[core.SessionID]map[core.PrincipalID]Participant
+	agents    map[core.TenantID]map[string]AgentDefinition
 	runs      map[core.RunID]Run
 	runByIdem map[string]core.RunID
 	tasks     map[core.TaskID]Task
@@ -256,6 +276,7 @@ func NewMemStore() *MemStore {
 	return &MemStore{
 		sessions:   map[core.SessionID]Session{},
 		members:    map[core.SessionID]map[core.PrincipalID]Participant{},
+		agents:     map[core.TenantID]map[string]AgentDefinition{},
 		runs:       map[core.RunID]Run{},
 		runByIdem:  map[string]core.RunID{},
 		tasks:      map[core.TaskID]Task{},
@@ -367,6 +388,39 @@ func (m *MemStore) RemoveParticipant(_ context.Context, tenant core.TenantID, se
 		return core.ErrNotFound
 	}
 	delete(m.members[session], principal)
+	return nil
+}
+
+func (m *MemStore) PutAgent(_ context.Context, a AgentDefinition) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.agents[a.TenantID] == nil {
+		m.agents[a.TenantID] = map[string]AgentDefinition{}
+	}
+	a.Version = m.agents[a.TenantID][a.Name].Version + 1
+	a.UpdatedAt = time.Now().UTC()
+	m.agents[a.TenantID][a.Name] = a
+	return a.Version, nil
+}
+
+func (m *MemStore) ListAgents(_ context.Context, tenant core.TenantID) ([]AgentDefinition, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]AgentDefinition, 0, len(m.agents[tenant]))
+	for _, a := range m.agents[tenant] {
+		out = append(out, a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (m *MemStore) DeleteAgent(_ context.Context, tenant core.TenantID, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.agents[tenant][name]; !ok {
+		return core.ErrNotFound
+	}
+	delete(m.agents[tenant], name)
 	return nil
 }
 

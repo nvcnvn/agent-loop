@@ -56,6 +56,7 @@ type StartRunInput struct {
 
 	history []model.Message
 	parent  core.RunID
+	agents  map[string]Agent // the agents the run's tenant may use
 	reuse   *completedTasks
 	plan    *plan
 }
@@ -74,6 +75,9 @@ type Orchestrator struct {
 	Store  store.Store // any driver: store.MemStore or store/pg.Store
 	Tools  *tool.Registry
 	Agents map[string]Agent
+	// Provider and Model run the agents tenants define over the API; Model unless the agent names one.
+	Provider model.Provider
+	Model    string
 	// Workflows are the named workflow templates a run can start by name.
 	Workflows map[string]Workflow
 	Policy    policy.ToolPolicy
@@ -157,12 +161,14 @@ type allowedTool struct {
 	budgets          []policy.ToolBudget
 }
 
+const defaultToolLoops = 4
+
 // NewOrchestrator wires sensible defaults around the provided store.
 func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchestrator {
 	am := map[string]Agent{}
 	for _, a := range agents {
 		if a.MaxToolLoops == 0 {
-			a.MaxToolLoops = 4
+			a.MaxToolLoops = defaultToolLoops
 		}
 		am[a.Name] = a
 	}
@@ -235,7 +241,12 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		}
 		in.Workflow = wf
 	}
-	p, err := compileWorkflow(in.Workflow, o.Agents)
+	agents, err := o.agentsFor(ctx, in.TenantID)
+	if err != nil {
+		return "", err
+	}
+	in.agents = agents
+	p, err := compileWorkflow(in.Workflow, in.agents)
 	if err != nil {
 		return "", err
 	}
@@ -412,7 +423,10 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 			return fmt.Errorf("stored input: %w", err)
 		}
 	}
-	if in.plan, err = compileWorkflow(in.Workflow, o.Agents); err != nil {
+	if in.agents, err = o.agentsFor(ctx, run.TenantID); err != nil {
+		return err
+	}
+	if in.plan, err = compileWorkflow(in.Workflow, in.agents); err != nil {
 		return fmt.Errorf("stored workflow: %w", err)
 	}
 	artifacts, err := o.Store.ListRunArtifacts(ctx, run.TenantID, run.ID)
@@ -1051,7 +1065,7 @@ type taskSpec struct {
 // runAgentStep runs a stage's agent step; reserved means the caller has
 // already reserved the sub-agent budget for its first attempt.
 func (o *Orchestrator) runAgentStep(ctx context.Context, runID core.RunID, in StartRunInput, p *plan, i int, step AgentStep, prompt string, reserved bool) (string, error) {
-	agent, ok := o.Agents[step.Name]
+	agent, ok := in.agents[step.Name]
 	if !ok {
 		return "", fmt.Errorf("unknown agent: %s", step.Name)
 	}
@@ -1225,8 +1239,9 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 		})
 	}
 	var delegate tool.Executor
-	if len(agent.Children) > 0 && spec.depth < in.Limits.MaxDepth {
-		toolSpecs = append(toolSpecs, o.delegateSpec(agent))
+	hasChild := slices.ContainsFunc(agent.Children, func(c string) bool { _, ok := in.agents[c]; return ok })
+	if hasChild && spec.depth < in.Limits.MaxDepth {
+		toolSpecs = append(toolSpecs, delegateSpec(agent, in.agents))
 		delegate = tool.ExecutorFunc(func(ctx context.Context, call tool.Call) (tool.Result, error) {
 			var req struct {
 				Agent string `json:"agent"`
@@ -1235,7 +1250,7 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			if err := json.Unmarshal(call.Input, &req); err != nil {
 				return tool.Result{}, err
 			}
-			child, ok := o.Agents[req.Agent]
+			child, ok := in.agents[req.Agent]
 			if !ok || !slices.Contains(agent.Children, req.Agent) {
 				return tool.Result{}, fmt.Errorf("%w: %s may not delegate to %q", core.ErrPolicyDenied, agent.Name, req.Agent)
 			}
@@ -1340,7 +1355,7 @@ func (o *Orchestrator) modelCall(ctx context.Context, runID core.RunID, in Start
 		HiddenPayload: mustJSON(map[string]any{"request": req}),
 	})
 
-	releaseAgent, err := o.sems.Acquire(ctx, "agent:"+agent.Name, o.Concurrency.PerAgent)
+	releaseAgent, err := o.sems.Acquire(ctx, "agent:"+string(agent.tenant)+"/"+agent.Name, o.Concurrency.PerAgent)
 	if err != nil {
 		return model.ChatResponse{}, err
 	}
@@ -1443,11 +1458,16 @@ func (o *Orchestrator) completeTask(ctx context.Context, in StartRunInput, runID
 // them tasks. It is also its tool ID, which no registered tool can have.
 const delegateTool = "delegate"
 
-func (o *Orchestrator) delegateSpec(agent Agent) model.ToolSpec {
+func delegateSpec(agent Agent, agents map[string]Agent) model.ToolSpec {
 	desc := "Give a task to another agent and get its answer. The agents you can give tasks to:"
+	var present []string
 	for _, name := range agent.Children {
+		if _, ok := agents[name]; !ok {
+			continue
+		}
+		present = append(present, name)
 		desc += "\n- " + name
-		if role := o.Agents[name].Role; role != "" {
+		if role := agents[name].Role; role != "" {
 			desc += ": " + role
 		}
 	}
@@ -1457,7 +1477,7 @@ func (o *Orchestrator) delegateSpec(agent Agent) model.ToolSpec {
 		InputSchema: mustJSON(map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"agent": map[string]any{"type": "string", "enum": agent.Children},
+				"agent": map[string]any{"type": "string", "enum": present},
 				"task":  map[string]any{"type": "string", "description": "everything the agent needs to know to do the task"},
 			},
 			"required": []string{"agent", "task"},

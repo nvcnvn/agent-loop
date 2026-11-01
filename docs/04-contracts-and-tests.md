@@ -257,9 +257,23 @@ in the tool policy, an unknown loop response, and negative thresholds or caps.
   exhausted budget fails the run. A call naming an agent outside `children` is refused back to the
   model, and agents at depth `max_depth` are not offered the tool.
 
-The file's `tool_policy` (§8) applies to every agent. Agent definitions are not versioned and
-cannot be changed through the API, and there are no model profile, per-agent tool policy or memory
-policy references, per-agent default limits, or per-agent visibility rules.
+Tenants define more agents over the API, in the same JSON without `name` (taken from the path):
+- `GET /v1/agents` lists the agents the caller's runs may use, the file's (`"source": "config"`)
+  and the tenant's (`"source": "api"`, with `version`), by name. Admins and operators see the
+  tenant's agents' `instructions`, and the file's only when the server runs with `-debug`.
+- `PUT /v1/agents/{name}` (admins) creates or replaces one of the tenant's agents and answers
+  `{"name", "version"}`, the version counting from 1. A name is 1 to 64 letters, digits, `_`, `.`
+  or `-`, and every tool and child must exist (400 otherwise); a name the file uses answers 409.
+- `DELETE /v1/agents/{name}` (admins) removes one (204); the file's answer 409.
+
+A tenant's agents run on the server's provider and, unless they name one, its model; a server
+without a provider (`Orchestrator.Provider`) refuses them (400). A stored definition that no longer
+decodes is skipped with a warning. Each tenant agent has its own `per_agent` concurrency bound, and
+an agent is offered `delegate` only for the children that exist. A run resolves
+its agents when it starts and again when it resumes, so a resumed or re-executed run uses the
+definitions current then. The file's `tool_policy` (§8) applies to every agent. There are no model
+profiles, per-agent tool or memory policies, per-agent default limits, or per-agent visibility
+rules.
 
 ### 5. Tool Registration Contract
 
@@ -526,6 +540,11 @@ Each error should include:
 - optional diagnostic details for internal visibility
 
 ## Acceptance Test Scenarios
+
+### Agent Definition
+
+1. Define agents over the API, use them in a tenant's runs only, and remove them
+   (`TestTenantDefinedAgents`, `TestAgentsOverREST`, `storetest.Agents`).
 
 ### Session and Run Lifecycle
 
