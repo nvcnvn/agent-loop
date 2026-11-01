@@ -188,7 +188,8 @@ The framework should support policy enforcement per agent or workflow:
 - [x] Allowlist per agent; allowlist and denylist per orchestrator.
 - [ ] Tool policy set per workflow or run.
 - [x] Read-only vs mutating tool classes declared on each tool.
-- [ ] Policy acts on the class (for example, approval for every `write_external` or `dangerous` tool).
+- [x] Policy acts on the side-effect class (`deny_side_effects`, `approve_side_effects`), set in Go or
+  as `tool_policy` in the `-config` file.
 - [x] Approval required before tools flagged or listed as needing it.
 - [x] Max tool calls per run.
 - [ ] Max cost or time budget per tool.

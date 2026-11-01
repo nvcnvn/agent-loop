@@ -86,7 +86,7 @@ func (r *Registry) Register(def core.ToolDefinition, exec Executor) error {
 		def.Idempotency = core.IdemUnknown
 	}
 	if def.SideEffect == "" {
-		def.SideEffect = core.SideNone
+		def.SideEffect = core.SideDangerous
 	}
 	if def.Concurrency == "" {
 		def.Concurrency = core.ConcurrencySerial

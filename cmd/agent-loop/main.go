@@ -50,7 +50,7 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	debug := flag.Bool("debug", false, "serve the debug console and /v1/debug/* (exposes agent instructions)")
 	trustHeaders := flag.Bool("trust-identity-headers", false, "take the tenant and principal from X-Tenant-ID/X-Principal-ID without authentication (local development only)")
-	configPath := flag.String("config", "", "JSON file of agents, named workflow templates and MCP servers (see README); without it the server has one echo agent")
+	configPath := flag.String("config", "", "JSON file of agents, named workflow templates, history compaction, tool policy and MCP servers (see README); without it the server has one echo agent")
 	drain := flag.Duration("shutdown-timeout", 30*time.Second, "on SIGINT/SIGTERM, how long to let requests and runs finish before checkpointing runs")
 	flag.Parse()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -87,6 +87,9 @@ func main() {
 	}
 	if cfg.Compaction != nil {
 		orch.Compaction = *cfg.Compaction
+	}
+	if cfg.ToolPolicy != nil {
+		orch.Policy = *cfg.ToolPolicy
 	}
 	if n, err := orch.Recover(context.Background()); err != nil {
 		slog.Error("recover runs", "resumed", n, "err", err)

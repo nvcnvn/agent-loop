@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/nvcnvn/agent-loop/policy"
 )
 
-// Config holds the agents, named workflow templates and history compaction an
-// operator defines in a file.
+// Config holds the agents, named workflow templates, history compaction and
+// tool policy an operator defines in a file.
 type Config struct {
 	Agents     []Agent     `json:"agents"`
 	Workflows  []Workflow  `json:"workflows,omitempty"`
 	Compaction *Compaction `json:"compaction,omitempty"`
+	// ToolPolicy applies to every run.
+	ToolPolicy *policy.ToolPolicy `json:"tool_policy,omitempty"`
 }
 
 // ParseConfig decodes a JSON config and checks its agents and workflows against each other.
@@ -26,7 +30,7 @@ func ParseConfig(data []byte) (Config, error) {
 	return c, c.Validate()
 }
 
-// Validate checks the agents and workflows against each other.
+// Validate checks the agents, workflows, compaction and tool policy.
 func (c Config) Validate() error {
 	agents := map[string]Agent{}
 	for _, a := range c.Agents {
@@ -54,6 +58,11 @@ func (c Config) Validate() error {
 		}
 		if c.MaxMessages < 0 || c.MaxTokens < 0 || c.KeepRecent < 0 || c.MaxMessages == 0 && c.MaxTokens == 0 {
 			return errors.New("compaction: needs max_messages or max_tokens, and no negative values")
+		}
+	}
+	if c.ToolPolicy != nil {
+		if err := c.ToolPolicy.Validate(); err != nil {
+			return err
 		}
 	}
 	names := map[string]bool{}

@@ -10,8 +10,9 @@ import (
 )
 
 func TestToolPolicyAuthorize(t *testing.T) {
-	plain := core.ToolDefinition{Name: "echo"}
+	plain := core.ToolDefinition{Name: "echo", SideEffect: core.SideNone}
 	gated := core.ToolDefinition{Name: "deploy", RequiresApproval: true}
+	external := core.ToolDefinition{Name: "email.send", SideEffect: core.SideWriteExternal}
 	cases := []struct {
 		name          string
 		policy        policy.ToolPolicy
@@ -25,6 +26,9 @@ func TestToolPolicyAuthorize(t *testing.T) {
 		{"definition requires approval", policy.ToolPolicy{}, gated, true, true},
 		{"policy requires approval", policy.ToolPolicy{ApprovalRequired: []string{"echo"}}, plain, true, true},
 		{"denied before approval", policy.ToolPolicy{Denylist: []string{"deploy"}}, gated, false, false},
+		{"side effect needs approval", policy.ToolPolicy{ApproveSideEffects: []core.SideEffectLevel{core.SideWriteExternal}}, external, true, true},
+		{"other side effect passes", policy.ToolPolicy{ApproveSideEffects: []core.SideEffectLevel{core.SideWriteExternal}}, plain, true, false},
+		{"side effect denied", policy.ToolPolicy{DenySideEffects: []core.SideEffectLevel{core.SideWriteExternal}, ApproveSideEffects: []core.SideEffectLevel{core.SideWriteExternal}}, external, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,6 +40,15 @@ func TestToolPolicyAuthorize(t *testing.T) {
 				t.Fatal("deny or approval without reason")
 			}
 		})
+	}
+}
+
+func TestToolPolicyValidate(t *testing.T) {
+	if err := (policy.ToolPolicy{ApproveSideEffects: []core.SideEffectLevel{core.SideDangerous}}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := (policy.ToolPolicy{DenySideEffects: []core.SideEffectLevel{"writes"}}).Validate(); err == nil {
+		t.Fatal("unknown side effect accepted")
 	}
 }
 

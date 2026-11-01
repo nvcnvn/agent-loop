@@ -560,7 +560,8 @@ const sampleConfig = `{
       {"name": "plan", "agents": [{"name": "lead", "prompt": "Research {{input.topic}}"}], "retry": {"max_attempts": 2}},
       {"name": "check", "agents": [{"name": "researcher", "prompt": "Check {{stage.plan}}"}], "hand_back": {"when": "^WRONG", "to": "plan"}}
     ]}
-  ]
+  ],
+  "tool_policy": {"denylist": ["shell"], "approve_side_effects": ["write_external", "dangerous"]}
 }`
 
 func TestParseConfig(t *testing.T) {
@@ -568,7 +569,8 @@ func TestParseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Agents) != 2 || cfg.Agents[0].Timeout != time.Minute || cfg.Workflows[0].Stages[1].HandBack.To != "plan" {
+	if len(cfg.Agents) != 2 || cfg.Agents[0].Timeout != time.Minute || cfg.Workflows[0].Stages[1].HandBack.To != "plan" ||
+		cfg.ToolPolicy == nil || len(cfg.ToolPolicy.ApproveSideEffects) != 2 || cfg.ToolPolicy.Denylist[0] != "shell" {
 		t.Fatalf("config=%+v", cfg)
 	}
 	for name, bad := range map[string]string{
@@ -579,6 +581,7 @@ func TestParseConfig(t *testing.T) {
 		"unnamed workflow": `{"agents":[{"name":"a"}],"workflows":[{"stages":[{"name":"s","agents":[{"name":"a"}]}]}]}`,
 		"compaction agent": `{"agents":[{"name":"a"}],"compaction":{"agent":"b","max_messages":5}}`,
 		"compaction never": `{"agents":[{"name":"a"}],"compaction":{"agent":"a"}}`,
+		"side effect":      `{"agents":[{"name":"a"}],"tool_policy":{"approve_side_effects":["sends_email"]}}`,
 	} {
 		if _, err := runtime.ParseConfig([]byte(bad)); err == nil {
 			t.Errorf("%s: accepted", name)

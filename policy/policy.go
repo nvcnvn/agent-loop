@@ -5,23 +5,45 @@ package policy
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/nvcnvn/agent-loop/core"
 )
 
-// ToolPolicy is the per-run policy applied to tool calls.
+// ToolPolicy decides which tools agents may call and which calls need approval,
+// by tool name or by side-effect level.
 type ToolPolicy struct {
-	Allowlist        []string // empty == allow all
-	Denylist         []string
-	ApprovalRequired []string // tool names requiring approval
+	Allowlist        []string `json:"allowlist,omitempty"` // empty == allow all
+	Denylist         []string `json:"denylist,omitempty"`
+	ApprovalRequired []string `json:"approval_required,omitempty"` // tool names requiring approval
+	// DenySideEffects and ApproveSideEffects deny, or require approval for,
+	// every tool with one of the listed side-effect levels.
+	DenySideEffects    []core.SideEffectLevel `json:"deny_side_effects,omitempty"`
+	ApproveSideEffects []core.SideEffectLevel `json:"approve_side_effects,omitempty"`
 }
 
+// Validate checks every listed side-effect level is a known one.
+func (p ToolPolicy) Validate() error {
+	for _, level := range slices.Concat(p.DenySideEffects, p.ApproveSideEffects) {
+		switch level {
+		case core.SideNone, core.SideReadExternal, core.SideWriteInternal, core.SideWriteExternal, core.SideDangerous:
+		default:
+			return fmt.Errorf("tool policy: unknown side effect %q", level)
+		}
+	}
+	return nil
+}
+
+// Authorize decides whether agents may call t and whether each call needs approval.
 func (p ToolPolicy) Authorize(t core.ToolDefinition) (allowed bool, requiresApproval bool, reason string) {
 	for _, d := range p.Denylist {
 		if d == t.Name {
 			return false, false, "tool in denylist"
 		}
+	}
+	if slices.Contains(p.DenySideEffects, t.SideEffect) {
+		return false, false, "tool side effect " + string(t.SideEffect) + " denied by policy"
 	}
 	if len(p.Allowlist) > 0 {
 		ok := false
@@ -42,6 +64,9 @@ func (p ToolPolicy) Authorize(t core.ToolDefinition) (allowed bool, requiresAppr
 		if n == t.Name {
 			return true, true, "tool requires approval per policy"
 		}
+	}
+	if slices.Contains(p.ApproveSideEffects, t.SideEffect) {
+		return true, true, "tool side effect " + string(t.SideEffect) + " requires approval per policy"
 	}
 	return true, false, ""
 }

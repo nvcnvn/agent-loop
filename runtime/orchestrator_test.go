@@ -1461,6 +1461,49 @@ func TestApprovalRequiredToolWaitsForResolution(t *testing.T) {
 	}
 }
 
+// Acceptance: §Tool Calling #3 – approval for every external side-effecting
+// tool, by class; re-execution does not ask again.
+func TestSideEffectPolicyRequiresApproval(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "notify", Input: json.RawMessage(`{}`)}, {ID: "2", Name: "echo", Input: json.RawMessage(`{"text":"x"}`)}}},
+		model.MockResponse{Content: "sent"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"notify", "echo"}}})
+	orch.Policy.ApproveSideEffects = []core.SideEffectLevel{core.SideWriteExternal}
+	if err := orch.Tools.Register(core.ToolDefinition{Name: "notify", SideEffect: core.SideWriteExternal}, tool.ExecutorFunc(func(context.Context, tool.Call) (tool.Result, error) {
+		return tool.Result{Output: json.RawMessage(`{"sent":true}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+		SessionID: sid,
+		Workflow:  runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalID := awaitApprovalRequest(t, s, runID)
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, approvalID, "approved", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil || res.Outputs["s"] != "sent" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	requested, _ := approvalEvents(t, s, runID)
+	if requested["tool"] != "notify" || !strings.Contains(requested["reason"].(string), "write_external") {
+		t.Fatalf("approval_requested=%v", requested)
+	}
+	if list, _ := s.ListApprovals(ctx, core.DefaultTenant, store.ApprovalFilter{RunID: runID}); len(list) != 1 {
+		t.Fatalf("approvals=%d want 1 (echo has no side effect)", len(list))
+	}
+	again, err := orch.ReExecute(ctx, core.DefaultTenant, runID)
+	if err != nil || again.Outputs["s"] != "sent" {
+		t.Fatalf("re-execute: %+v %v", again, err)
+	}
+}
+
 func awaitApprovalRequest(t *testing.T, s store.Store, runID core.RunID) core.ApprovalID {
 	t.Helper()
 	ctx := context.Background()

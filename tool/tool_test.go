@@ -28,7 +28,7 @@ func TestRegisterValidatesAndFillsDefaults(t *testing.T) {
 		t.Fatal("registered tool not found")
 	}
 	if def.ID == "" || def.Version != "1.0.0" || def.Idempotency != core.IdemUnknown ||
-		def.SideEffect != core.SideNone || def.Concurrency != core.ConcurrencySerial {
+		def.SideEffect != core.SideDangerous || def.Concurrency != core.ConcurrencySerial {
 		t.Fatalf("defaults not applied: %+v", def)
 	}
 	if _, _, ok := r.Get("missing"); ok {

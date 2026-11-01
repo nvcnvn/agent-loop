@@ -169,7 +169,6 @@ func (t *toolReplay) Execute(_ context.Context, c tool.Call) (tool.Result, error
 func (o *Orchestrator) replayOrchestrator(p model.Provider, tools tool.Executor) (*Orchestrator, error) {
 	reg := tool.NewRegistry()
 	for _, def := range o.Tools.List() {
-		def.RequiresApproval = false
 		if err := reg.Register(def, tools); err != nil {
 			return nil, err
 		}
@@ -181,8 +180,7 @@ func (o *Orchestrator) replayOrchestrator(p model.Provider, tools tool.Executor)
 	}
 	c := NewOrchestrator(o.Store, reg, agents)
 	c.Workflows, c.MaxLimits, c.MaxHistoryMessages, c.Concurrency, c.Compaction = o.Workflows, o.MaxLimits, o.MaxHistoryMessages, o.Concurrency, o.Compaction
-	c.Policy = o.Policy
-	c.Policy.ApprovalRequired = nil
+	c.Policy, c.skipToolApprovals = o.Policy, true
 	c.Log, c.Tracer = o.Log, o.Tracer
 	return c, nil
 }

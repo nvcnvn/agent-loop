@@ -164,9 +164,10 @@ for output gates, `output`, where tool approvals have `tool`.
 ### 4. Agent Definition Contract
 
 Agents are `runtime.Agent` values registered in Go, or come from the JSON file passed to
-`cmd/agent-loop -config`, which also holds the named workflow templates and history compaction.
-`runtime.ParseConfig` rejects unknown fields, duplicate names, unknown child agents, invalid
-workflows, and a compaction whose agent is unknown or that has no trigger.
+`cmd/agent-loop -config`, which also holds the named workflow templates, history compaction and the
+tool policy. `runtime.ParseConfig` rejects unknown fields, duplicate names, unknown child agents,
+invalid workflows, a compaction whose agent is unknown or that has no trigger, and an unknown
+side-effect level in the tool policy.
 
 ```json
 {
@@ -178,7 +179,8 @@ workflows, and a compaction whose agent is unknown or that has no trigger.
   "workflows": [
     {"name": "research", "stages": [{"name": "answer", "agents": [{"name": "lead", "prompt": "{{input.question}}"}]}]}
   ],
-  "compaction": {"agent": "lead", "max_tokens": 6000, "keep_recent": 6}
+  "compaction": {"agent": "lead", "max_tokens": 6000, "keep_recent": 6},
+  "tool_policy": {"approve_side_effects": ["write_external", "dangerous"]}
 }
 ```
 
@@ -192,16 +194,17 @@ workflows, and a compaction whose agent is unknown or that has no trigger.
   exhausted budget fails the run. A call naming an agent outside `children` is refused back to the
   model, and agents at depth `max_depth` are not offered the tool.
 
-Agent definitions are not versioned and cannot be changed through the API, and there are no model
-profile, tool policy or memory policy references, per-agent default limits, or per-agent
-visibility rules.
+The file's `tool_policy` (§8) applies to every agent. Agent definitions are not versioned and
+cannot be changed through the API, and there are no model profile, per-agent tool policy or memory
+policy references, per-agent default limits, or per-agent visibility rules.
 
 ### 5. Tool Registration Contract
 
 A tool is a `core.ToolDefinition` and a `tool.Executor`, registered by name in a `tool.Registry`.
 The definition holds the name, version, description, input and output JSON Schema, idempotency
 hint, side-effect level, concurrency class, whether calls need approval, and a per-call timeout.
-Native Go tools are registered in Go (`tool.RegisterBuiltins` registers the demo tools).
+Native Go tools are registered in Go (`tool.RegisterBuiltins` registers the demo tools). A tool
+registered without a side-effect level is `dangerous`, and without a concurrency class `serial`.
 Registering a tool whose input schema does not compile, or references another document, fails.
 Every call's input is validated against the schema before it is approved or run; a call that does
 not match goes back to the model as a tool error naming the mismatch, and still counts toward the
@@ -301,10 +304,24 @@ Not yet stored: agent definition versions, budget reservations, and random seeds
 
 ### 8. Policy and Budget Contract
 
-Define a policy matrix for:
-- tool allowlist and denylist
-- read-only vs mutating tools
-- approval-required tools
+The tool policy (`policy.ToolPolicy`: `Orchestrator.Policy` in Go, `tool_policy` in the `-config`
+file) decides for each tool whether agents may call it and whether each call waits for approval:
+
+```json
+"tool_policy": {"allowlist": [], "denylist": ["shell.exec"], "approval_required": ["orders.refund"],
+                "deny_side_effects": ["dangerous"], "approve_side_effects": ["write_external"]}
+```
+
+- A tool is denied when `denylist` names it, its side-effect level is in `deny_side_effects`, or
+  `allowlist` is not empty and does not name it. A denied tool is not offered to the model (the
+  task records a `tool_denied` system event), and a call to it goes back to the model as an error.
+- An allowed tool needs approval when its definition says so, `approval_required` names it, or its
+  side-effect level is in `approve_side_effects`. The levels are `none`, `read_external`,
+  `write_internal`, `write_external` and `dangerous`; a tool registered without one, or an MCP tool
+  without annotations, is `dangerous` (§5). Re-execution never asks for approval, and it uses the
+  policy in force now, so a tool denied since the run fails the copy (§7).
+
+The rest of the policy matrix:
 - recursion depth
 - sub-agent count
 - concurrency limits
@@ -403,7 +420,7 @@ Each error should include:
 1. Register a native Go tool and validate input schema before execution
    (`TestToolInputValidatedBeforeExecution`).
 2. Reject a tool call denied by policy.
-3. Require approval for an external side-effecting tool.
+3. Require approval for an external side-effecting tool (`TestSideEffectPolicyRequiresApproval`).
 4. Run parallel read-only tool calls and fan in results.
 5. Serialize exclusive tools even when scheduled concurrently.
 6. Cancel a parallel tool group and verify all in-flight calls observe context cancellation.

@@ -31,7 +31,7 @@ The recommended first vertical slice from
 | Retry with jittered backoff and `Retry-After` for transient provider errors | [model/retry.go](model/retry.go) |
 | Streaming replies from both adapters; SSE `agent_message_delta` events with `?deltas=1` | [runtime/deltas.go](runtime/deltas.go), [api/server.go](api/server.go) |
 | Native Go tool registry + builtin demo tools (`echo`, `uppercase`, `math.add`) | [tool/tool.go](tool/tool.go) |
-| Tool policy (allow / deny / approval) | [policy/policy.go](policy/policy.go) |
+| Tool policy (allow / deny / approval, by tool name or side-effect level; `tool_policy` in the config file) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost) | [policy/policy.go](policy/policy.go) |
 | Prometheus metrics at `/metrics` (runs, model calls, tokens, cost, tools, queue depth, HTTP latency) | [observe/metrics.go](observe/metrics.go) |
 | Loop / stall detector; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |

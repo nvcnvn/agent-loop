@@ -120,6 +120,9 @@ type Orchestrator struct {
 	executing atomic.Int64
 	sems      policy.Semaphores
 	deltas    deltaHub
+	// skipToolApprovals runs tool calls without approval, for re-execution,
+	// whose recorded results already reflect each decision.
+	skipToolApprovals bool
 }
 
 type runState struct {
@@ -1116,7 +1119,7 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			o.systemEvent(ctx, in, runID, taskID, map[string]any{"event": "tool_denied", "tool": def.Name, "reason": reason})
 			continue
 		}
-		allowed[def.Name] = allowedTool{def: def, requiresApproval: requiresApproval, approvalReason: reason}
+		allowed[def.Name] = allowedTool{def: def, requiresApproval: requiresApproval && !o.skipToolApprovals, approvalReason: reason}
 		toolSpecs = append(toolSpecs, model.ToolSpec{
 			Name:        def.Name,
 			Description: def.Description,
