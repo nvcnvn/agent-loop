@@ -345,8 +345,8 @@ Operational requirements:
 - [x] Graceful shutdown: on SIGINT/SIGTERM `cmd/agent-loop` stops accepting requests and runs, closes
   SSE streams, lets runs drain for `-shutdown-timeout`, then checkpoints the rest (left unfinished
   for `Recover`).
-- [x] Job recovery after process restart: `cmd/agent-loop` calls `Orchestrator.Recover`, which resumes
-  every unfinished run. It assumes one process executes runs (see run ownership by lease below).
+- [x] Job recovery after process restart: `cmd/agent-loop` calls `Orchestrator.Recover` at startup and
+  then every lease period, which resumes every unfinished run no live process holds.
 - [x] Liveness endpoint (`/healthz`).
 - [x] Readiness endpoint that checks the database (`/readyz`).
 - [x] Backpressure handling: at most `MaxActiveRuns` runs execute, up to `MaxQueuedRuns` more wait in
@@ -357,7 +357,9 @@ Operational requirements:
   `MaxBodyBytes`).
 - [x] Versioned schema migrations (`store/pg/migrations`, applied by `pg.Store.Migrate`).
 - [x] In-process state for finished runs is released; `Wait` answers finished runs from the store.
-- [ ] Run ownership by lease, so several API replicas can share one database.
+- [x] Run ownership by lease, so several API replicas can share one database: a process holds each run
+  it executes by a renewed lease, other processes take a run over once its lease passes, and cancel
+  it through the store. Reply deltas reach only the SSE streams of the process executing the run.
 - [x] Deployment configuration for agents and workflow templates from a file (`-config`).
 - [x] Deployment configuration for tools, policy, and limits from file or environment (`-config` or
   `AGENT_LOOP_CONFIG`, with `${VAR}` from the environment).

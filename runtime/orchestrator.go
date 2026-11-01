@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -124,6 +125,10 @@ type Orchestrator struct {
 	Redactor *observe.Redactor
 	// Retention is how long idle sessions and memories are kept; Purge applies it.
 	Retention Retention
+	// Owner names this process in the run leases that keep each run to one process sharing the store; default host/pid.
+	Owner string
+	// Lease is how long a run stays this process's without a renewal, renewed every third of it; it must be positive.
+	Lease time.Duration
 	// LoopResponse is what a detected runaway loop does to its run.
 	LoopResponse LoopResponse
 	// ApproveAbove asks a human, once per execution, before a model call of a run whose total tokens or cost units passed its positive fields.
@@ -204,6 +209,8 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		Log:                slog.Default(),
 		ApprovalTimeout:    15 * time.Minute,
 		IdleWarnAfter:      2 * time.Minute,
+		Owner:              fmt.Sprintf("%s/%d", hostname(), os.Getpid()),
+		Lease:              30 * time.Second,
 		MaxArtifactBytes:   10 << 20,
 		ToolRetry:          RetryPolicy{MaxAttempts: 3, Backoff: 200 * time.Millisecond},
 		MaxHistoryMessages: 50,
@@ -325,6 +332,8 @@ func (o *Orchestrator) createRun(ctx context.Context, in StartRunInput) (core.Ru
 		StartedBy:      in.PrincipalID,
 		Workflow:       wfRaw,
 		Input:          inRaw,
+		Owner:          o.Owner,
+		LeaseUntil:     time.Now().Add(o.Lease),
 	}
 	runID, err := o.Store.CreateRun(ctx, runRec)
 	if err != nil {
@@ -396,19 +405,12 @@ func (o *Orchestrator) unclaim(runID core.RunID, st *runState) {
 	close(st.done)
 }
 
-// Resume continues the tenant's run that is not executing in this process and
-// is unfinished, for example after a restart, or failed or timed out. Agent
-// tasks that completed are reused; a task that was interrupted or failed runs
-// again from its start. Succeeded and canceled runs give core.ErrConflict. by
-// is who asked, the actor of the events that record it.
+// Resume continues the tenant's unfinished, failed or timed-out run that no live process executes; by is who asked.
 func (o *Orchestrator) Resume(ctx context.Context, tenant core.TenantID, runID core.RunID, by core.PrincipalID) error {
 	return o.resume(ctx, tenant, runID, by, false)
 }
 
-// Recover resumes every unfinished run in the store and returns how many it
-// resumed. Recovered runs bypass MaxQueuedRuns so none is left behind, and
-// runs the store cannot read are reported without holding back the rest. It
-// assumes this process is the only one executing runs.
+// Recover resumes every unfinished run no live process holds and returns how many it resumed.
 func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 	runs, err := o.Store.ListUnfinishedRuns(ctx)
 	if len(runs) == 0 && err != nil {
@@ -420,7 +422,9 @@ func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 		if run.Status == core.RunPaused {
 			continue
 		}
-		if err := o.resume(ctx, run.TenantID, run.ID, core.SystemPrincipal, true); err != nil {
+		if err := o.resume(ctx, run.TenantID, run.ID, core.SystemPrincipal, true); errors.Is(err, core.ErrConflict) {
+			continue
+		} else if err != nil {
 			errs = append(errs, fmt.Errorf("run %s: %w", run.ID, err))
 			continue
 		}
@@ -448,6 +452,14 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 	if run.Status == core.RunSucceeded || run.Status == core.RunCanceled {
 		return fmt.Errorf("run %s already %s: %w", run.ID, run.Status, core.ErrConflict)
 	}
+	if err := o.Store.ClaimRun(ctx, tenant, runID, o.Owner, o.Lease); err != nil {
+		return err
+	}
+	defer func() {
+		if !started {
+			o.logErr(ctx, "release run", o.Store.ReleaseRun(context.WithoutCancel(ctx), runID, o.Owner), "run_id", runID)
+		}
+	}()
 	in := StartRunInput{TenantID: run.TenantID, SessionID: run.SessionID, Limits: run.Limits}
 	if err := json.Unmarshal(run.Workflow, &in.Workflow); err != nil {
 		return fmt.Errorf("stored workflow: %w", err)
@@ -482,6 +494,9 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 	in.reuse = reuse
 	if err := o.Approvals.CancelRunApprovals(ctx, run.TenantID, run.ID); err != nil {
 		return err
+	}
+	if run.CancelRequested {
+		return o.finishCanceled(ctx, run, "canceled while no process executed it")
 	}
 	if err := o.admit(force); err != nil {
 		return err
@@ -631,8 +646,12 @@ func (o *Orchestrator) release() {
 	o.admitted.Done()
 }
 
-// errShutdown is the cancellation cause of runs that Shutdown checkpoints.
-var errShutdown = errors.New("orchestrator shutting down")
+// errShutdown is the cancellation cause of runs that Shutdown checkpoints,
+// and errLeaseLost of runs another process took over.
+var (
+	errShutdown  = errors.New("orchestrator shutting down")
+	errLeaseLost = errors.New("run lease taken by another process")
+)
 
 // Shutdown stops admitting runs and waits for admitted ones to finish. When
 // ctx ends first, it stops the remaining runs without recording a terminal
@@ -662,6 +681,7 @@ func (o *Orchestrator) Shutdown(ctx context.Context) error {
 // executes the run.
 func (o *Orchestrator) queueAndExecute(ctx context.Context, runID core.RunID, in StartRunInput, st *runState) {
 	defer o.release()
+	stopLease := o.keepLease(runID, st)
 	o.queued.Add(1)
 	releaseSlots, err := o.acquireRunSlots(ctx, in)
 	o.queued.Add(-1)
@@ -670,7 +690,7 @@ func (o *Orchestrator) queueAndExecute(ctx context.Context, runID core.RunID, in
 	}
 	o.executing.Add(1)
 	defer o.executing.Add(-1)
-	o.execute(ctx, runID, in, st)
+	o.execute(ctx, runID, in, st, stopLease)
 }
 
 // acquireRunSlots takes the tenant and workflow slots before the global one,
@@ -797,7 +817,7 @@ func (o *Orchestrator) Cancel(ctx context.Context, tenant core.TenantID, runID c
 			Payload:    mustJSON(map[string]any{"event": "run_cancel_requested", "reason": reason}),
 		})
 		st.cancel(nil)
-		return nil
+		return o.Store.RequestCancel(ctx, tenant, runID)
 	}
 	run, err := o.Store.GetRun(ctx, tenant, runID)
 	if err != nil {
@@ -806,10 +826,20 @@ func (o *Orchestrator) Cancel(ctx context.Context, tenant core.TenantID, runID c
 	if run.Status.Terminal() {
 		return fmt.Errorf("run %s already %s: %w", runID, run.Status, core.ErrConflict)
 	}
-	if run.Status != core.RunPaused {
-		return fmt.Errorf("run %s is not executing here: %w", runID, core.ErrNotFound)
+	if run.Status == core.RunPaused {
+		if err := o.cancelPaused(ctx, tenant, runID, by, reason); !errors.Is(err, core.ErrConflict) {
+			return err
+		}
 	}
-	return o.cancelPaused(ctx, tenant, runID, by, reason)
+	// Another process executes the run, or will once it recovers it, and cancels it then.
+	if err := o.Store.RequestCancel(ctx, tenant, runID); err != nil {
+		return err
+	}
+	o.emit(ctx, core.Event{
+		TenantID: tenant, SessionID: run.SessionID, RunID: runID, Type: core.EvSystem, Visibility: core.VisibilityAudit, ActorID: by,
+		Payload: mustJSON(map[string]any{"event": "run_cancel_requested", "reason": reason}),
+	})
+	return nil
 }
 
 // cancelPaused cancels a paused run, holding its claim so it cannot be resumed meanwhile.
@@ -819,6 +849,12 @@ func (o *Orchestrator) cancelPaused(ctx context.Context, tenant core.TenantID, r
 		return err
 	}
 	defer o.unclaim(runID, st)
+	if err := o.Store.ClaimRun(ctx, tenant, runID, o.Owner, o.Lease); err != nil {
+		return err
+	}
+	defer func() {
+		o.logErr(ctx, "release run", o.Store.ReleaseRun(context.WithoutCancel(ctx), runID, o.Owner), "run_id", runID)
+	}()
 	run, err := o.Store.GetRun(ctx, tenant, runID)
 	if err != nil {
 		return err
@@ -842,8 +878,9 @@ func (o *Orchestrator) cancelPaused(ctx context.Context, tenant core.TenantID, r
 }
 
 // execute is the main run loop.
-func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRunInput, st *runState) {
+func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRunInput, st *runState, stopLease func()) {
 	defer close(st.done)
+	leaseLost := func() bool { return errors.Is(context.Cause(ctx), errLeaseLost) }
 	ctx, stopTimer := context.WithTimeout(ctx, in.Limits.MaxRuntime)
 	defer stopTimer()
 
@@ -922,15 +959,24 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	usage.Runtime += time.Since(startedAt)
 
 	stopIdleWatch()
+	lost := !o.stillLeased(runID, stopLease, leaseLost)
+	releaseLease := func() {
+		if !lost {
+			o.logErr(ctx, "release run", o.Store.ReleaseRun(context.Background(), runID, o.Owner), "run_id", runID)
+		}
+	}
 
-	if finalStatus == core.RunCanceled && errors.Is(context.Cause(ctx), errShutdown) {
-		o.logErr(ctx, "update run usage", o.Store.UpdateRunUsage(context.Background(), in.TenantID, runID, usage), "run_id", runID)
+	if cause := context.Cause(ctx); lost || finalStatus == core.RunCanceled && errors.Is(cause, errShutdown) {
+		if !lost {
+			o.logErr(ctx, "update run usage", o.Store.UpdateRunUsage(context.Background(), in.TenantID, runID, usage), "run_id", runID)
+		}
+		releaseLease()
 		o.LoopDet.Reset(runID)
 		o.Budget.Forget(runID)
 		o.mu.Lock()
 		delete(o.runs, runID)
 		o.mu.Unlock()
-		log.InfoContext(ctx, "run checkpointed for shutdown", "status_left", finalStatus)
+		log.InfoContext(ctx, "run stopped without a final status", "cause", cause)
 		return
 	}
 
@@ -963,6 +1009,7 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 	})
 	o.LoopDet.Reset(runID)
 	o.Budget.Forget(runID)
+	releaseLease()
 	// Wait answers released runs from the store, so keep the state when the final write failed.
 	if finalStored {
 		o.mu.Lock()
@@ -2405,3 +2452,108 @@ type redactedError struct {
 
 func (e redactedError) Error() string { return e.msg }
 func (e redactedError) Unwrap() error { return e.err }
+
+// keepLease renews the run's lease every third of Lease until stopped. It
+// stops the run when another process took it, or when no renewal succeeded
+// for a whole Lease, since another process may take it then; and it cancels
+// the run when its cancellation was asked for elsewhere.
+func (o *Orchestrator) keepLease(runID core.RunID, st *runState) (stop func()) {
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		every := max(o.Lease/3, time.Millisecond)
+		t := time.NewTicker(every)
+		defer t.Stop()
+		renewed := time.Now()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+			}
+			attempt := time.Now()
+			ctx, cancel := context.WithTimeout(context.Background(), every)
+			held, err := o.Store.RenewLeases(ctx, o.Owner, []core.RunID{runID}, o.Lease)
+			cancel()
+			if err != nil {
+				o.logErr(context.Background(), "renew run lease", err, "run_id", runID)
+				if time.Since(renewed) >= o.Lease {
+					st.cancel(errLeaseLost)
+					return
+				}
+				continue
+			}
+			renewed = attempt
+			switch cancelRequested, ok := held[runID]; {
+			case !ok:
+				st.cancel(errLeaseLost)
+				return
+			case cancelRequested:
+				st.cancel(nil)
+			}
+		}
+	})
+	return func() {
+		close(done)
+		wg.Wait()
+	}
+}
+
+// stillLeased stops renewing the run's lease and reports whether this process
+// still holds it, checking the store once more so a run taken over since the
+// last renewal writes no final status. Writes before that are not fenced.
+func (o *Orchestrator) stillLeased(runID core.RunID, stopLease func(), lost func() bool) bool {
+	stopLease()
+	if lost() {
+		return false
+	}
+	held, err := o.Store.RenewLeases(context.Background(), o.Owner, []core.RunID{runID}, o.Lease)
+	if err != nil {
+		o.logErr(context.Background(), "renew run lease", err, "run_id", runID)
+		return true
+	}
+	_, ok := held[runID]
+	return ok
+}
+
+// finishCanceled ends a run no process is executing as canceled.
+func (o *Orchestrator) finishCanceled(ctx context.Context, run store.Run, reason string) error {
+	run.Status, run.FailureReason, run.EndedAt = core.RunCanceled, reason, time.Now().UTC()
+	if err := o.Store.UpdateRun(ctx, run); err != nil {
+		return err
+	}
+	o.emit(ctx, core.Event{
+		TenantID: run.TenantID, SessionID: run.SessionID, RunID: run.ID, Type: core.EvRunStateChanged, Visibility: core.VisibilityPublic,
+		Payload: mustJSON(map[string]any{"status": core.RunCanceled, "failure_reason": reason}),
+	})
+	return nil
+}
+
+func hostname() string {
+	name, err := os.Hostname()
+	if err != nil {
+		return "agent-loop"
+	}
+	return name
+}
+
+// KeepRecovering calls Recover every interval until ctx ends, taking over the runs of processes that died.
+func (o *Orchestrator) KeepRecovering(ctx context.Context, every time.Duration) {
+	if every <= 0 {
+		return
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if n, err := o.Recover(ctx); err != nil {
+			o.Log.ErrorContext(ctx, "recover runs", "resumed", n, "err", err)
+		} else if n > 0 {
+			o.Log.InfoContext(ctx, "took over unfinished runs", "count", n)
+		}
+	}
+}

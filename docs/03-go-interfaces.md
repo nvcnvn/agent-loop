@@ -214,6 +214,13 @@ func (o *Orchestrator) DeleteAgent(ctx context.Context, tenant core.TenantID, na
 // see, replacing shared ones of the same name; TenantPolicies adds a tool policy per tenant.
 // ListTools(tenant) lists what a tenant's runs may call.
 
+// Orchestrator.Owner and Lease lease each run to one process among those sharing a store;
+// Recover resumes every unfinished, unpaused run whose lease passed, bypassing MaxQueuedRuns, and
+// reports the runs the store cannot read without holding back the rest; KeepRecovering(ctx, every)
+// calls it periodically.
+func (o *Orchestrator) Recover(ctx context.Context) (int, error)
+func (o *Orchestrator) KeepRecovering(ctx context.Context, every time.Duration)
+
 // Compaction (Orchestrator.Compaction) summarizes session history when a run starts.
 type Compaction struct {
     Agent       string // writes the summary; empty disables compaction
@@ -272,7 +279,14 @@ type RunStore interface {
     CreateRun(ctx context.Context, run Run) (core.RunID, error)
     GetRun(ctx context.Context, tenantID core.TenantID, runID core.RunID) (Run, error)
     UpdateRunStatus(ctx context.Context, transition RunTransition) error
-    ListRunnableRuns(ctx context.Context, tenantID core.TenantID, limit int) ([]Run, error)
+    ListUnfinishedRuns(ctx context.Context) ([]Run, error)
+    // ClaimRun makes owner the run's executor for lease (store clock) unless another owner's lease
+    // has not passed (core.ErrConflict); RenewLeases extends owner's leases and reports, for each
+    // run still held, whether its cancellation was requested; RequestCancel asks the owner to.
+    ClaimRun(ctx context.Context, tenantID core.TenantID, id core.RunID, owner string, lease time.Duration) error
+    RenewLeases(ctx context.Context, owner string, runs []core.RunID, lease time.Duration) (map[core.RunID]bool, error)
+    ReleaseRun(ctx context.Context, id core.RunID, owner string) error
+    RequestCancel(ctx context.Context, tenantID core.TenantID, id core.RunID) error
 }
 
 type TaskStore interface {

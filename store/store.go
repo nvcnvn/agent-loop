@@ -74,6 +74,12 @@ type Run struct {
 	Workflow       json.RawMessage
 	Input          json.RawMessage
 	Output         json.RawMessage
+	// Owner is the process executing the run while LeaseUntil has not passed;
+	// CancelRequested asks it to cancel the run. CreateRun sets Owner and
+	// LeaseUntil, ClaimRun and ReleaseRun change them, and UpdateRun leaves all three alone.
+	Owner           string
+	LeaseUntil      time.Time
+	CancelRequested bool
 }
 
 // Task is the stored shape of a task.
@@ -195,6 +201,16 @@ type RunStore interface {
 	ListRuns(ctx context.Context, tenant core.TenantID, sessionID core.SessionID) ([]Run, error)
 	// ListUnfinishedRuns returns every tenant's runs that are not in a terminal status; runs it cannot read are left out and reported in the error.
 	ListUnfinishedRuns(ctx context.Context) ([]Run, error)
+	// ClaimRun makes owner the run's executor for lease, measured by the
+	// store's clock, unless another owner's lease has not passed (core.ErrConflict).
+	ClaimRun(ctx context.Context, tenant core.TenantID, id core.RunID, owner string, lease time.Duration) error
+	// RenewLeases extends owner's leases on runs by lease and reports, for each
+	// run it still holds, whether its cancellation was requested.
+	RenewLeases(ctx context.Context, owner string, runs []core.RunID, lease time.Duration) (map[core.RunID]bool, error)
+	// ReleaseRun ends owner's lease on the run.
+	ReleaseRun(ctx context.Context, id core.RunID, owner string) error
+	// RequestCancel asks the run's owner to cancel it.
+	RequestCancel(ctx context.Context, tenant core.TenantID, id core.RunID) error
 	FindByIdempotency(ctx context.Context, tenant core.TenantID, key string) (Run, error)
 }
 
@@ -493,7 +509,59 @@ func (m *MemStore) UpdateRun(_ context.Context, r Run) error {
 	if !ok || cur.TenantID != r.TenantID {
 		return core.ErrNotFound
 	}
+	r.Owner, r.LeaseUntil, r.CancelRequested = cur.Owner, cur.LeaseUntil, cur.CancelRequested
 	m.runs[r.ID] = r
+	return nil
+}
+
+func (m *MemStore) ClaimRun(_ context.Context, tenant core.TenantID, id core.RunID, owner string, lease time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.TenantID != tenant {
+		return core.ErrNotFound
+	}
+	if r.Owner != "" && r.Owner != owner && time.Now().Before(r.LeaseUntil) {
+		return fmt.Errorf("run %s is held by %s: %w", id, r.Owner, core.ErrConflict)
+	}
+	r.Owner, r.LeaseUntil = owner, time.Now().Add(lease)
+	m.runs[id] = r
+	return nil
+}
+
+func (m *MemStore) RenewLeases(_ context.Context, owner string, runs []core.RunID, lease time.Duration) (map[core.RunID]bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	held := map[core.RunID]bool{}
+	for _, id := range runs {
+		if r, ok := m.runs[id]; ok && r.Owner == owner {
+			r.LeaseUntil = time.Now().Add(lease)
+			m.runs[id] = r
+			held[id] = r.CancelRequested
+		}
+	}
+	return held, nil
+}
+
+func (m *MemStore) ReleaseRun(_ context.Context, id core.RunID, owner string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if r, ok := m.runs[id]; ok && r.Owner == owner {
+		r.Owner, r.LeaseUntil = "", time.Time{}
+		m.runs[id] = r
+	}
+	return nil
+}
+
+func (m *MemStore) RequestCancel(_ context.Context, tenant core.TenantID, id core.RunID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.TenantID != tenant {
+		return core.ErrNotFound
+	}
+	r.CancelRequested = true
+	m.runs[id] = r
 	return nil
 }
 

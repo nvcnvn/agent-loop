@@ -90,8 +90,22 @@ read `hidden_reasoning`; the SSE envelope never does.
 
 Cancellation: `POST /v1/runs/{rid}/cancel`, with an optional `{"reason": "..."}` of at most 1024
 bytes, records an `audit` `system_event_recorded` event (`"event": "run_cancel_requested"`,
-`reason`) whose `actor_id` is the caller's principal, then stops the run; a finished run answers
+`reason`) whose `actor_id` is the caller's principal, and records the request with the run. The
+process executing the run stops it at once if it is the one asked, and otherwise within a third of
+the lease; a run no process holds is canceled when it is next recovered. A finished run answers
 409. Audit events are served to the roles that read `audit` visibility.
+
+Run ownership: every process sharing a store has an `Owner` name (`-owner` or `AGENT_LOOP_OWNER`,
+by default host/pid) and holds each run it executes by a lease of `Orchestrator.Lease` (30s),
+renewed every third of it and measured by the store's clock. Creating a run leases it to its
+creator in the same write, and resuming one claims it; a run another process holds answers resume
+with 409. A process stops executing a run when another process took it or when it could not renew
+the lease for a whole lease period, and before writing a run's final status it checks it still
+holds the lease; the writes before that are not fenced. Every process recovers at startup, and then
+every lease period, the unfinished runs whose lease has passed (paused runs excepted), so a dead
+process's runs are taken over within two lease periods. A graceful shutdown releases the leases of
+the runs it checkpoints so another process takes them at its next recovery, and a process
+restarted with the same `Owner` takes its own back at once.
 
 Key decisions:
 - idempotency headers for `POST` endpoints
@@ -156,7 +170,8 @@ Required behavior:
 - Heartbeats do not advance run sequence.
 - With `?deltas=1` the stream also carries `agent_message_delta` events while a model writes a
   reply: `{"run_id", "task_id", "step_id", "agent", "content"}`, without an `id`. They are not
-  stored, carry no reasoning, and may be dropped for a slow client or across a reconnect. Each
+  stored, carry no reasoning, and may be dropped for a slow client or across a reconnect; only
+  streams served by the process executing the run get them. Each
   model call has its own `step_id`; a reply that ends in tool calls or is rejected by the output
   schema is superseded by the next step, and the finished reply is `agent_message_created`, which
   follows its deltas.
@@ -745,6 +760,11 @@ Each error should include:
 4. Apply backpressure when queue depth exceeds configured limits.
 5. Take limits, the worker pool and tool settings from the config file and environment
    (`TestConfigSetsLimitsPoolAndTools`).
+6. Lease runs across processes sharing a store: one executes each, a cancel reaches it, a shutdown
+   hands its runs over, a process that cannot renew stops, a finished run's lease is free when
+   `Wait` returns, and a run canceled while unheld ends with its tasks and approvals closed
+   (`TestRunsLeasedAcrossProcesses`, `TestLeaseReleasedBeforeWaitReturns`,
+   `TestLocalCancelIsRecorded`, `TestRecoverCancelsRequestedRunCleanly`, `storetest.Leases`).
 
 ### Security
 

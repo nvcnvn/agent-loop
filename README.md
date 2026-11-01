@@ -51,7 +51,7 @@ The recommended first vertical slice from
 | Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
 | MCP tools: servers over stdio or streamable HTTP, tools discovered and translated at startup and kept in step with the server, auth headers from the config file's `${VAR}`, reconnects, retries of idempotent calls, a circuit breaker; servers whose tools only one tenant sees (`tenant_mcp_servers`) | [tool/mcp/mcp.go](tool/mcp/mcp.go), [runtime/tenanttools.go](runtime/tenanttools.go) |
 | OpenTelemetry traces of runs, stages, tasks (including delegated ones), model calls, tool calls and approval waits | [runtime/orchestrator.go](runtime/orchestrator.go) |
-| HTTP server example: JSON logs (`log/slog`) to stdout, resumes unfinished runs at startup, graceful shutdown on SIGINT/SIGTERM (`-shutdown-timeout`) | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
+| HTTP server example: JSON logs (`log/slog`) to stdout, run leases so several replicas share one database (`-owner`), recovery of unfinished runs at startup and of other replicas' runs once their leases pass, graceful shutdown on SIGINT/SIGTERM (`-shutdown-timeout`) | [cmd/agent-loop/main.go](cmd/agent-loop/main.go) |
 | Programmatic example: planner -> parallel researchers -> synthesizer + replay | [cmd/example-workflow/main.go](cmd/example-workflow/main.go) |
 
 Both the in-memory store and the PostgreSQL driver implement

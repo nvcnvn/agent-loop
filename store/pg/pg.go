@@ -325,12 +325,15 @@ func (s *Store) CreateRun(ctx context.Context, r store.Run) (core.RunID, error) 
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO runs (run_id, tenant_id, session_id, parent_run_id, status,
 		                  limits, usage_totals, failure_reason, idempotency_key,
-		                  workflow, input, output, queued_at, started_at, ended_at, started_by, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())`,
+		                  workflow, input, output, queued_at, started_at, ended_at, started_by, updated_at,
+		                  owner, lease_until)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now(),
+		        $17, CASE WHEN $17::text IS NULL THEN NULL ELSE now() + make_interval(secs => $18) END)`,
 		string(r.ID), string(r.TenantID), string(r.SessionID), nullableUUID(string(r.ParentRunID)),
 		string(r.Status), limits, usage, r.FailureReason, nullable(r.IdempotencyKey),
 		nullableJSON(r.Workflow), nullableJSON(s.Sealer.json("runs.input", r.Input)), nullableJSON(s.Sealer.json("runs.output", r.Output)),
 		r.QueuedAt, nullableTime(r.StartedAt), nullableTime(r.EndedAt), nullableUUID(string(r.StartedBy)),
+		nullable(r.Owner), time.Until(r.LeaseUntil).Seconds(),
 	)
 	if err != nil {
 		if errors.Is(mapErr(err), core.ErrConflict) && r.IdempotencyKey != "" {
@@ -347,9 +350,67 @@ func (s *Store) GetRun(ctx context.Context, tenant core.TenantID, id core.RunID)
 	row := s.pool.QueryRow(ctx, `
 		SELECT run_id, tenant_id, session_id, parent_run_id, status, limits, usage_totals,
 		       failure_reason, idempotency_key, workflow, input, output,
-		       queued_at, started_at, ended_at, started_by
+		       queued_at, started_at, ended_at, started_by, owner, lease_until, cancel_requested
 		FROM runs WHERE run_id=$1 AND tenant_id=$2`, string(id), string(tenant))
 	return s.scanRun(row)
+}
+
+func (s *Store) ClaimRun(ctx context.Context, tenant core.TenantID, id core.RunID, owner string, lease time.Duration) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE runs SET owner=$3, lease_until=now() + make_interval(secs => $4)
+		WHERE run_id=$1 AND tenant_id=$2 AND (owner IS NULL OR owner=$3 OR lease_until < now())`,
+		string(id), string(tenant), owner, lease.Seconds())
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		if _, err := s.GetRun(ctx, tenant, id); err != nil {
+			return err
+		}
+		return fmt.Errorf("run %s is held by another process: %w", id, core.ErrConflict)
+	}
+	return nil
+}
+
+func (s *Store) RenewLeases(ctx context.Context, owner string, runs []core.RunID, lease time.Duration) (map[core.RunID]bool, error) {
+	ids := make([]string, len(runs))
+	for i, id := range runs {
+		ids[i] = string(id)
+	}
+	rows, err := s.pool.Query(ctx, `
+		UPDATE runs SET lease_until=now() + make_interval(secs => $3)
+		WHERE owner=$1 AND run_id = ANY($2::uuid[])
+		RETURNING run_id, cancel_requested`, owner, ids, lease.Seconds())
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	held := map[core.RunID]bool{}
+	for rows.Next() {
+		var id string
+		var cancel bool
+		if err := rows.Scan(&id, &cancel); err != nil {
+			return nil, err
+		}
+		held[core.RunID(id)] = cancel
+	}
+	return held, mapErr(rows.Err())
+}
+
+func (s *Store) ReleaseRun(ctx context.Context, id core.RunID, owner string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE runs SET owner=NULL, lease_until=NULL WHERE run_id=$1 AND owner=$2`, string(id), owner)
+	return mapErr(err)
+}
+
+func (s *Store) RequestCancel(ctx context.Context, tenant core.TenantID, id core.RunID) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE runs SET cancel_requested=true WHERE run_id=$1 AND tenant_id=$2`, string(id), string(tenant))
+	if err != nil {
+		return mapErr(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return core.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpdateRun(ctx context.Context, r store.Run) error {
@@ -414,7 +475,7 @@ func (s *Store) queryRuns(ctx context.Context, where string, args ...any) ([]sto
 	rows, err := s.pool.Query(ctx, `
 		SELECT run_id, tenant_id, session_id, parent_run_id, status, limits, usage_totals,
 		       failure_reason, idempotency_key, workflow, input, output,
-		       queued_at, started_at, ended_at, started_by
+		       queued_at, started_at, ended_at, started_by, owner, lease_until, cancel_requested
 		FROM runs `+where+` ORDER BY queued_at`, args...)
 	if err != nil {
 		return nil, mapErr(err)
@@ -443,7 +504,7 @@ func (s *Store) FindByIdempotency(ctx context.Context, tenant core.TenantID, key
 	row := s.pool.QueryRow(ctx, `
 		SELECT run_id, tenant_id, session_id, parent_run_id, status, limits, usage_totals,
 		       failure_reason, idempotency_key, workflow, input, output,
-		       queued_at, started_at, ended_at, started_by
+		       queued_at, started_at, ended_at, started_by, owner, lease_until, cancel_requested
 		FROM runs WHERE tenant_id=$1 AND idempotency_key=$2`, string(tenant), key)
 	return s.scanRun(row)
 }
@@ -462,10 +523,12 @@ func (s *Store) scanRun(row rowScanner) (store.Run, error) {
 		started, ended       *time.Time
 		status               string
 		startedBy            *string
+		owner                *string
+		leaseUntil           *time.Time
 	)
 	if err := row.Scan(&rid, &tid, &sid, &parent, &status, &limits, &usage,
 		&out.FailureReason, &idem, &workflow, &in, &output,
-		&out.QueuedAt, &started, &ended, &startedBy); err != nil {
+		&out.QueuedAt, &started, &ended, &startedBy, &owner, &leaseUntil, &out.CancelRequested); err != nil {
 		return store.Run{}, mapErr(err)
 	}
 	out.ID = core.RunID(rid)
@@ -483,6 +546,12 @@ func (s *Store) scanRun(row rowScanner) (store.Run, error) {
 	}
 	if startedBy != nil {
 		out.StartedBy = core.PrincipalID(*startedBy)
+	}
+	if owner != nil {
+		out.Owner = *owner
+	}
+	if leaseUntil != nil {
+		out.LeaseUntil = *leaseUntil
 	}
 	if ended != nil {
 		out.EndedAt = *ended

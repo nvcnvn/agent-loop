@@ -203,6 +203,7 @@ func (o *Orchestrator) replayOrchestrator(p model.Provider, tools tool.Executor)
 	}
 	c := NewOrchestrator(o.Store, reg, agents)
 	c.Provider, c.Model, c.replayTools = p, o.Model, tools
+	c.Owner, c.Lease = o.Owner+"/replay/"+core.NewID(), o.Lease
 	c.Workflows, c.MaxLimits, c.MaxHistoryMessages, c.Concurrency, c.Compaction = o.Workflows, o.MaxLimits, o.MaxHistoryMessages, o.Concurrency, o.Compaction
 	c.Policy, c.TenantPolicies, c.TenantTools, c.skipApprovals = o.Policy, o.TenantPolicies, tenantTools, true
 	c.Log, c.Tracer = o.Log, o.Tracer

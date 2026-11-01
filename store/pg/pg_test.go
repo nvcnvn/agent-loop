@@ -652,3 +652,7 @@ func TestPg_SealedColumns(t *testing.T) {
 		t.Fatalf("unfinished runs without the key: %+v err=%v; want the plain run and ErrSealed", unfinished, err)
 	}
 }
+
+func TestPg_Leases(t *testing.T) {
+	storetest.Leases(t, freshStore(t))
+}

@@ -197,3 +197,7 @@ func TestMemStoreAgents(t *testing.T) {
 func TestMemStoreRetention(t *testing.T) {
 	storetest.Retention(t, store.NewMemStore())
 }
+
+func TestMemStoreLeases(t *testing.T) {
+	storetest.Leases(t, store.NewMemStore())
+}

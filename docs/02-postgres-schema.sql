@@ -159,6 +159,9 @@ CREATE TABLE runs (
     queued_at timestamptz NOT NULL DEFAULT now(),
     started_at timestamptz,
     ended_at timestamptz,
+    owner text,                     -- the process holding the run's lease
+    lease_until timestamptz,
+    cancel_requested boolean NOT NULL DEFAULT false,
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, idempotency_key)
 );

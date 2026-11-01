@@ -58,6 +58,7 @@ func main() {
 	debug := flag.Bool("debug", false, "serve the debug console and /v1/debug/* (exposes agent instructions)")
 	trustHeaders := flag.Bool("trust-identity-headers", false, "take the tenant and principal from X-Tenant-ID/X-Principal-ID without authentication (local development only)")
 	configPath := flag.String("config", os.Getenv("AGENT_LOOP_CONFIG"), "JSON file of agents, workflow templates, compaction, tool policy, limits, worker pool and MCP servers, with ${VAR} read from the environment (see README); default $AGENT_LOOP_CONFIG; without one the server has one echo agent")
+	owner := flag.String("owner", os.Getenv("AGENT_LOOP_OWNER"), "this process's name in run leases, unique among processes sharing the database and kept across restarts so a restart takes its runs back at once; default host/pid, default $AGENT_LOOP_OWNER")
 	drain := flag.Duration("shutdown-timeout", 30*time.Second, "on SIGINT/SIGTERM, how long to let requests and runs finish before checkpointing runs")
 	flag.Parse()
 	redactor, err := observe.NewRedactor(observe.DefaultRedactPatterns...)
@@ -118,6 +119,9 @@ func main() {
 	cfg.Apply(orch)
 	orch.TenantTools = tenantTools
 	orch.Redactor, orch.Secrets = redactor, toolSecrets()
+	if *owner != "" {
+		orch.Owner = *owner
+	}
 	if n, err := orch.Recover(context.Background()); err != nil {
 		slog.Error("recover runs", "resumed", n, "err", err)
 	} else if n > 0 {
@@ -129,6 +133,9 @@ func main() {
 	if orch.Retention != (runtime.Retention{}) {
 		go orch.KeepPurging(purging, time.Hour)
 	}
+	recovering, stopRecovering := context.WithCancel(context.Background())
+	defer stopRecovering()
+	go orch.KeepRecovering(recovering, orch.Lease)
 
 	srv := api.NewServer(orch, persistence)
 	srv.Debug = *debug
@@ -149,6 +156,7 @@ func main() {
 	case <-signals.Done():
 	}
 
+	stopRecovering()
 	slog.Info("shutting down", "timeout", *drain)
 	ctx, cancel := context.WithTimeout(context.Background(), *drain)
 	defer cancel()

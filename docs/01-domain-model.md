@@ -140,8 +140,9 @@ failed -> superseded    # new run attempt replaces it
 
 Rules:
 - `run.status` is a projection of the event stream, not the source of truth.
-- A run is resumable when no process is executing it and it is unfinished, paused, failed or timed
-  out. Recovery after a restart resumes unfinished runs but leaves paused ones to a human.
+- A run is resumable when no process holds its lease and it is unfinished, paused, failed or timed
+  out. Recovery after a restart, and the periodic recovery of every process, resumes unfinished runs
+  whose lease passed but leaves paused ones to a human.
   Resuming reuses the outputs of its completed tasks, marks interrupted tasks failed, runs
   interrupted and failed tasks again, and cancels its open approvals. Succeeded and canceled runs
   are final.
