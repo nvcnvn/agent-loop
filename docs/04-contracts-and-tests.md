@@ -15,8 +15,22 @@ Define an OpenAPI document for:
 - list runs
 - list run events
 - list artifacts
+- list pending approvals
 - approve or reject gated actions
 - subscribe to run events through SSE
+
+Approvals: `GET /v1/approvals` lists the caller's tenant's approvals that are still `requested`
+and not expired, oldest first, as `{"approvals": [{"approval_id", "tenant_id", "run_id",
+"step_id", "reason", "status", "request", "resolution", "created_at", "resolved_at",
+"expires_at"}], "next_after"}`. `?run_id=` narrows the list to one run (404 if the tenant has no
+such run), and `?status=` picks `approved`, `rejected`, `expired`, `canceled` or `all` (where an
+approval that expired before anyone closed it still shows as `requested`). Pages hold `?limit=`
+approvals (1 to 100, default 100); a full page carries `next_after`, which `?after=` takes to get
+the next. `request` holds the `tool` and its `input`, or the stage `gate`, `stage` and, for output
+gates, `output`: whoever may approve sees what they approve, so any key of the tenant can read tool
+inputs this way, though `tool_call_scheduled` is internal. `POST /v1/approvals/{aid}` with
+`{"decision": "approved" | "rejected", "payload": {...}}` resolves one; an approval already
+resolved or expired answers 409.
 
 Key decisions:
 - idempotency headers for `POST` endpoints

@@ -253,7 +253,7 @@ Expose HTTP APIs for:
 - [x] List runs and events.
 - [ ] List and download artifacts.
 - [x] Approve or reject gated actions.
-- [ ] List pending approvals (clients learn approval IDs only from the event stream).
+- [x] List pending approvals (`GET /v1/approvals`).
 - [x] Subscribe to run events.
 
 ### 8.2 Real-Time Delivery

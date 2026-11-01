@@ -13,6 +13,7 @@
 //	POST   /v1/runs/{rid}/cancel
 //	POST   /v1/runs/{rid}/resume
 //	POST   /v1/runs/{rid}/reexecute  (replays recorded model and tool outputs; waits)
+//	GET    /v1/approvals?run_id=&status=&after=&limit=  (default status: requested; "all" for every status)
 //	POST   /v1/approvals/{aid}
 //	GET    /healthz                  (liveness)
 //	GET    /readyz                   (readiness: the store answers a ping)
@@ -40,6 +41,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
@@ -118,6 +121,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/runs/{rid}/cancel", s.cancelRun)
 	mux.HandleFunc("POST /v1/runs/{rid}/resume", s.resumeRun)
 	mux.HandleFunc("POST /v1/runs/{rid}/reexecute", s.reExecuteRun)
+	mux.HandleFunc("GET /v1/approvals", s.listApprovals)
 	mux.HandleFunc("POST /v1/approvals/{aid}", s.resolveApproval)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -485,6 +489,52 @@ func (s *Server) resumeRun(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusAccepted)
 	}
+}
+
+// approvalPage is the default and largest page of GET /v1/approvals.
+const approvalPage = 100
+
+func (s *Server) listApprovals(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := store.ApprovalFilter{RunID: core.RunID(q.Get("run_id")), Status: q.Get("status"), After: core.ApprovalID(q.Get("after")), Limit: approvalPage}
+	switch f.Status {
+	case "":
+		f.Status = "requested"
+	case "all":
+		f.Status = ""
+	case "requested", "approved", "rejected", "expired", "canceled":
+	default:
+		writeErr(w, http.StatusBadRequest, "validation_error", "status must be requested, approved, rejected, expired, canceled or all")
+		return
+	}
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > approvalPage {
+			writeErr(w, http.StatusBadRequest, "validation_error", fmt.Sprintf("limit must be from 1 to %d", approvalPage))
+			return
+		}
+		f.Limit = n
+	}
+	if f.After != "" && uuid.Validate(string(f.After)) != nil {
+		writeErr(w, http.StatusBadRequest, "validation_error", "after must be an approval ID")
+		return
+	}
+	if f.RunID != "" {
+		if _, err := s.Store.GetRun(r.Context(), tenantOf(r), f.RunID); err != nil {
+			writeErr(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+	}
+	approvals, err := s.Store.ListApprovals(r.Context(), tenantOf(r), f)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	resp := map[string]any{"approvals": approvals}
+	if len(approvals) == f.Limit {
+		resp["next_after"] = approvals[len(approvals)-1].ID
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) resolveApproval(w http.ResponseWriter, r *http.Request) {

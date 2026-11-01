@@ -177,3 +177,7 @@ func TestUpdateTaskChangesOnlyStatusOutputAndError(t *testing.T) {
 func TestMemStoreMemories(t *testing.T) {
 	storetest.Memories(t, store.NewMemStore(), core.SessionID(core.NewID()), core.SessionID(core.NewID()))
 }
+
+func TestMemStoreApprovals(t *testing.T) {
+	storetest.Approvals(t, store.NewMemStore(), core.RunID(core.NewID()), core.RunID(core.NewID()))
+}

@@ -729,6 +729,66 @@ func TestResolveApprovalEndpoint(t *testing.T) {
 	}
 }
 
+func TestListApprovals(t *testing.T) {
+	srv, _, s := newTestServer(t)
+	defer srv.Close()
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant})
+	run, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid})
+	open, _ := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: run, Reason: "tool requires approval", Request: json.RawMessage(`{"tool":"refund"}`)})
+	done, _ := s.CreateApproval(ctx, store.Approval{TenantID: core.DefaultTenant, RunID: run})
+	_ = s.ResolveApproval(ctx, core.DefaultTenant, done, "rejected", nil)
+	var next string
+	list := func(query, tenant string) (int, []map[string]any) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/approvals"+query, nil)
+		if tenant != "" {
+			req.Header.Set("X-Tenant-ID", tenant)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body struct {
+			Approvals []map[string]any
+			NextAfter string `json:"next_after"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		next = body.NextAfter
+		return resp.StatusCode, body.Approvals
+	}
+	code, got := list("", "")
+	if code != http.StatusOK || len(got) != 1 || got[0]["approval_id"] != string(open) || got[0]["run_id"] != string(run) ||
+		got[0]["status"] != "requested" || got[0]["reason"] != "tool requires approval" {
+		t.Fatalf("pending: code=%d %v", code, got)
+	}
+	if _, got := list("?status=all&run_id="+string(run), ""); len(got) != 2 {
+		t.Fatalf("all: %v", got)
+	}
+	if _, got := list("?status=rejected", ""); len(got) != 1 || got[0]["approval_id"] != string(done) {
+		t.Fatalf("rejected: %v", got)
+	}
+	if _, got := list("?status=all&limit=1", ""); len(got) != 1 || next != string(open) {
+		t.Fatalf("first page: %v next=%q", got, next)
+	}
+	if _, got := list("?status=all&limit=1&after="+next, ""); len(got) != 1 || got[0]["approval_id"] != string(done) {
+		t.Fatalf("second page: %v", got)
+	}
+	for _, bad := range []string{"?status=aproved", "?limit=0", "?limit=1000", "?after=x"} {
+		if code, _ := list(bad, ""); code != http.StatusBadRequest {
+			t.Fatalf("%s: code=%d", bad, code)
+		}
+	}
+	other := core.NewID()
+	if _, got := list("", other); len(got) != 0 {
+		t.Fatalf("another tenant sees approvals: %v", got)
+	}
+	if code, _ := list("?run_id="+string(run), other); code != http.StatusNotFound {
+		t.Fatalf("another tenant's run: code=%d", code)
+	}
+}
+
 func TestResolveApprovalConflicts(t *testing.T) {
 	srv, _, s := newTestServer(t)
 	defer srv.Close()

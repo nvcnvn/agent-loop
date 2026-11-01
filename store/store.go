@@ -77,19 +77,29 @@ type MessageProjection struct {
 
 // Approval is the stored shape of an approval request.
 type Approval struct {
-	ID         core.ApprovalID
-	TenantID   core.TenantID
-	RunID      core.RunID
-	StepID     core.StepID
-	Reason     string
-	Status     string // requested|approved|rejected|expired|canceled
-	Request    json.RawMessage
-	Resolution json.RawMessage
-	CreatedAt  time.Time
-	ResolvedAt time.Time
+	ID         core.ApprovalID `json:"approval_id"`
+	TenantID   core.TenantID   `json:"tenant_id"`
+	RunID      core.RunID      `json:"run_id,omitempty"`
+	StepID     core.StepID     `json:"step_id,omitempty"`
+	Reason     string          `json:"reason"`
+	Status     string          `json:"status"` // requested|approved|rejected|expired|canceled
+	Request    json.RawMessage `json:"request,omitempty"`
+	Resolution json.RawMessage `json:"resolution,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	ResolvedAt time.Time       `json:"resolved_at,omitzero"`
 	// ExpiresAt, when set, is the time after which only "expired" or
 	// "canceled" can resolve the approval.
-	ExpiresAt time.Time
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
+}
+
+// ApprovalFilter selects a tenant's approvals in ID order, which is creation
+// order. Empty fields select all; status "requested" leaves out approvals
+// that have expired without being resolved.
+type ApprovalFilter struct {
+	RunID  core.RunID
+	Status string
+	After  core.ApprovalID // only approvals after this one
+	Limit  int             // zero means no limit
 }
 
 // Artifact is the stored shape of a produced artifact.
@@ -159,6 +169,7 @@ type ApprovalStore interface {
 	GetApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID) (Approval, error)
 	ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, resolution json.RawMessage) error
 	WaitForApproval(ctx context.Context, id core.ApprovalID) (Approval, error)
+	ListApprovals(ctx context.Context, tenant core.TenantID, f ApprovalFilter) ([]Approval, error)
 	// CancelRunApprovals resolves the run's open approvals as "canceled".
 	CancelRunApprovals(ctx context.Context, tenant core.TenantID, run core.RunID) error
 }
@@ -511,6 +522,28 @@ func (m *MemStore) CancelRunApprovals(_ context.Context, tenant core.TenantID, r
 		}
 	}
 	return nil
+}
+
+func (m *MemStore) ListApprovals(_ context.Context, tenant core.TenantID, f ApprovalFilter) ([]Approval, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	now := time.Now()
+	out := []Approval{}
+	for _, e := range m.approvals {
+		a := e.approval
+		if a.TenantID != tenant || f.RunID != "" && a.RunID != f.RunID || f.Status != "" && a.Status != f.Status || a.ID <= f.After {
+			continue
+		}
+		if f.Status == "requested" && !a.ExpiresAt.IsZero() && !now.Before(a.ExpiresAt) {
+			continue
+		}
+		out = append(out, a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
+	return out, nil
 }
 
 func (m *MemStore) WaitForApproval(ctx context.Context, id core.ApprovalID) (Approval, error) {

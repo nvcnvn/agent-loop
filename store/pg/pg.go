@@ -570,6 +570,33 @@ func (s *Store) CancelRunApprovals(ctx context.Context, tenant core.TenantID, ru
 	return mapErr(err)
 }
 
+func (s *Store) ListApprovals(ctx context.Context, tenant core.TenantID, f store.ApprovalFilter) ([]store.Approval, error) {
+	limit := any(nil)
+	if f.Limit > 0 {
+		limit = f.Limit
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+approvalColumns+` FROM approvals
+		WHERE tenant_id=$1 AND ($2::uuid IS NULL OR run_id = $2::uuid) AND ($3 = '' OR status = $3)
+		  AND ($3 <> 'requested' OR expires_at IS NULL OR expires_at > now())
+		  AND ($4::uuid IS NULL OR approval_id > $4::uuid)
+		ORDER BY approval_id
+		LIMIT $5`, string(tenant), nullableUUID(string(f.RunID)), f.Status, nullableUUID(string(f.After)), limit)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []store.Approval{}
+	for rows.Next() {
+		a, err := scanApproval(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, mapErr(rows.Err())
+}
+
 // WaitForApproval polls until the approval resolves or ctx is canceled.
 func (s *Store) WaitForApproval(ctx context.Context, id core.ApprovalID) (store.Approval, error) {
 	t := time.NewTicker(PollInterval)

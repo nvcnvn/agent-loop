@@ -351,7 +351,8 @@ CREATE TABLE approvals (
     resolved_at timestamptz
 );
 
-CREATE INDEX approvals_pending_idx ON approvals (tenant_id, expires_at, requested_at) WHERE status = 'requested';
+CREATE INDEX approvals_tenant_status_idx ON approvals (tenant_id, status, approval_id);
+CREATE INDEX approvals_run_idx ON approvals (run_id, approval_id);
 
 CREATE TABLE snapshots (
     snapshot_id uuid PRIMARY KEY DEFAULT uuidv7(),

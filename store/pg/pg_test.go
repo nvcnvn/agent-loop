@@ -431,3 +431,12 @@ func TestPg_EndToEndRunOverREST(t *testing.T) {
 		t.Fatalf("copy parent=%q err=%v", copyRun.ParentRunID, err)
 	}
 }
+
+func TestPg_Approvals(t *testing.T) {
+	s := freshStore(t)
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	run, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid})
+	other, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid})
+	storetest.Approvals(t, s, run, other)
+}

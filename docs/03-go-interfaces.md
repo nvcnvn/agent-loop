@@ -232,6 +232,26 @@ type TaskStore interface {
     ListRunTasks(ctx context.Context, tenantID core.TenantID, runID core.RunID) ([]TaskRecord, error)
 }
 
+// ApprovalStore keeps approval requests. ResolveApproval returns core.ErrConflict for an approval
+// that is already resolved or has expired. ListApprovals pages through the approvals f selects in ID
+// (creation) order. storetest.Approvals is the conformance check.
+type ApprovalStore interface {
+    CreateApproval(ctx context.Context, a Approval) (core.ApprovalID, error)
+    GetApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID) (Approval, error)
+    ResolveApproval(ctx context.Context, tenant core.TenantID, id core.ApprovalID, status string, resolution json.RawMessage) error
+    WaitForApproval(ctx context.Context, id core.ApprovalID) (Approval, error)
+    ListApprovals(ctx context.Context, tenant core.TenantID, f ApprovalFilter) ([]Approval, error)
+    CancelRunApprovals(ctx context.Context, tenant core.TenantID, run core.RunID) error
+}
+
+// ApprovalFilter: empty fields select all; Status "requested" leaves out expired approvals.
+type ApprovalFilter struct {
+    RunID  core.RunID
+    Status string
+    After  core.ApprovalID
+    Limit  int
+}
+
 type ArtifactStore interface {
     PutArtifact(ctx context.Context, artifact Artifact) (ArtifactRef, error)
     GetArtifact(ctx context.Context, tenantID core.TenantID, artifactID string) (Artifact, error)
