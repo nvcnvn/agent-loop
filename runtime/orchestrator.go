@@ -9,6 +9,7 @@
 package runtime
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -869,45 +870,54 @@ func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, i
 			results <- result{idx: j, out: out, err: err}
 		})
 	}
-	wg.Wait()
-	close(results)
-
-	collected := make([]result, 0, len(stage.Agents))
-	for r := range results {
-		collected = append(collected, r)
-	}
-	sort.Slice(collected, func(i, j int) bool { return collected[i].idx < collected[j].idx })
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
 
 	policy := stage.FailurePolicy
 	if policy == "" {
 		policy = FailFast
 	}
+	collected := make([]result, 0, len(stage.Agents))
+	failures := 0
+	var stageErr error
+	for r := range results {
+		collected = append(collected, r)
+		if r.err == nil || stageErr != nil {
+			continue
+		}
+		failures++
+		switch {
+		case policy == FailFast:
+			stageErr = r.err
+		case policy == Quorum && failures > len(stage.Agents)-stage.Quorum:
+			stageErr = fmt.Errorf("stage %q: %d of %d agents failed, so fewer than the quorum of %d can succeed: %w", stage.Name, failures, len(stage.Agents), stage.Quorum, r.err)
+		default:
+			continue
+		}
+		cancel()
+	}
+	if stageErr != nil {
+		return "", stageErr
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	sort.Slice(collected, func(i, j int) bool { return collected[i].idx < collected[j].idx })
 
 	var firstErr error
 	parts := make([]string, 0, len(collected))
 	for _, r := range collected {
 		if r.err != nil {
-			if firstErr == nil {
-				firstErr = r.err
-			}
-			if policy == FailFast {
-				return "", r.err
-			}
+			firstErr = cmp.Or(firstErr, r.err)
 			continue
 		}
 		parts = append(parts, fmt.Sprintf("%s=%s", stage.Agents[r.idx].Name, r.out))
 		vars[stage.Name+"."+stage.Agents[r.idx].Name] = r.out
 	}
-
-	switch policy {
-	case WaitAll:
-		if firstErr != nil {
-			return "", firstErr
-		}
-	case BestEffort:
-		if len(parts) == 0 && firstErr != nil {
-			return "", firstErr
-		}
+	if policy == WaitAll && firstErr != nil || len(parts) == 0 {
+		return "", firstErr
 	}
 	return strings.Join(parts, "\n"), nil
 }

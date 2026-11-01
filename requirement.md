@@ -207,8 +207,7 @@ Requirements:
   - requires exclusive execution
   - non-idempotent or externally side-effecting
 - [x] Support fan-out and fan-in patterns where multiple tool results are collected before the next reasoning step.
-- [x] Partial failure handling for parallel sub-agent stages: fail-fast, wait-all, best-effort.
-- [ ] Quorum failure handling for parallel sub-agent stages.
+- [x] Partial failure handling for parallel sub-agent stages: fail-fast, wait-all, best-effort, quorum.
 - [x] Partial failure handling for parallel tool groups: a failed call becomes an error result and the
   rest of the group still runs.
 - [x] Concurrency limit per run for parallel sub-agents.

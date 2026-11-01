@@ -49,6 +49,7 @@ const (
 	FailFast   FailurePolicy = "fail_fast"
 	WaitAll    FailurePolicy = "wait_all"
 	BestEffort FailurePolicy = "best_effort"
+	Quorum     FailurePolicy = "quorum"
 )
 
 // AgentStep is one agent invocation inside a stage.
@@ -77,6 +78,8 @@ type Stage struct {
 	Kind          StageKind     `json:"kind,omitempty"`
 	Agents        []AgentStep   `json:"agents"`
 	FailurePolicy FailurePolicy `json:"failure_policy,omitempty"`
+	// Quorum is how many agents of a quorum stage must succeed.
+	Quorum int `json:"quorum,omitempty"`
 	// DependsOn names the stages that must finish first. When no stage of a
 	// workflow sets it, each stage depends on the one before it.
 	DependsOn []string      `json:"depends_on,omitempty"`
@@ -155,12 +158,18 @@ func compileWorkflow(wf Workflow, agents map[string]Agent) (*plan, error) {
 			return nil, bad("unknown kind %q", s.Kind)
 		}
 		switch s.FailurePolicy {
-		case "", FailFast, WaitAll, BestEffort:
+		case "", FailFast, WaitAll, BestEffort, Quorum:
 		default:
 			return nil, bad("unknown failure_policy %q", s.FailurePolicy)
 		}
 		if len(s.Agents) == 0 {
 			return nil, bad("no agents")
+		}
+		if (s.FailurePolicy == Quorum) != (s.Quorum != 0) || s.Quorum < 0 || s.Quorum > len(s.Agents) {
+			return nil, bad("quorum must be set for, and only for, failure_policy quorum, between 1 and the number of agents")
+		}
+		if s.FailurePolicy == Quorum && s.Kind != StageParallel {
+			return nil, bad("failure_policy quorum needs kind parallel")
 		}
 		for _, a := range s.Agents {
 			if _, ok := agents[a.Name]; !ok {

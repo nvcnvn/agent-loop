@@ -414,6 +414,10 @@ func TestInvalidWorkflowsAreRejected(t *testing.T) {
 		"bad output schema":    {{Name: "s", OutputSchema: json.RawMessage(`{"type":5}`), Agents: step}},
 		"schema loads a file":  {{Name: "s", OutputSchema: json.RawMessage(`{"$ref":"file:///etc/passwd"}`), Agents: step}},
 		"negative retry count": {{Name: "s", Retry: runtime.RetryPolicy{MaxAttempts: -1}, Agents: step}},
+		"quorum without count": {{Name: "s", Kind: runtime.StageParallel, FailurePolicy: runtime.Quorum, Agents: step}},
+		"quorum above agents":  {{Name: "s", Kind: runtime.StageParallel, FailurePolicy: runtime.Quorum, Quorum: 2, Agents: step}},
+		"count without quorum": {{Name: "s", Kind: runtime.StageParallel, Quorum: 1, Agents: step}},
+		"sequential quorum":    {{Name: "s", FailurePolicy: runtime.Quorum, Quorum: 1, Agents: step}},
 	} {
 		if _, err := orch.StartRun(context.Background(), runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: stages}}); err == nil {
 			t.Errorf("%s: accepted", name)

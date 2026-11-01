@@ -906,6 +906,121 @@ func TestParallelStageWaitAll(t *testing.T) {
 	}
 }
 
+// Acceptance: §Concurrent Sub-Agent Workflow #3 – a quorum stage succeeds with
+// the answers of the agents that succeeded when enough of them did, and fails otherwise.
+func TestParallelStageQuorum(t *testing.T) {
+	for _, tc := range []struct {
+		quorum int
+		ok     bool
+	}{{2, true}, {3, false}} {
+		boom := errors.New("provider down")
+		orch, _, sid := setup(t, []runtime.Agent{
+			{Name: "a", Model: "m", Provider: model.NewMockProvider(model.MockResponse{Content: "A"})},
+			{Name: "b", Model: "m", Provider: model.NewMockProvider(model.MockResponse{Err: boom})},
+			{Name: "c", Model: "m", Provider: model.NewMockProvider(model.MockResponse{Content: "C"})},
+		})
+		ctx, cancel := waitCtx()
+		runID, err := orch.StartRun(ctx, runtime.StartRunInput{
+			SessionID: sid,
+			Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+				Name: "fan", Kind: runtime.StageParallel, FailurePolicy: runtime.Quorum, Quorum: tc.quorum,
+				Agents: []runtime.AgentStep{{Name: "a", Prompt: "x"}, {Name: "b", Prompt: "y"}, {Name: "c", Prompt: "z"}},
+			}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := orch.Wait(ctx, core.DefaultTenant, runID)
+		cancel()
+		if tc.ok {
+			if err != nil || res.Outputs["fan"] != "a=A\nc=C" {
+				t.Fatalf("quorum %d: err=%v outputs=%q", tc.quorum, err, res.Outputs)
+			}
+			continue
+		}
+		if res.Status != core.RunFailed || !strings.Contains(res.FailureReason, "1 of 3 agents failed, so fewer than the quorum of 3 can succeed") || !strings.Contains(res.FailureReason, "provider down") {
+			t.Fatalf("quorum %d: status=%s reason=%s", tc.quorum, res.Status, res.FailureReason)
+		}
+	}
+}
+
+// fail_fast and an unreachable quorum cancel the agents still running.
+func TestParallelStageFailureCancelsSiblings(t *testing.T) {
+	for _, policy := range []runtime.Stage{{FailurePolicy: runtime.FailFast}, {FailurePolicy: runtime.Quorum, Quorum: 2}} {
+		orch, _, sid := setup(t, []runtime.Agent{
+			{Name: "fails", Model: "m", Provider: model.NewMockProvider(model.MockResponse{Err: errors.New("provider down")})},
+			{Name: "blocks", Model: "m", Provider: gateProvider(make(chan struct{}))},
+		})
+		ctx, cancel := waitCtx()
+		stage := policy
+		stage.Name, stage.Kind = "fan", runtime.StageParallel
+		stage.Agents = []runtime.AgentStep{{Name: "fails", Prompt: "x"}, {Name: "blocks", Prompt: "y"}}
+		runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{stage}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, _ := orch.Wait(ctx, core.DefaultTenant, runID)
+		cancel()
+		if res.Status != core.RunFailed || !strings.Contains(res.FailureReason, "provider down") {
+			t.Fatalf("%s: status=%s reason=%s", policy.FailurePolicy, res.Status, res.FailureReason)
+		}
+	}
+}
+
+// best_effort and wait_all wait for every agent: best_effort keeps the answers
+// that succeeded, wait_all fails on any failure.
+func TestParallelStageBestEffortAndWaitAllWithAFailure(t *testing.T) {
+	for policy, ok := range map[runtime.FailurePolicy]bool{runtime.BestEffort: true, runtime.WaitAll: false} {
+		orch, _, sid := setup(t, []runtime.Agent{
+			{Name: "fails", Model: "m", Provider: model.NewMockProvider(model.MockResponse{Err: errors.New("provider down")})},
+			{Name: "slow", Model: "m", Provider: &slowProvider{delay: 50 * time.Millisecond}},
+		})
+		ctx, cancel := waitCtx()
+		runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+			Name: "fan", Kind: runtime.StageParallel, FailurePolicy: policy,
+			Agents: []runtime.AgentStep{{Name: "fails", Prompt: "x"}, {Name: "slow", Prompt: "y"}},
+		}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, _ := orch.Wait(ctx, core.DefaultTenant, runID)
+		cancel()
+		if ok && (res.Status != core.RunSucceeded || res.Outputs["fan"] != "slow=slow") ||
+			!ok && (res.Status != core.RunFailed || !strings.Contains(res.FailureReason, "provider down")) {
+			t.Fatalf("%s: status=%s outputs=%q reason=%s", policy, res.Status, res.Outputs, res.FailureReason)
+		}
+	}
+}
+
+// A canceled run whose quorum stage already met its quorum ends canceled, not succeeded.
+func TestQuorumStageMetThenRunCanceled(t *testing.T) {
+	orch, s, sid := setup(t, []runtime.Agent{
+		{Name: "a", Model: "m", Provider: model.NewMockProvider(model.MockResponse{Content: "A"})},
+		{Name: "b", Model: "m", Provider: gateProvider(make(chan struct{}))},
+	})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+		Name: "fan", Kind: runtime.StageParallel, FailurePolicy: runtime.Quorum, Quorum: 1,
+		Agents: []runtime.AgentStep{{Name: "a", Prompt: "x"}, {Name: "b", Prompt: "y"}},
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for done := false; !done; time.Sleep(5 * time.Millisecond) {
+		events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+		for _, ev := range events {
+			done = done || ev.Type == core.EvTaskCompleted
+		}
+	}
+	if err := orch.Cancel(ctx, core.DefaultTenant, runID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := orch.Wait(ctx, core.DefaultTenant, runID); res.Status != core.RunCanceled {
+		t.Fatalf("status=%s outputs=%q", res.Status, res.Outputs)
+	}
+}
+
 // Acceptance: §Budget and Safety #2 – parallel sub-agent fan-out reserves as one group.
 func TestParallelSubAgentBudgetReservesWholeStage(t *testing.T) {
 	pa := model.NewMockProvider(model.MockResponse{Content: "A"})

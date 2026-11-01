@@ -89,7 +89,8 @@ nanoseconds, as in `limits`.
 | `name` | Unique within the workflow; the run output maps it to the stage output. |
 | `agents` | Agent steps: a registered agent's `name`, a `prompt` template, and `images`, the names of run input images shown with the prompt. |
 | `kind` | `sequential` (default): steps run in order. `parallel`: steps run at once, up to `max_concurrent`, and the stage output is one `agent=answer` line per step. |
-| `failure_policy` | For parallel stages: `fail_fast` (default), `wait_all` or `best_effort`. |
+| `failure_policy` | For parallel stages: `fail_fast` (default) fails the stage with the first failure and cancels the other agents; `wait_all` waits for every agent and fails if any failed; `best_effort` fails only if all failed; `quorum` fails, canceling the others, once fewer than `quorum` agents can still succeed. A stage that does not fail has the answers of the agents that succeeded. |
+| `quorum` | For `failure_policy: quorum`, which needs `kind: parallel`, and only then: how many agents must succeed, from 1 to the number of agents. |
 | `depends_on` | Stages that must finish first. When no stage sets it, each stage depends on the one before it. When any stage sets it, a stage without it starts at once, and stages whose dependencies have finished run concurrently. |
 | `timeout` | Bounds the stage's agent work, not its approval gates. When it passes, the run ends `timed_out`. |
 | `retry` | `max_attempts`, counting the first, and `backoff` before the first retry, doubled for each later one. A failed agent task is retried unless the run was canceled, hit its deadline or exhausted a budget. Each attempt is a task and counts as a sub-agent. |
@@ -109,7 +110,8 @@ them. Request bodies are capped at 1 MiB by default (`api.Server.MaxBodyBytes`).
 cannot reference other documents.
 
 `StartRun` rejects an invalid workflow before creating a run (REST answers 400): a missing,
-duplicate or unknown stage, agent, kind, failure policy or image; a dependency cycle; a hand-back to a stage
+duplicate or unknown stage, agent, kind, failure policy or image; a `quorum` that is missing, out of
+range or set without `failure_policy: quorum`; a dependency cycle; a hand-back to a stage
 the handing stage does not depend on; an invalid regexp or schema; a negative timeout or retry; or
 input that does not match `input_schema`.
 
@@ -351,7 +353,8 @@ Each error should include:
 
 1. Execute `planner -> research agents in parallel -> synthesizer`.
 2. Verify child tasks run concurrently but persisted events have deterministic sequence.
-3. Test `fail_fast`, `wait_all`, `quorum`, and `best_effort` fan-in policies.
+3. Test `fail_fast`, `wait_all`, `quorum` (`TestParallelStageQuorum`), and `best_effort` fan-in
+   policies.
 4. Exhaust per-workflow concurrency and verify excess tasks wait rather than start.
 
 ### Tool Calling
