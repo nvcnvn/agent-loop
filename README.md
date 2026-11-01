@@ -35,7 +35,7 @@ The recommended first vertical slice from
 | Tool policy (allow / deny / approval, by tool name or side-effect level; `tool_policy` in the config file or a workflow) | [policy/policy.go](policy/policy.go) |
 | Budget manager (model calls, tool calls, sub-agents, tokens, cost) | [policy/policy.go](policy/policy.go) |
 | Prometheus metrics at `/metrics` (runs, model calls, tokens, cost, tools, queue depth, HTTP latency) | [observe/metrics.go](observe/metrics.go) |
-| Loop / stall detector; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
+| Loop / stall detector (identical tool calls, near-identical rejected answers); idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Workflows as stage graphs (`depends_on`) with hand-backs to earlier stages, stop conditions, retries, stage/agent/tool timeouts, stage approval gates, and JSON Schema for input and stage outputs; agents delegating to child agents at runtime (`delegate` tool, depth-limited); agents and named workflow templates loaded from a JSON config | [runtime/workflow.go](runtime/workflow.go), [runtime/config.go](runtime/config.go) |
 | Orchestrator with session history passed to every agent, sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`, `quorum`), parallel tool calls for read-safe tools, resuming interrupted runs (also on startup), run queueing with backpressure, concurrency limits per tenant/workflow/agent/tool, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Long-term memory: `memory.save` / `memory.search` tools over embeddings (Ollama or OpenAI-compatible), scoped by session, workflow or tenant, with provenance; pgvector in Postgres | [tool/memory/memory.go](tool/memory/memory.go), [store/memory.go](store/memory.go), [store/pg/memory.go](store/pg/memory.go) |
@@ -247,9 +247,10 @@ were resolved in code:
 3. **Per-run sequence allocator** — sequence numbers are assigned
    atomically inside `Append`, so concurrent goroutines produce a
    strict total order. Verified by `TestEventSequenceIsMonotonicUnderConcurrency`.
-4. **Loop / stall detector algorithm** — a simple sliding counter on
-   `(tool, hash(input))` per run, configurable threshold. Verified by
-   `TestLoopDetectorTripsOnRepeats`.
+4. **Loop / stall detector algorithm** — a counter on
+   `(tool, hash(input))` per run, and word-set similarity between the
+   rejected answers of one agent task. Verified by `TestLoopDetectorTripsOnRepeats`
+   and `TestNearIdenticalRepliesFailTheRun`.
 5. **Replay scope** — strict replay rebuilds the terminal state from
    events; re-execution runs the run again on its recorded model and
    tool outputs and fails on the first request that was never recorded.

@@ -162,3 +162,31 @@ func TestLoopDetector(t *testing.T) {
 		t.Fatalf("after reset: stalled=%v n=%d", stalled, n)
 	}
 }
+
+func TestLoopDetectorFlagsNearIdenticalReplies(t *testing.T) {
+	d := policy.NewLoopDetector(5)
+	replies := []struct {
+		text    string
+		stalled bool
+	}{
+		{"The order 1042 has shipped and will arrive on Friday.", false},
+		{"", false},
+		{"the order 1042 has shipped, and will arrive on friday", false},
+		{"Order 1043 is still waiting for stock.", false},
+		{"The order 1042 has shipped and will arrive on Friday!", false},
+		{"The order 1042 has shipped and will arrive on Friday.", false},
+		{"THE ORDER 1042 HAS SHIPPED AND WILL ARRIVE ON FRIDAY", true},
+	}
+	for i, r := range replies {
+		if stalled, n := d.ObserveReply("run", "task", r.text); stalled != r.stalled {
+			t.Fatalf("reply %d: stalled=%v count=%d", i, stalled, n)
+		}
+	}
+	if stalled, _ := d.ObserveReply("run", "other-task", replies[0].text); stalled {
+		t.Fatal("another task's replies counted")
+	}
+	d.Reset("run")
+	if _, n := d.ObserveReply("run", "task", replies[0].text); n != 1 {
+		t.Fatalf("count after reset=%d", n)
+	}
+}

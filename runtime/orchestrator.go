@@ -1175,7 +1175,6 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 		if err != nil {
 			return "", err
 		}
-
 		messages = append(messages, resp.Message)
 		if len(resp.ToolCalls) > 0 {
 			toolMessages, err := o.runToolCalls(ctx, in.TenantID, in.SessionID, runID, taskID, resp.ToolCalls, allowed, delegate, in.Limits.MaxConcurrent)
@@ -1189,6 +1188,18 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 		if spec.schema != nil {
 			if err := validateJSON(spec.schema, content); err != nil {
 				o.systemEvent(ctx, in, runID, taskID, map[string]any{"event": "output_rejected", "agent": agent.Name, "error": err.Error()})
+				if stalled, count := o.LoopDet.ObserveReply(runID, taskID, content); stalled {
+					o.emit(ctx, core.Event{
+						TenantID:   in.TenantID,
+						SessionID:  in.SessionID,
+						RunID:      runID,
+						TaskID:     taskID,
+						Type:       core.EvSystem,
+						Visibility: core.VisibilityAudit,
+						Payload:    mustJSON(map[string]any{"event": "loop_detected", "agent": agent.Name, "replies": count}),
+					})
+					return "", fmt.Errorf("%w: agent %s gave %d near-identical rejected answers", errLoopDetected, agent.Name, count)
+				}
 				messages = append(messages, model.Message{
 					Role:    model.RoleUser,
 					Content: "Your answer does not match the required output schema: " + err.Error() + "\nReply with only a JSON document that matches it.",

@@ -282,7 +282,9 @@ SSE requirements:
 
 The framework must detect runaway behavior such as:
 - [x] Repeated identical tool calls.
-- [ ] Repeated near-identical messages.
+- [x] Repeated near-identical messages: answers an agent task keeps giving that the output schema
+  rejects.
+- [ ] Repeated near-identical drafts across hand-backs (today only `hand_back.max_times` bounds them).
 - [ ] Excessive delegation without progress.
 - [ ] Retry storms.
 - [x] Long idle waits: a run with no events for `Orchestrator.IdleWarnAfter` gets an `idle_wait`

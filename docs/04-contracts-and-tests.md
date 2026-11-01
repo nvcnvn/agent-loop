@@ -337,6 +337,14 @@ The rest of the policy matrix:
 
 Budget enforcement should reserve before execution and commit or release afterward.
 
+Loop detection (`policy.LoopDetector`) fails a run with `loop_detected` when the same tool is
+called with the same input 5 times in the run, or when an agent task's last 3 answers that the
+output schema rejected are near-identical: as sets of lower-cased words, each pair has a Jaccard
+similarity of at least 0.9 (`ReplyRepeats`, `ReplySimilarity`). An answer that is accepted, or a
+reply with tool calls, is never compared, so an agent that fixes its answer or pages through a tool
+is not stopped. Each records an `audit` `system_event_recorded` event with
+`"event": "loop_detected"`.
+
 ### 9. Security and Tenancy Contract
 
 Decide v1 deployment mode explicitly:
@@ -485,8 +493,8 @@ Each error should include:
 
 1. Stop a run when token budget is exhausted.
 2. Stop a run when sub-agent budget is exhausted.
-3. Pause or fail a run after repeated identical tool calls.
-4. Pause or fail a run after repeated near-identical messages.
+3. Pause or fail a run after repeated identical tool calls (`TestLoopDetectorTripsOnRepeats`).
+4. Pause or fail a run after repeated near-identical messages (`TestNearIdenticalRepliesFailTheRun`).
 5. Detect long idle wait and emit diagnostic event.
 
 ### Human Approval

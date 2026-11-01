@@ -1610,6 +1610,50 @@ func TestToolArtifactsAreStoredAndAnnounced(t *testing.T) {
 	}
 }
 
+// Acceptance: §Budget and Safety #4 – an agent that keeps giving near-identical
+// rejected answers fails before its tool-loop cap, while one that fixes its
+// answer succeeds however similar the fix is.
+func TestNearIdenticalRepliesFailTheRun(t *testing.T) {
+	same := model.MockResponse{Content: `{"total": "about forty"}`}
+	prov := model.NewMockProvider(same, same, same, same, same, same)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, MaxToolLoops: 6}})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+		Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}},
+		OutputSchema: json.RawMessage(`{"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}`),
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, _ := orch.Wait(ctx, core.DefaultTenant, runID)
+	if res.Status != core.RunFailed || !strings.Contains(res.FailureReason, "3 near-identical rejected answers") || len(prov.Calls()) != 3 {
+		t.Fatalf("status=%s reason=%q model calls=%d", res.Status, res.FailureReason, len(prov.Calls()))
+	}
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	var audited, coded bool
+	for _, ev := range events {
+		audited = audited || ev.Visibility == core.VisibilityAudit && strings.Contains(string(ev.Payload), `"event":"loop_detected"`)
+		coded = coded || ev.Type == core.EvError && strings.Contains(string(ev.Payload), `"code":"loop_detected"`)
+	}
+	if !audited || !coded {
+		t.Fatalf("loop_detected audit event=%v error code=%v", audited, coded)
+	}
+
+	fixed := model.NewMockProvider(same, same, model.MockResponse{Content: `{"total": 40}`})
+	orch, _, sid = setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: fixed, MaxToolLoops: 6}})
+	runID, err = orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{
+		Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}},
+		OutputSchema: json.RawMessage(`{"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}`),
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil || res.Outputs["s"] != `{"total": 40}` {
+		t.Fatalf("fixed answer: %+v %v", res, err)
+	}
+}
+
 func awaitApprovalRequest(t *testing.T, s store.Store, runID core.RunID) core.ApprovalID {
 	t.Helper()
 	ctx := context.Background()
@@ -1926,7 +1970,7 @@ func TestLoopDetectorTripsOnRepeats(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = orch.Wait(ctx, core.DefaultTenant, runID)
-	if err == nil || !strings.Contains(err.Error(), "loop detected") {
+	if err == nil || !strings.Contains(err.Error(), "identical calls") {
 		t.Fatalf("expected loop detection, got %v", err)
 	}
 }
