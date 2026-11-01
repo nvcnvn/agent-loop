@@ -260,6 +260,14 @@ type createSessionResp struct {
 type postMessageReq struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	// Run, when set, starts a run in the session with the message as input "message".
+	Run *struct {
+		IdempotencyKey string            `json:"idempotency_key,omitempty"`
+		Workflow       runtime.Workflow  `json:"workflow"`
+		Template       string            `json:"template,omitempty"`
+		Input          map[string]string `json:"input,omitempty"`
+		Limits         core.Limits       `json:"limits,omitempty"`
+	} `json:"run,omitempty"`
 }
 
 type startRunReq struct {
@@ -401,31 +409,57 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	if !s.allowSession(w, r, sid, needWrite) {
 		return
 	}
-	ev := core.Event{
-		TenantID:   tenant,
-		SessionID:  sid,
-		Type:       core.EvHumanMessage,
-		Visibility: core.VisibilityParticipant,
-		ActorID:    principalOf(r),
-		Payload:    mustJSON(map[string]any{"role": req.Role, "content": req.Content}),
-	}
-	out, err := s.Store.Append(r.Context(), []core.Event{ev})
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-	if len(out) == 1 {
-		if err := s.Store.AddMessage(r.Context(), store.MessageProjection{
-			SessionID:  sid,
-			EventID:    out[0].ID,
-			Role:       req.Role,
-			Visibility: core.VisibilityParticipant,
-			Content:    req.Content,
-		}); err != nil {
-			s.Log.ErrorContext(r.Context(), "add message failed", "session_id", sid, "err", err)
+	var run *runtime.StartRunInput
+	if req.Run != nil {
+		if len(req.Run.Workflow.Stages) == 0 && req.Run.Template == "" {
+			writeErr(w, http.StatusBadRequest, "validation_error", "run needs workflow.stages or template")
+			return
+		}
+		run = &runtime.StartRunInput{
+			IdempotencyKey: cmp.Or(req.Run.IdempotencyKey, r.Header.Get("Idempotency-Key")),
+			Workflow:       req.Run.Workflow, Template: req.Run.Template, Input: req.Run.Input, Limits: req.Run.Limits,
 		}
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"event": out[0]})
+	posted, err := s.Orch.PostMessage(r.Context(), tenant, sid, principalOf(r), req.Role, req.Content, run)
+	if err != nil && posted.Event.ID == "" {
+		writeRunErr(w, err)
+		return
+	}
+	resp := map[string]any{"event": posted.Event}
+	if posted.Answered != "" {
+		resp["answered_run_id"], resp["answered_approval_id"] = posted.Answered, posted.Approval
+	}
+	if posted.RunID != "" {
+		resp["run_id"] = posted.RunID
+	}
+	if posted.Replayed {
+		delete(resp, "event")
+		resp["replayed"] = true
+	}
+	if err != nil {
+		status, code := runErrStatus(err)
+		resp["run_error"] = errorResp{Code: code, Message: err.Error(), Retryable: status == http.StatusServiceUnavailable}
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// runErrStatus maps an error starting a run to its HTTP status and code.
+func runErrStatus(err error) (int, string) {
+	switch {
+	case errors.Is(err, core.ErrOverloaded):
+		return http.StatusServiceUnavailable, "overloaded"
+	case errors.Is(err, core.ErrConflict):
+		return http.StatusConflict, "conflict"
+	}
+	return http.StatusBadRequest, "validation_error"
+}
+
+func writeRunErr(w http.ResponseWriter, err error) {
+	status, code := runErrStatus(err)
+	if status == http.StatusServiceUnavailable {
+		w.Header().Set("Retry-After", "1")
+	}
+	writeErr(w, status, code, err.Error())
 }
 
 func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
@@ -460,17 +494,8 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		Images:         req.Images,
 		Limits:         req.Limits,
 	})
-	if errors.Is(err, core.ErrOverloaded) {
-		w.Header().Set("Retry-After", "1")
-		writeErr(w, http.StatusServiceUnavailable, "overloaded", err.Error())
-		return
-	}
-	if errors.Is(err, core.ErrConflict) {
-		writeErr(w, http.StatusConflict, "conflict", err.Error())
-		return
-	}
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "validation_error", err.Error())
+		writeRunErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, startRunResp{RunID: runID})

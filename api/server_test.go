@@ -1090,6 +1090,8 @@ func FuzzRESTBodies(f *testing.F) {
 	f.Add(uint8(0), []byte(`{"title":"demo"}`))
 	f.Add(uint8(0), []byte(``))
 	f.Add(uint8(1), []byte(`{"role":"user","content":"hi"}`))
+	f.Add(uint8(1), []byte(`{"role":"user","content":"hi","run":{"template":"t","input":{"message":"x"},"limits":{"max_tool_calls":-1}}}`))
+	f.Add(uint8(1), []byte(`{"content":"hi","run":null}`))
 	f.Add(uint8(2), []byte(`{"decision":"approved","payload":{"x":1}}`))
 	f.Add(uint8(2), []byte(`{"decision":1}`))
 	f.Add(uint8(3), []byte(`{"session_id":"x","workflow":{"name":"wf","stages":[{"name":"a","kind":"sequential","agents":[{"name":"missing","prompt":"p"}]}]}}`))
@@ -1317,5 +1319,52 @@ func TestIngestIntoMemory(t *testing.T) {
 	hits, _ := s.SearchMemories(ctx, store.MemoryQuery{TenantID: core.DefaultTenant, Embedding: vec[0], EmbedModel: "bow", SessionID: sid, Project: "apollo", Limit: 1})
 	if len(hits) != 1 || hits[0].Source.ArtifactID != text || hits[0].Source.Document != "notes.md" || hits[0].Source.By != core.DefaultPrincipal {
 		t.Fatalf("hits=%+v", hits)
+	}
+}
+
+// Acceptance: §Session and Run Lifecycle #7 – posting a message starts a run with it as input.
+func TestPostMessageStartsARun(t *testing.T) {
+	srv, orch, s := newTestServer(t)
+	defer srv.Close()
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	post := func(body string, want int) map[string]any {
+		t.Helper()
+		resp, err := srv.Client().Post(srv.URL+"/v1/sessions/"+string(sid)+"/messages", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		if resp.StatusCode != want {
+			t.Fatalf("status %d want %d: %v", resp.StatusCode, want, out)
+		}
+		return out
+	}
+	out := post(`{"role":"user","content":"What is new?","run":{"workflow":{"stages":[{"name":"s","agents":[{"name":"echo","prompt":"Answer: {{input.message}}"}]}]}}}`, http.StatusCreated)
+	runID, _ := out["run_id"].(string)
+	wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if res, err := orch.Wait(wctx, core.DefaultTenant, core.RunID(runID)); err != nil || res.Status != core.RunSucceeded {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	post(`{"role":"user","content":"x","run":{"template":"missing"}}`, http.StatusBadRequest)
+	post(`{"role":"user","content":"x","run":{}}`, http.StatusBadRequest)
+	post(`{"role":"user","content":"x","run":{"template":"t","input":{"message":"mine"}}}`, http.StatusBadRequest)
+	humans := func() int {
+		msgs, _ := s.ListMessages(ctx, core.DefaultTenant, sid)
+		return len(slices.DeleteFunc(msgs, func(m store.MessageProjection) bool { return m.Role != "user" }))
+	}
+	if n := humans(); n != 1 {
+		t.Fatalf("a run that could not start left %d messages, want 1", n)
+	}
+	first := post(`{"role":"user","content":"again","run":{"idempotency_key":"k","workflow":{"stages":[{"name":"s","agents":[{"name":"echo","prompt":"x"}]}]}}}`, http.StatusCreated)
+	second := post(`{"role":"user","content":"again","run":{"idempotency_key":"k","workflow":{"stages":[{"name":"s","agents":[{"name":"echo","prompt":"x"}]}]}}}`, http.StatusCreated)
+	if first["run_id"] != second["run_id"] || second["replayed"] != true || second["event"] != nil {
+		t.Fatalf("a replayed post: first %v, second %v", first, second)
+	}
+	if n := humans(); n != 2 {
+		t.Fatalf("a replayed post was stored again: %d messages", n)
 	}
 }

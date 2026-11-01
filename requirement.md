@@ -105,7 +105,8 @@ Chat-style sessions require:
 - [x] Runs pass the session's prior messages to the model: the latest history summary, then human
   messages and earlier runs' agent answers written after it, the last `Orchestrator.MaxHistoryMessages`
   of them, between the instructions and the prompt.
-- [ ] Posting a human message can start or continue a run.
+- [x] Posting a human message can start a run (with the message as input) or continue one whose
+  agent asked a question with `ask_human`.
 
 ### 5.2 Message Model
 

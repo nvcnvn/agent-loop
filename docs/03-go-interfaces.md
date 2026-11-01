@@ -159,6 +159,11 @@ import (
 
 type Orchestrator interface {
     StartRun(ctx context.Context, input core.RunInput) (core.RunHandle, error)
+    // PostMessage stores a human message and answers the session's oldest open ask_human question
+    // with it (an approval with request gate "input"); with run, it checks the run first and
+    // starts it with the message as input "message" instead. PostedMessage reports the event, the
+    // run it answered or started, and whether an earlier post with the run's key had started it.
+    PostMessage(ctx context.Context, tenantID core.TenantID, sessionID core.SessionID, by core.PrincipalID, role, content string, run *StartRunInput) (PostedMessage, error)
     // Resume records by as the actor of the events that mark the resumption.
     Resume(ctx context.Context, tenantID core.TenantID, runID core.RunID, by core.PrincipalID) error
     // Cancel records by and reason in an audit event, then stops the run; a finished run gives

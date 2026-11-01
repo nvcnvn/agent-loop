@@ -119,7 +119,8 @@ Run state:
 ```text
 queued -> running -> succeeded
 queued -> canceled
-running -> awaiting_approval -> running   # approved, rejected or expired; a refused tool call goes back
+running -> awaiting_approval -> running   # also waiting for an answer to an agent's question (ask_human);
+                                          # approved, rejected or expired; a refused tool call goes back
                                           # to the agent, a refused stage gate then fails the run
 running -> paused -> queued   # a detected loop paused it; resumed by a human
 running -> canceling -> canceled

@@ -31,6 +31,8 @@ type Agent struct {
 	Tools        []string       `json:"tools,omitempty"`    // tool names from the tool registry the agent may call
 	Children     []string       `json:"children,omitempty"` // agents it may hand tasks to with the delegate tool
 	MaxToolLoops int            `json:"max_tool_loops,omitempty"`
+	// AskHuman gives the agent the ask_human tool, whose answer is the next message posted to the session.
+	AskHuman bool `json:"ask_human,omitempty"`
 	// Timeout bounds each attempt of a task the agent runs; zero means no bound.
 	Timeout time.Duration `json:"timeout,omitempty"`
 
@@ -478,12 +480,12 @@ func (o *Orchestrator) stageGate(ctx context.Context, runID core.RunID, in Start
 	if gate == "output" {
 		subject["output"] = output
 	}
-	status, err := o.awaitApproval(ctx, in.TenantID, in.SessionID, runID, "", core.StepID(core.NewID()), "stage "+gate+" requires approval", subject, mustJSON(subject))
+	approval, err := o.awaitApproval(ctx, in.TenantID, in.SessionID, runID, "", core.StepID(core.NewID()), "stage "+gate+" requires approval", subject, mustJSON(subject))
 	if err != nil {
 		return err
 	}
-	if status != "approved" {
-		return fmt.Errorf("stage %q %s was not approved (%s)", stage, gate, status)
+	if approval.Status != "approved" {
+		return fmt.Errorf("stage %q %s was not approved (%s)", stage, gate, approval.Status)
 	}
 	return nil
 }

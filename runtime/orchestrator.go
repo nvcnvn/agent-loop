@@ -132,6 +132,8 @@ type Orchestrator struct {
 	executing atomic.Int64
 	sems      policy.Semaphores
 	deltas    deltaHub
+	// replayTools answers built-in questions during re-execution.
+	replayTools tool.Executor
 	// skipApprovals runs tool calls and passes the cost threshold without
 	// approval, for re-execution, whose recorded results already reflect each decision.
 	skipApprovals bool
@@ -212,6 +214,16 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 // StartRun creates a run record and begins executing the workflow in a
 // background goroutine. It returns immediately.
 func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.RunID, error) {
+	existing, err := o.prepareRun(ctx, &in)
+	if err != nil || existing != "" {
+		return existing, err
+	}
+	return o.createRun(ctx, in)
+}
+
+// prepareRun fills in's defaults, workflow, agents and plan and checks them,
+// or returns the run an earlier start with the same idempotency key created.
+func (o *Orchestrator) prepareRun(ctx context.Context, in *StartRunInput) (core.RunID, error) {
 	if in.TenantID == "" {
 		in.TenantID = core.DefaultTenant
 	}
@@ -268,7 +280,11 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		}
 	}
 	in.plan = p
+	return "", nil
+}
 
+// createRun stores a prepared run and starts it.
+func (o *Orchestrator) createRun(ctx context.Context, in StartRunInput) (core.RunID, error) {
 	if err := o.admit(false); err != nil {
 		return "", err
 	}
@@ -1238,11 +1254,18 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			InputSchema: def.InputSchema,
 		})
 	}
-	var delegate tool.Executor
+	builtins := map[string]tool.Executor{}
+	if agent.AskHuman {
+		toolSpecs = append(toolSpecs, askHumanSpec)
+		builtins[askHumanTool] = o.askHuman(in, runID, taskID)
+		if o.replayTools != nil {
+			builtins[askHumanTool] = o.replayTools
+		}
+	}
 	hasChild := slices.ContainsFunc(agent.Children, func(c string) bool { _, ok := in.agents[c]; return ok })
 	if hasChild && spec.depth < in.Limits.MaxDepth {
 		toolSpecs = append(toolSpecs, delegateSpec(agent, in.agents))
-		delegate = tool.ExecutorFunc(func(ctx context.Context, call tool.Call) (tool.Result, error) {
+		builtins[delegateTool] = tool.ExecutorFunc(func(ctx context.Context, call tool.Call) (tool.Result, error) {
 			var req struct {
 				Agent string `json:"agent"`
 				Task  string `json:"task"`
@@ -1299,7 +1322,7 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 		}
 		messages = append(messages, resp.Message)
 		if len(resp.ToolCalls) > 0 {
-			toolMessages, err := o.runToolCalls(ctx, in.TenantID, in.SessionID, runID, taskID, resp.ToolCalls, allowed, delegate, in.Limits.MaxConcurrent)
+			toolMessages, err := o.runToolCalls(ctx, in.TenantID, in.SessionID, runID, taskID, resp.ToolCalls, allowed, builtins, in.Limits.MaxConcurrent)
 			if err != nil {
 				return "", err
 			}
@@ -1533,12 +1556,12 @@ func (o *Orchestrator) onLoop(ctx context.Context, tenant core.TenantID, session
 		return fmt.Errorf("%w: %w", errPaused, err)
 	case LoopApprove:
 		subject := withFields(detail, map[string]any{"gate": "loop", "error": err.Error()})
-		status, aerr := o.awaitApproval(ctx, tenant, session, runID, taskID, core.StepID(core.NewID()), "runaway loop detected", subject, mustJSON(subject))
+		approval, aerr := o.awaitApproval(ctx, tenant, session, runID, taskID, core.StepID(core.NewID()), "runaway loop detected", subject, mustJSON(subject))
 		if aerr != nil {
 			return aerr
 		}
-		if status != "approved" {
-			return fmt.Errorf("%w; carrying on was not approved (%s)", err, status)
+		if approval.Status != "approved" {
+			return fmt.Errorf("%w; carrying on was not approved (%s)", err, approval.Status)
 		}
 		o.LoopDet.Clear(runID, key)
 		return nil
@@ -1594,7 +1617,8 @@ func (o *Orchestrator) checkCost(ctx context.Context, runID core.RunID, in Start
 
 	subject := map[string]any{"gate": "cost", "total_tokens": used.TotalTokens, "cost_units": used.CostUnits,
 		"approve_above": map[string]int64{"total_tokens": limit.TotalTokens, "cost_units": limit.CostUnits}}
-	status, err := o.awaitApproval(ctx, in.TenantID, in.SessionID, runID, taskID, core.StepID(core.NewID()), "run passed its cost approval threshold", subject, mustJSON(subject))
+	approval, err := o.awaitApproval(ctx, in.TenantID, in.SessionID, runID, taskID, core.StepID(core.NewID()), "run passed its cost approval threshold", subject, mustJSON(subject))
+	status := approval.Status
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	defer close(asking)
@@ -1667,7 +1691,7 @@ func (o *Orchestrator) logErr(ctx context.Context, op string, err error, attrs .
 	}
 }
 
-func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, calls []model.ToolCall, allowed map[string]allowedTool, delegate tool.Executor, maxParallel int) ([]model.Message, error) {
+func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, calls []model.ToolCall, allowed map[string]allowedTool, builtins map[string]tool.Executor, maxParallel int) ([]model.Message, error) {
 	type toolOut struct {
 		idx int
 		msg model.Message
@@ -1715,9 +1739,9 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			Input:          tc.Input,
 			IdempotencyKey: string(stepID),
 		}
-		if tc.Name == delegateTool && delegate != nil {
-			callRec.Tool = core.ToolDefinition{ID: delegateTool, Name: delegateTool}
-			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, exec: delegate, runParallel: true})
+		if exec, ok := builtins[tc.Name]; ok {
+			callRec.Tool = core.ToolDefinition{ID: core.ToolID(tc.Name), Name: tc.Name}
+			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, exec: exec, runParallel: tc.Name == delegateTool})
 			continue
 		}
 		allowedTool, ok := allowed[tc.Name]
@@ -1778,7 +1802,8 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 		if plans[i].requiresApproval {
 			call := plans[i].call
 			request := mustJSON(map[string]any{"tool": call.Tool.Name, "input": json.RawMessage(call.Input)})
-			status, err := o.awaitApproval(gctx, tenant, session, runID, taskID, call.StepID, plans[i].approvalReason, map[string]any{"tool": call.Tool.Name}, request)
+			approval, err := o.awaitApproval(gctx, tenant, session, runID, taskID, call.StepID, plans[i].approvalReason, map[string]any{"tool": call.Tool.Name}, request)
+			status := approval.Status
 			if err != nil {
 				return nil, err
 			}
@@ -1835,7 +1860,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 
 // awaitApproval records an approval request about subject, which its events
 // carry, and waits until it is resolved, expires or ctx ends.
-func (o *Orchestrator) awaitApproval(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, stepID core.StepID, reason string, subject map[string]any, request json.RawMessage) (string, error) {
+func (o *Orchestrator) awaitApproval(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, stepID core.StepID, reason string, subject map[string]any, request json.RawMessage) (store.Approval, error) {
 	if reason == "" {
 		reason = "tool requires approval"
 	}
@@ -1854,7 +1879,7 @@ func (o *Orchestrator) awaitApproval(ctx context.Context, tenant core.TenantID, 
 		Request:   request,
 	})
 	if err != nil {
-		return "", err
+		return store.Approval{}, err
 	}
 	o.transitionRun(ctx, runID, tenant, core.RunAwaitingApproval, reason)
 	o.emit(ctx, core.Event{
@@ -1879,11 +1904,11 @@ func (o *Orchestrator) awaitApproval(ctx context.Context, tenant core.TenantID, 
 		if ctx.Err() != nil {
 			status = "canceled"
 		} else if !errors.Is(waitErr, context.DeadlineExceeded) {
-			return "", fmt.Errorf("approval %s: %w", approvalID, waitErr)
+			return store.Approval{}, fmt.Errorf("approval %s: %w", approvalID, waitErr)
 		}
 		approval, err = o.closeApproval(context.WithoutCancel(ctx), tenant, approvalID, status)
 		if err != nil {
-			return "", fmt.Errorf("approval %s: %w", approvalID, err)
+			return store.Approval{}, fmt.Errorf("approval %s: %w", approvalID, err)
 		}
 	}
 	o.emit(context.WithoutCancel(ctx), core.Event{
@@ -1898,10 +1923,10 @@ func (o *Orchestrator) awaitApproval(ctx context.Context, tenant core.TenantID, 
 		Payload:    mustJSON(withFields(subject, map[string]any{"approval_id": approvalID, "status": approval.Status, "resolved_by": approval.ResolvedBy})),
 	})
 	if ctx.Err() != nil {
-		return "", fmt.Errorf("approval %s: %w", approvalID, ctx.Err())
+		return store.Approval{}, fmt.Errorf("approval %s: %w", approvalID, ctx.Err())
 	}
 	o.transitionRun(ctx, runID, tenant, core.RunRunning, "")
-	return approval.Status, nil
+	return approval, nil
 }
 
 func withFields(base, extra map[string]any) map[string]any {
@@ -1926,8 +1951,9 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		attribute.String("gen_ai.tool.name", call.Tool.Name),
 		attribute.String("agentloop.step_id", string(call.StepID)))
 	defer func() { endSpan(span, err) }()
-	// A delegating task holding a slot its descendants wait for would deadlock.
-	if call.Tool.ID != delegateTool {
+	// Built-ins take no slot: a delegating task holding one its descendants
+	// wait for would deadlock, and a question would block other runs' questions.
+	if string(call.Tool.ID) != call.Tool.Name {
 		limit := o.Concurrency.PerTool
 		if call.Tool.Concurrency == core.ConcurrencyExclusive {
 			limit = 1

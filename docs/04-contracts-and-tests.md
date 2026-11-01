@@ -26,8 +26,8 @@ and not expired, oldest first, as `{"approvals": [{"approval_id", "tenant_id", "
 such run), and `?status=` picks `approved`, `rejected`, `expired`, `canceled` or `all` (where an
 approval that expired before anyone closed it still shows as `requested`). Pages hold `?limit=`
 approvals (1 to 100, default 100); a full page carries `next_after`, which `?after=` takes to get
-the next. `request` holds the `tool` and its `input`, or the stage `gate`, `stage` and, for output
-gates, `output`: whoever may approve sees what they approve, so anyone who can read the session can read tool
+the next. `request` holds the `tool` and its `input`, the stage `gate`, `stage` and, for output
+gates, `output`, or for an agent's question `"gate": "input"` and its `question`: whoever may approve sees what they approve, so anyone who can read the session can read tool
 inputs this way, though `tool_call_scheduled` is internal. `POST /v1/approvals/{aid}` with
 `{"decision": "approved" | "rejected", "payload": {...}}` resolves one as the caller's principal,
 which `resolved_by` and the `actor_id` of the `approval_resolved` event record (when the runtime
@@ -47,6 +47,20 @@ before its caller was removed from the session runs on until the run ends. A run
 belongs to its session: reusing it in another session answers 409. `GET /v1/sessions` and `GET /v1/approvals` list only what the caller
 participates in, unless it is an admin or operator. The `/v1/debug/*` endpoints need admin or
 operator.
+
+Messages: `POST /v1/sessions/{sid}/messages` with `{"role", "content"}` stores a human message by
+the caller (`human_message_created`) and answers 201 `{"event"}`. If a run of the session is waiting
+on an agent's question (`ask_human`, §4), the oldest such question (by creation time) takes the
+message as its answer, and the response adds `answered_run_id` and `answered_approval_id`.
+
+With `"run": {"workflow" | "template", "input", "limits", "idempotency_key"}` (or an
+`Idempotency-Key` header) the message instead starts a run in the session, as its input `message`
+(and, like every earlier message, in the history its agents see), and answers no question. The run
+is checked first: one that is invalid, or whose input already has `message`, answers 400 like
+`POST /v1/runs` and posts nothing. A key an earlier post already used answers 201 `{"run_id",
+"replayed": true}` and posts nothing again. Otherwise the response adds `run_id`; if the run could
+still not start once the message was stored (the queue is full), it answers 201 with `run_error`
+in the error shape (`code`, `message`, `retryable`).
 
 Sessions: `POST /v1/sessions` takes `{"title", "project"}`; `project` is an optional label of at most
 200 bytes, trimmed, that sessions share to share project memory, and `GET /v1/sessions?project=`
@@ -250,6 +264,11 @@ in the tool policy, an unknown loop response, and negative thresholds or caps.
 - `model` defaults to the server's model, and every agent uses the server's provider.
 - `tools` lists registry tools the agent may call; `max_tool_loops` (default 4) caps its model calls
   per task; `timeout` bounds each task attempt.
+- An agent with `"ask_human": true` gets a built-in `ask_human` tool taking `{"question"}`. The run
+  waits for an approval whose `request` is `{"gate": "input", "question"}`; the next message posted
+  to the session answers it, and the agent gets `{"answer": "<message>"}`. An approval resolved
+  over REST answers with its payload's `answer`; one rejected, expired or canceled gives the agent
+  `{"answered": false, "status"}`.
 - An agent with `children` gets a built-in `delegate` tool taking `{"agent", "task"}`. The child runs
   as a task with the caller's task as its parent and one more level of depth, and its answer comes
   back as the tool result `{"agent", "answer"}`. Delegate calls in one model response run
@@ -557,6 +576,10 @@ Each error should include:
    failed task runs again. Succeeded and canceled runs cannot be resumed.
 6. Agents see the session's earlier human messages (always as user turns) and earlier runs' answers
    (as assistant turns) between their instructions and the stage prompt.
+7. Post a message that starts a run with it as input (`TestPostMessageStartsARun`).
+8. An agent asks a question and the next human message continues its run; an unanswered question
+   expires back to the agent (`TestAskHumanContinuesWithTheNextMessage`,
+   `TestUnansweredQuestionGoesBackToTheAgent`).
 
 ### Sequential Multi-Agent Workflow
 
