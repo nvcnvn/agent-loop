@@ -134,8 +134,8 @@ Required behavior:
   name internal hosts) it reports a failed agent task attempt, with `agent`, `stage`, `attempt` and
   `will_retry`; an attempt stopped because its run, its stage or a sibling agent failed, timed out
   or was canceled records none. Codes: `budget_exceeded`, `policy_denied`, `timed_out`, `canceled`,
-  `unsupported_capability`, `loop_detected`, `provider_unavailable` (a model call failed), and
-  `failed` for the rest.
+  `unsupported_capability`, `loop_detected`, `paused` (a loop paused the run), `provider_unavailable`
+  (a model call failed), and `failed` for the rest.
 - Event names are backward-compatible or versioned.
 
 ### 3. Workflow Definition Contract
@@ -169,7 +169,7 @@ nanoseconds, as in `limits`.
 | `quorum` | For `failure_policy: quorum`, which needs `kind: parallel`, and only then: how many agents must succeed, from 1 to the number of agents. |
 | `depends_on` | Stages that must finish first. When no stage sets it, each stage depends on the one before it. When any stage sets it, a stage without it starts at once, and stages whose dependencies have finished run concurrently. |
 | `timeout` | Bounds the stage's agent work, not its approval gates. When it passes, the run ends `timed_out`. |
-| `retry` | `max_attempts`, counting the first, and `backoff` before the first retry, doubled for each later one. A failed agent task is retried unless the run was canceled, hit its deadline or exhausted a budget. Each attempt is a task and counts as a sub-agent. |
+| `retry` | `max_attempts`, counting the first, and `backoff` before the first retry, doubled for each later one. A failed agent task is retried unless the run was canceled, paused or hit its deadline, or the task exhausted a budget, was refused by policy (`policy_denied`), needed a capability its model lacks, or hit a loop. Each attempt is a task and counts as a sub-agent. |
 | `hand_back` | When the stage output matches the regexp `when`, the stage `to` (this stage or one it depends on, directly or not) and every stage depending on it run again, after running stages finish. One hand-back more than `max_times` (default 3) fails the run. |
 | `stop_when` | Regexp. When the stage output matches it, no further stage starts, and the run succeeds once running stages finish. |
 | `output_schema` | JSON Schema every answer in the stage must satisfy. It is sent to the provider as the response schema. An answer that does not match goes back to the model with the validation error and counts toward the agent's `max_tool_loops`. |
@@ -221,6 +221,8 @@ side-effect level in the tool policy.
   ],
   "compaction": {"agent": "lead", "max_tokens": 6000, "keep_recent": 6},
   "tool_policy": {"approve_side_effects": ["write_external", "dangerous"]},
+  "loop_response": "pause",
+  "approve_above": {"total_tokens": 200000},
   "visibility": {"member": ["public", "participant", "internal"]}
 }
 ```
@@ -373,13 +375,35 @@ The rest of the policy matrix:
 
 Budget enforcement should reserve before execution and commit or release afterward.
 
-Loop detection (`policy.LoopDetector`) fails a run with `loop_detected` when the same tool is
-called with the same input 5 times in the run, or when an agent task's last 3 answers that the
-output schema rejected are near-identical: as sets of lower-cased words, each pair has a Jaccard
-similarity of at least 0.9 (`ReplyRepeats`, `ReplySimilarity`). An answer that is accepted, or a
-reply with tool calls, is never compared, so an agent that fixes its answer or pages through a tool
-is not stopped. Each records an `audit` `system_event_recorded` event with
-`"event": "loop_detected"`.
+Loop detection (`policy.LoopDetector`) catches a run that is not making progress:
+- `repeated_tool_call`: the same tool called with the same input 5 times in the run;
+- `rejected_answers`: an agent task's last 3 answers that the output schema rejected are
+  near-identical: as sets of lower-cased words, each pair has a Jaccard similarity of at least 0.9
+  (`ReplyRepeats`, `ReplySimilarity`). An accepted answer, or a reply with tool calls, is never
+  compared, so an agent that fixes its answer or pages through a tool is not stopped;
+- `repeated_drafts`: the drafts a hand-back sent back to its target stage the last 3 times are
+  near-identical in the same sense;
+- `repeated_delegation`: one agent task delegated 3 near-identical tasks (agent and task text);
+- `retry_storm`: 10 task retries in the run within a minute (`RetryStorm`, `RetryWindow`).
+
+Each records an `audit` `system_event_recorded` event with `"event": "loop_detected"`, its `kind`
+and details, and the `response`, which `Orchestrator.LoopResponse` (`loop_response` in the config
+file) picks:
+- `fail` (default): the run fails with `loop_detected`.
+- `pause`: the run stops in `paused`, with the loop as its `failure_reason`, until
+  `POST /v1/runs/{rid}/resume` resumes it (completed tasks are reused, as for any resume) or
+  `POST /v1/runs/{rid}/cancel` cancels it. A restart does not resume paused runs.
+- `approve`: the run asks for an approval whose `request` holds `"gate": "loop"`, the `kind` and
+  details; if approved the detector forgets what it saw and the run carries on, otherwise it fails.
+  A task that hit a loop is not retried, whatever its stage's retry policy. A pause stops a parallel
+  stage whatever its `failure_policy`. A hand-back loop's approval is awaited before the run handles
+  its other stages' results.
+
+A run whose total tokens or cost units pass the positive fields of `Orchestrator.ApproveAbove`
+(`approve_above` in the config file, e.g. `{"total_tokens": 200000, "cost_units": 5000}`) asks once
+before its next model call for an approval whose `request` holds `"gate": "cost"`, the usage and the
+threshold; concurrent tasks wait for the same answer. Without approval the model calls fail with
+`policy_denied`. A resumed run asks again once it is past the threshold; re-execution never asks.
 
 ### 9. Security and Tenancy Contract
 
@@ -529,8 +553,11 @@ Each error should include:
 
 1. Stop a run when token budget is exhausted.
 2. Stop a run when sub-agent budget is exhausted.
-3. Pause or fail a run after repeated identical tool calls (`TestLoopDetectorTripsOnRepeats`).
-4. Pause or fail a run after repeated near-identical messages (`TestNearIdenticalRepliesFailTheRun`).
+3. Pause or fail a run after repeated identical tool calls (`TestLoopDetectorTripsOnRepeats`,
+   `TestLoopPausesRun`), or ask whether it may carry on (`TestLoopAsksForApproval`).
+4. Pause or fail a run after repeated near-identical messages (`TestNearIdenticalRepliesFailTheRun`),
+   hand-back drafts (`TestNearIdenticalHandBackDraftsFailTheRun`) or delegations
+   (`TestRepeatedDelegationFailsTheRun`), and after a retry storm (`TestRetryStormFailsTheRun`).
 5. Detect long idle wait and emit diagnostic event.
 
 ### Human Approval
@@ -539,6 +566,7 @@ Each error should include:
 2. Approve asynchronously and resume the run.
 3. Reject approval; the agent receives the rejection as the tool result and the run continues.
 4. Expire approval and verify timeout handling.
+5. Ask once before a run goes past its cost threshold (`TestCostThresholdAsksOnce`).
 
 ### Memory and Retrieval
 

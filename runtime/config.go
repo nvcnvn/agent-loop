@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/policy"
 )
 
@@ -17,6 +18,9 @@ type Config struct {
 	Compaction *Compaction `json:"compaction,omitempty"`
 	// ToolPolicy applies to every run.
 	ToolPolicy *policy.ToolPolicy `json:"tool_policy,omitempty"`
+	// LoopResponse and ApproveAbove set the Orchestrator fields of the same names.
+	LoopResponse LoopResponse `json:"loop_response,omitempty"`
+	ApproveAbove *core.Usage  `json:"approve_above,omitempty"`
 }
 
 // ParseConfig decodes a JSON config and checks its agents and workflows against each other.
@@ -64,6 +68,14 @@ func (c Config) Validate() error {
 		if err := c.ToolPolicy.Validate(); err != nil {
 			return err
 		}
+	}
+	if a := c.ApproveAbove; a != nil && (a.TotalTokens < 0 || a.CostUnits < 0) {
+		return errors.New("approve_above must not be negative")
+	}
+	switch c.LoopResponse {
+	case "", LoopFail, LoopPause, LoopApprove:
+	default:
+		return fmt.Errorf("loop_response %q is not fail, pause or approve", c.LoopResponse)
 	}
 	names := map[string]bool{}
 	for _, w := range c.Workflows {

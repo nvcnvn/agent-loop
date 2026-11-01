@@ -407,6 +407,15 @@ func (o *Orchestrator) runStages(ctx context.Context, runID core.RunID, in Start
 				cancel()
 				continue
 			}
+			scope := "hand_back:" + stage.Name
+			if stalled, count := o.LoopDet.ObserveReply(runID, scope, vars[p.stages[to].Name]); stalled {
+				err := fmt.Errorf("%w: stage %q handed back %d near-identical drafts", errLoopDetected, stage.Name, count)
+				if err := o.onLoop(ctx, in.TenantID, in.SessionID, runID, "", scope, map[string]any{"kind": "repeated_drafts", "stage": stage.Name, "drafts": count}, err); err != nil {
+					failed = err
+					cancel()
+					continue
+				}
+			}
 			o.systemEvent(ctx, in, runID, "", map[string]any{"event": "stage_handed_back", "stage": stage.Name, "to": stage.HandBack.To, "count": handBacks[r.i]})
 			feedback[to] = r.out
 			resets = append(resets, to)

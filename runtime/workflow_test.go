@@ -569,6 +569,10 @@ func TestParseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if loop, err := runtime.ParseConfig([]byte(`{"agents":[{"name":"a"}],"loop_response":"approve","approve_above":{"total_tokens":100}}`)); err != nil ||
+		loop.LoopResponse != runtime.LoopApprove || loop.ApproveAbove.TotalTokens != 100 {
+		t.Fatalf("loop config=%+v err=%v", loop, err)
+	}
 	if len(cfg.Agents) != 2 || cfg.Agents[0].Timeout != time.Minute || cfg.Workflows[0].Stages[1].HandBack.To != "plan" ||
 		cfg.ToolPolicy == nil || len(cfg.ToolPolicy.ApproveSideEffects) != 2 || cfg.ToolPolicy.Denylist[0] != "shell" {
 		t.Fatalf("config=%+v", cfg)
@@ -582,6 +586,8 @@ func TestParseConfig(t *testing.T) {
 		"compaction agent": `{"agents":[{"name":"a"}],"compaction":{"agent":"b","max_messages":5}}`,
 		"compaction never": `{"agents":[{"name":"a"}],"compaction":{"agent":"a"}}`,
 		"side effect":      `{"agents":[{"name":"a"}],"tool_policy":{"approve_side_effects":["sends_email"]}}`,
+		"loop response":    `{"agents":[{"name":"a"}],"loop_response":"panic"}`,
+		"approve above":    `{"agents":[{"name":"a"}],"approve_above":{"cost_units":-1}}`,
 	} {
 		if _, err := runtime.ParseConfig([]byte(bad)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -592,6 +598,7 @@ func TestParseConfig(t *testing.T) {
 func FuzzParseConfig(f *testing.F) {
 	f.Add([]byte(sampleConfig))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"compaction":{"agent":"a","max_tokens":8000,"keep_recent":6}}`))
+	f.Add([]byte(`{"agents":[{"name":"a"}],"loop_response":"pause","approve_above":{"total_tokens":100,"cost_units":5}}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"workflows":[{"name":"w","stages":[{"name":"s","depends_on":["s"],"agents":[{"name":"a"}]}]}]}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"workflows":[{"name":"w","stages":[{"name":"s","output_schema":{"$ref":"#/x"},"agents":[{"name":"a"}]}]}]}`))
 	f.Fuzz(func(t *testing.T, data []byte) {

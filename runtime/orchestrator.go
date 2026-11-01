@@ -106,6 +106,10 @@ type Orchestrator struct {
 	Compaction Compaction
 	// IdleWarnAfter is how long a run may go without an event before it gets an idle_wait diagnostic; zero disables it.
 	IdleWarnAfter time.Duration
+	// LoopResponse is what a detected runaway loop does to its run.
+	LoopResponse LoopResponse
+	// ApproveAbove asks a human, once per execution, before a model call of a run whose total tokens or cost units passed its positive fields.
+	ApproveAbove core.Usage
 
 	mu        sync.Mutex
 	runs      map[core.RunID]*runState
@@ -120,9 +124,9 @@ type Orchestrator struct {
 	executing atomic.Int64
 	sems      policy.Semaphores
 	deltas    deltaHub
-	// skipToolApprovals runs tool calls without approval, for re-execution,
-	// whose recorded results already reflect each decision.
-	skipToolApprovals bool
+	// skipApprovals runs tool calls and passes the cost threshold without
+	// approval, for re-execution, whose recorded results already reflect each decision.
+	skipApprovals bool
 }
 
 type runState struct {
@@ -132,6 +136,8 @@ type runState struct {
 	taskSpawned map[core.TaskID]core.EventID
 	lastInStep  map[core.StepID]core.EventID
 	taskActor   map[core.TaskID]core.PrincipalID
+
+	cost costGate
 
 	tenant  core.TenantID
 	cancel  context.CancelCauseFunc
@@ -354,6 +360,9 @@ func (o *Orchestrator) Recover(ctx context.Context) (int, error) {
 	var errs []error
 	resumed := 0
 	for _, run := range runs {
+		if run.Status == core.RunPaused {
+			continue
+		}
 		if err := o.resume(ctx, run.TenantID, run.ID, core.SystemPrincipal, true); err != nil {
 			errs = append(errs, fmt.Errorf("run %s: %w", run.ID, err))
 			continue
@@ -417,7 +426,7 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 	if err := o.admit(force); err != nil {
 		return err
 	}
-	if run.Status.Terminal() {
+	if run.Status.Terminal() || run.Status == core.RunPaused {
 		reopened := run
 		reopened.Status, reopened.FailureReason, reopened.EndedAt = core.RunQueued, "", time.Time{}
 		if err := o.Store.UpdateRun(ctx, reopened); err != nil {
@@ -671,7 +680,7 @@ func (o *Orchestrator) storedResult(ctx context.Context, tenant core.TenantID, r
 	if err != nil {
 		return Result{}, err
 	}
-	if !run.Status.Terminal() {
+	if !run.Status.Terminal() && run.Status != core.RunPaused {
 		return Result{}, fmt.Errorf("run %s is %s but not executing here: %w", runID, run.Status, core.ErrNotFound)
 	}
 	res := Result{RunID: runID, Status: run.Status, Usage: run.Usage, FailureReason: run.FailureReason}
@@ -737,7 +746,39 @@ func (o *Orchestrator) Cancel(ctx context.Context, tenant core.TenantID, runID c
 	if run.Status.Terminal() {
 		return fmt.Errorf("run %s already %s: %w", runID, run.Status, core.ErrConflict)
 	}
-	return fmt.Errorf("run %s is not executing here: %w", runID, core.ErrNotFound)
+	if run.Status != core.RunPaused {
+		return fmt.Errorf("run %s is not executing here: %w", runID, core.ErrNotFound)
+	}
+	return o.cancelPaused(ctx, tenant, runID, by, reason)
+}
+
+// cancelPaused cancels a paused run, holding its claim so it cannot be resumed meanwhile.
+func (o *Orchestrator) cancelPaused(ctx context.Context, tenant core.TenantID, runID core.RunID, by core.PrincipalID, reason string) error {
+	_, st, err := o.claim(runID, tenant)
+	if err != nil {
+		return err
+	}
+	defer o.unclaim(runID, st)
+	run, err := o.Store.GetRun(ctx, tenant, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status != core.RunPaused {
+		return fmt.Errorf("run %s is %s, no longer paused: %w", runID, run.Status, core.ErrConflict)
+	}
+	o.emit(ctx, core.Event{
+		TenantID: tenant, SessionID: run.SessionID, RunID: runID, Type: core.EvSystem, Visibility: core.VisibilityAudit, ActorID: by,
+		Payload: mustJSON(map[string]any{"event": "run_cancel_requested", "reason": reason}),
+	})
+	run.Status, run.FailureReason, run.EndedAt = core.RunCanceled, "canceled while paused", time.Now().UTC()
+	if err := o.Store.UpdateRun(ctx, run); err != nil {
+		return err
+	}
+	o.emit(ctx, core.Event{
+		TenantID: tenant, SessionID: run.SessionID, RunID: runID, Type: core.EvRunStateChanged, Visibility: core.VisibilityPublic, ActorID: by,
+		Payload: mustJSON(map[string]any{"status": core.RunCanceled, "failure_reason": run.FailureReason}),
+	})
+	return nil
 }
 
 // execute is the main run loop.
@@ -799,6 +840,9 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		runErr = err
 		switch {
 		case err == nil:
+		case errors.Is(err, errPaused):
+			finalStatus = core.RunPaused
+			failureReason = err.Error()
 		case errors.Is(err, context.Canceled):
 			finalStatus = core.RunCanceled
 			failureReason = "canceled"
@@ -835,7 +879,9 @@ func (o *Orchestrator) execute(ctx context.Context, runID core.RunID, in StartRu
 		cur.Status = finalStatus
 		cur.Usage = usage
 		cur.FailureReason = failureReason
-		cur.EndedAt = time.Now().UTC()
+		if finalStatus != core.RunPaused {
+			cur.EndedAt = time.Now().UTC()
+		}
 		cur.Output, _ = json.Marshal(stageOutputs)
 		err = o.Store.UpdateRun(context.Background(), cur)
 	}
@@ -940,7 +986,7 @@ func (o *Orchestrator) runParallelStage(ctx context.Context, runID core.RunID, i
 		}
 		failures++
 		switch {
-		case policy == FailFast:
+		case policy == FailFast, errors.Is(r.err, errPaused):
 			stageErr = r.err
 		case policy == Quorum && failures > len(stage.Agents)-stage.Quorum:
 			stageErr = fmt.Errorf("stage %q: %d of %d agents failed, so fewer than the quorum of %d can succeed: %w", stage.Name, failures, len(stage.Agents), stage.Quorum, r.err)
@@ -1032,6 +1078,14 @@ func (o *Orchestrator) runTask(ctx context.Context, runID core.RunID, in StartRu
 		}
 		retry := spec.retries(ctx, attempt, err)
 		if retry {
+			if stalled, n := o.LoopDet.ObserveRetry(runID); stalled {
+				storm := fmt.Errorf("%w: %d retries within %s, the last after: %w", errLoopDetected, n, o.LoopDet.RetryWindow, err)
+				if lerr := o.onLoop(ctx, in.TenantID, in.SessionID, runID, "", "", map[string]any{"kind": "retry_storm", "retries": n, "agent": spec.agent.Name}, storm); lerr != nil {
+					retry, err = false, lerr
+				}
+			}
+		}
+		if retry {
 			if rerr := o.Budget.ReserveSubAgent(runID); rerr != nil {
 				retry, err = false, rerr
 			}
@@ -1061,7 +1115,8 @@ func (o *Orchestrator) runTask(ctx context.Context, runID core.RunID, in StartRu
 
 // retries reports whether a failed attempt is retried.
 func (spec taskSpec) retries(ctx context.Context, attempt int, err error) bool {
-	return attempt < spec.retry.MaxAttempts && ctx.Err() == nil && !errors.Is(err, core.ErrBudgetExceeded) && !errors.Is(err, model.ErrUnsupported)
+	return attempt < spec.retry.MaxAttempts && ctx.Err() == nil && !errors.Is(err, core.ErrBudgetExceeded) && !errors.Is(err, model.ErrUnsupported) &&
+		!errors.Is(err, errLoopDetected) && !errors.Is(err, core.ErrPolicyDenied)
 }
 
 func (o *Orchestrator) attemptTask(ctx context.Context, runID core.RunID, in StartRunInput, spec taskSpec, attempt int) (string, core.TaskID, error) {
@@ -1143,7 +1198,7 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			o.systemEvent(ctx, in, runID, taskID, map[string]any{"event": "tool_denied", "tool": def.Name, "reason": reason})
 			continue
 		}
-		allowed[def.Name] = allowedTool{def: def, requiresApproval: requiresApproval && !o.skipToolApprovals, approvalReason: reason}
+		allowed[def.Name] = allowedTool{def: def, requiresApproval: requiresApproval && !o.skipApprovals, approvalReason: reason}
 		toolSpecs = append(toolSpecs, model.ToolSpec{
 			Name:        def.Name,
 			Description: def.Description,
@@ -1164,6 +1219,13 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			child, ok := o.Agents[req.Agent]
 			if !ok || !slices.Contains(agent.Children, req.Agent) {
 				return tool.Result{}, fmt.Errorf("%w: %s may not delegate to %q", core.ErrPolicyDenied, agent.Name, req.Agent)
+			}
+			scope := "delegate:" + string(taskID)
+			if stalled, n := o.LoopDet.ObserveReply(runID, scope, req.Agent+" "+req.Task); stalled {
+				err := fmt.Errorf("%w: agent %s delegated %d near-identical tasks", errLoopDetected, agent.Name, n)
+				if err := o.onLoop(ctx, in.TenantID, in.SessionID, runID, taskID, scope, map[string]any{"kind": "repeated_delegation", "agent": agent.Name, "count": n}, err); err != nil {
+					return tool.Result{}, err
+				}
 			}
 			out, err := o.runTask(ctx, runID, in, taskSpec{
 				stage: spec.stage, agent: child, prompt: req.Task, parent: taskID, spawnedBy: core.AgentPrincipal(agent.Name), depth: spec.depth + 1,
@@ -1210,17 +1272,11 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 		if spec.schema != nil {
 			if err := validateJSON(spec.schema, content); err != nil {
 				o.systemEvent(ctx, in, runID, taskID, map[string]any{"event": "output_rejected", "agent": agent.Name, "error": err.Error()})
-				if stalled, count := o.LoopDet.ObserveReply(runID, taskID, content); stalled {
-					o.emit(ctx, core.Event{
-						TenantID:   in.TenantID,
-						SessionID:  in.SessionID,
-						RunID:      runID,
-						TaskID:     taskID,
-						Type:       core.EvSystem,
-						Visibility: core.VisibilityAudit,
-						Payload:    mustJSON(map[string]any{"event": "loop_detected", "agent": agent.Name, "replies": count}),
-					})
-					return "", fmt.Errorf("%w: agent %s gave %d near-identical rejected answers", errLoopDetected, agent.Name, count)
+				if stalled, count := o.LoopDet.ObserveReply(runID, string(taskID), content); stalled {
+					err := fmt.Errorf("%w: agent %s gave %d near-identical rejected answers", errLoopDetected, agent.Name, count)
+					if err := o.onLoop(ctx, in.TenantID, in.SessionID, runID, taskID, string(taskID), map[string]any{"kind": "rejected_answers", "agent": agent.Name, "replies": count}, err); err != nil {
+						return "", err
+					}
 				}
 				messages = append(messages, model.Message{
 					Role:    model.RoleUser,
@@ -1238,6 +1294,9 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 // modelCall makes one budgeted, traced and recorded model call for agent,
 // filling the request's IDs and model.
 func (o *Orchestrator) modelCall(ctx context.Context, runID core.RunID, in StartRunInput, taskID core.TaskID, agent Agent, req model.ChatRequest) (model.ChatResponse, error) {
+	if err := o.checkCost(ctx, runID, in, taskID); err != nil {
+		return model.ChatResponse{}, err
+	}
 	if err := o.Budget.ReserveModelCall(runID); err != nil {
 		return model.ChatResponse{}, err
 	}
@@ -1398,7 +1457,114 @@ func (o *Orchestrator) systemEvent(ctx context.Context, in StartRunInput, runID 
 var (
 	errModelCall    = errors.New("model")
 	errLoopDetected = errors.New("loop detected")
+	errPaused       = errors.New("run paused")
 )
+
+// LoopResponse is what a detected runaway loop does to its run.
+type LoopResponse string
+
+const (
+	// LoopFail fails the run; it is the default.
+	LoopFail LoopResponse = "fail"
+	// LoopPause leaves the run paused until it is resumed or canceled.
+	LoopPause LoopResponse = "pause"
+	// LoopApprove asks a human whether the run may carry on, and fails it unless approved.
+	LoopApprove LoopResponse = "approve"
+)
+
+// onLoop records a detected loop, with detail, and answers it as LoopResponse
+// says; nil lets the run carry on, with what the detector saw under key forgotten.
+func (o *Orchestrator) onLoop(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, key string, detail map[string]any, err error) error {
+	response := cmp.Or(o.LoopResponse, LoopFail)
+	o.emit(ctx, core.Event{
+		TenantID:   tenant,
+		SessionID:  session,
+		RunID:      runID,
+		TaskID:     taskID,
+		Type:       core.EvSystem,
+		Visibility: core.VisibilityAudit,
+		Payload:    mustJSON(withFields(detail, map[string]any{"event": "loop_detected", "error": err.Error(), "response": response})),
+	})
+	switch response {
+	case LoopPause:
+		return fmt.Errorf("%w: %w", errPaused, err)
+	case LoopApprove:
+		subject := withFields(detail, map[string]any{"gate": "loop", "error": err.Error()})
+		status, aerr := o.awaitApproval(ctx, tenant, session, runID, taskID, core.StepID(core.NewID()), "runaway loop detected", subject, mustJSON(subject))
+		if aerr != nil {
+			return aerr
+		}
+		if status != "approved" {
+			return fmt.Errorf("%w; carrying on was not approved (%s)", err, status)
+		}
+		o.LoopDet.Clear(runID, key)
+		return nil
+	}
+	return err
+}
+
+// costGate holds a run's one answer to whether it may go past ApproveAbove.
+type costGate struct {
+	mu       sync.Mutex
+	asking   chan struct{} // closed when the caller asking a human is done; nil when nobody asks
+	answered bool
+	err      error
+}
+
+// checkCost asks once per execution whether a run past ApproveAbove may call
+// models again; other callers wait for that answer or their own context. When
+// the asker's context ends first, the next caller asks again.
+func (o *Orchestrator) checkCost(ctx context.Context, runID core.RunID, in StartRunInput, taskID core.TaskID) error {
+	limit := o.ApproveAbove
+	if limit.TotalTokens <= 0 && limit.CostUnits <= 0 || o.skipApprovals {
+		return nil
+	}
+	used := o.Budget.Snapshot(runID)
+	if !(limit.TotalTokens > 0 && used.TotalTokens > limit.TotalTokens || limit.CostUnits > 0 && used.CostUnits > limit.CostUnits) {
+		return nil
+	}
+	o.mu.Lock()
+	st := o.runs[runID]
+	o.mu.Unlock()
+	if st == nil {
+		return nil
+	}
+	g := &st.cost
+	g.mu.Lock()
+	for !g.answered && g.asking != nil {
+		asking := g.asking
+		g.mu.Unlock()
+		select {
+		case <-asking:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		g.mu.Lock()
+	}
+	if g.answered {
+		defer g.mu.Unlock()
+		return g.err
+	}
+	asking := make(chan struct{})
+	g.asking = asking
+	g.mu.Unlock()
+
+	subject := map[string]any{"gate": "cost", "total_tokens": used.TotalTokens, "cost_units": used.CostUnits,
+		"approve_above": map[string]int64{"total_tokens": limit.TotalTokens, "cost_units": limit.CostUnits}}
+	status, err := o.awaitApproval(ctx, in.TenantID, in.SessionID, runID, taskID, core.StepID(core.NewID()), "run passed its cost approval threshold", subject, mustJSON(subject))
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	defer close(asking)
+	g.asking = nil
+	if err != nil {
+		return err
+	}
+	g.answered = true
+	if status != "approved" {
+		g.err = fmt.Errorf("%w: going past the cost approval threshold was not approved (%s)", core.ErrPolicyDenied, status)
+	}
+	return g.err
+}
 
 // errorCode classifies err for error_recorded events.
 func errorCode(err error) string {
@@ -1413,6 +1579,8 @@ func errorCode(err error) string {
 		return "policy_denied"
 	case errors.Is(err, model.ErrUnsupported):
 		return "unsupported_capability"
+	case errors.Is(err, errPaused):
+		return "paused"
 	case errors.Is(err, errLoopDetected):
 		return "loop_detected"
 	case errors.Is(err, errModelCall):
@@ -1487,16 +1655,11 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 
 	for i, tc := range calls {
 		if stalled, count := o.LoopDet.Observe(runID, tc.Name, hashInput(tc.Input)); stalled {
-			o.emit(ctx, core.Event{
-				TenantID:   tenant,
-				SessionID:  session,
-				RunID:      runID,
-				TaskID:     taskID,
-				Type:       core.EvSystem,
-				Visibility: core.VisibilityAudit,
-				Payload:    mustJSON(map[string]any{"event": "loop_detected", "tool": tc.Name, "count": count}),
-			})
-			return nil, fmt.Errorf("%w on tool %s after %d identical calls", errLoopDetected, tc.Name, count)
+			err := fmt.Errorf("%w on tool %s after %d identical calls", errLoopDetected, tc.Name, count)
+			key := policy.ToolKey(tc.Name, hashInput(tc.Input))
+			if err := o.onLoop(ctx, tenant, session, runID, taskID, key, map[string]any{"kind": "repeated_tool_call", "tool": tc.Name, "count": count}, err); err != nil {
+				return nil, err
+			}
 		}
 		callRec := tool.Call{
 			TenantID: tenant,
@@ -1744,7 +1907,7 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 	}
 	o.Metrics.Observe("agentloop_tool_call_duration_seconds", time.Since(callStart).Seconds(), "tool", call.Tool.Name)
 	if err != nil {
-		if ctx.Err() != nil || errors.Is(err, core.ErrBudgetExceeded) {
+		if ctx.Err() != nil || errors.Is(err, core.ErrBudgetExceeded) || errors.Is(err, errLoopDetected) {
 			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err)
 			return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
 		}

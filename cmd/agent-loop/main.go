@@ -93,6 +93,10 @@ func main() {
 	if cfg.ToolPolicy != nil {
 		orch.Policy = *cfg.ToolPolicy
 	}
+	orch.LoopResponse = cfg.LoopResponse
+	if cfg.ApproveAbove != nil {
+		orch.ApproveAbove = *cfg.ApproveAbove
+	}
 	if n, err := orch.Recover(context.Background()); err != nil {
 		slog.Error("recover runs", "resumed", n, "err", err)
 	} else if n > 0 {

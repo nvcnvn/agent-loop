@@ -185,6 +185,13 @@ type StepExecutor interface {
     ExecuteStep(ctx context.Context, step StepContext) (StepResult, error)
 }
 
+// LoopResponse (Orchestrator.LoopResponse) is what a detected loop does: LoopFail (default),
+// LoopPause (the run waits in paused for Resume or Cancel) or LoopApprove (a human decides).
+type LoopResponse string
+
+// Orchestrator.ApproveAbove (core.Usage): a run past that many total tokens or cost units asks a
+// human once before its next model call.
+
 // Compaction (Orchestrator.Compaction) summarizes session history when a run starts.
 type Compaction struct {
     Agent       string // writes the summary; empty disables compaction

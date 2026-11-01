@@ -133,20 +133,21 @@ queued -> running -> succeeded
 queued -> canceled
 running -> awaiting_approval -> running   # approved, rejected or expired; a refused tool call goes back
                                           # to the agent, a refused stage gate then fails the run
-running -> paused -> running
+running -> paused -> queued   # a detected loop paused it; resumed by a human
 running -> canceling -> canceled
 running -> failed
 running -> timed_out
 running -> succeeded
 queued | running | awaiting_approval -> running   # resumed after an interruption
-paused -> canceling
+paused -> canceled
 failed | timed_out -> queued   # resumed
 failed -> superseded    # new run attempt replaces it
 ```
 
 Rules:
 - `run.status` is a projection of the event stream, not the source of truth.
-- A run is resumable when no process is executing it and it is unfinished, failed or timed out.
+- A run is resumable when no process is executing it and it is unfinished, paused, failed or timed
+  out. Recovery after a restart resumes unfinished runs but leaves paused ones to a human.
   Resuming reuses the outputs of its completed tasks, marks interrupted tasks failed, runs
   interrupted and failed tasks again, and cancels its open approvals. Succeeded and canceled runs
   are final.

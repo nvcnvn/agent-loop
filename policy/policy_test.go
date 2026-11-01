@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/policy"
@@ -188,5 +189,28 @@ func TestLoopDetectorFlagsNearIdenticalReplies(t *testing.T) {
 	d.Reset("run")
 	if _, n := d.ObserveReply("run", "task", replies[0].text); n != 1 {
 		t.Fatalf("count after reset=%d", n)
+	}
+}
+
+func TestLoopDetectorRetryStormAndClear(t *testing.T) {
+	d := policy.NewLoopDetector(2)
+	d.RetryStorm, d.RetryWindow = 3, time.Hour
+	for i := 1; i <= 3; i++ {
+		if stalled, n := d.ObserveRetry("r"); stalled != (i == 3) || n != i {
+			t.Fatalf("retry %d: stalled=%v n=%d", i, stalled, n)
+		}
+	}
+	d.Clear("r", "")
+	if _, n := d.ObserveRetry("r"); n != 1 {
+		t.Fatalf("after clearing retries n=%d", n)
+	}
+	d.RetryWindow = 0
+	if stalled, n := d.ObserveRetry("r"); stalled || n != 1 {
+		t.Fatalf("retries outside the window: stalled=%v n=%d", stalled, n)
+	}
+	d.Observe("r", "echo", "h")
+	d.Clear("r", policy.ToolKey("echo", "h"))
+	if stalled, n := d.Observe("r", "echo", "h"); stalled || n != 1 {
+		t.Fatalf("after clearing the tool key: stalled=%v n=%d", stalled, n)
 	}
 }

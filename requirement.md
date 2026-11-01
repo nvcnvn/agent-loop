@@ -286,16 +286,16 @@ The framework must detect runaway behavior such as:
 - [x] Repeated identical tool calls.
 - [x] Repeated near-identical messages: answers an agent task keeps giving that the output schema
   rejects.
-- [ ] Repeated near-identical drafts across hand-backs (today only `hand_back.max_times` bounds them).
-- [ ] Excessive delegation without progress.
-- [ ] Retry storms.
+- [x] Repeated near-identical drafts across hand-backs.
+- [x] Excessive delegation without progress: one task delegating near-identical tasks.
+- [x] Retry storms: too many task retries in a run within a window.
 - [x] Long idle waits: a run with no events for `Orchestrator.IdleWarnAfter` gets an `idle_wait`
   diagnostic event and a warning log naming the last event; unresolved approvals expire (§9.3).
 
 Responses may include:
 - [x] Warn (idle waits).
-- [ ] Pause run.
-- [ ] Request human approval.
+- [x] Pause run (`loop_response: pause`), until resumed or canceled.
+- [x] Request human approval (`loop_response: approve`).
 - [x] Fail run with diagnostic reason.
 
 ### 9.2 Budget Enforcement
@@ -314,7 +314,8 @@ Track and enforce:
 
 Support approval checkpoints for:
 - [x] Dangerous tools and tools with external side effects, when flagged.
-- [ ] High-cost actions.
+- [x] High-cost actions: a run past its token or cost threshold (`approve_above`) asks once before
+  further model calls.
 - [x] Final answer publication in selected workflows (`approve_output` on the last stage).
 - [x] Approval expiry (`Orchestrator.ApprovalTimeout`): an expired approval can no longer be granted and
   the agent gets the expiry as the tool result. An approval still open when its run ends is canceled.
