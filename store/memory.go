@@ -17,6 +17,7 @@ type MemoryScope string
 // Memory scopes, widest first.
 const (
 	MemoryTenant   MemoryScope = "tenant"   // every run of the tenant
+	MemoryProject  MemoryScope = "project"  // runs in sessions of the same project
 	MemoryWorkflow MemoryScope = "workflow" // runs of the same workflow
 	MemorySession  MemoryScope = "session"  // runs in the same session
 )
@@ -28,6 +29,7 @@ type Memory struct {
 	TenantID   core.TenantID
 	Scope      MemoryScope
 	SessionID  core.SessionID // the session a session-scoped memory belongs to
+	Project    string         // the project a project-scoped memory belongs to
 	Workflow   string         // the workflow a workflow-scoped memory belongs to
 	Content    string
 	Embedding  []float32
@@ -36,22 +38,28 @@ type Memory struct {
 	CreatedAt  time.Time
 }
 
-// MemorySource is a memory's provenance.
+// MemorySource is a memory's provenance: the run step that saved it, or the
+// document or artifact, and the part of it, that was ingested.
 type MemorySource struct {
-	RunID     core.RunID     `json:"run_id,omitempty"`
-	SessionID core.SessionID `json:"session_id,omitempty"`
-	TaskID    core.TaskID    `json:"task_id,omitempty"`
-	StepID    core.StepID    `json:"step_id,omitempty"`
+	RunID      core.RunID       `json:"run_id,omitempty"`
+	SessionID  core.SessionID   `json:"session_id,omitempty"`
+	TaskID     core.TaskID      `json:"task_id,omitempty"`
+	StepID     core.StepID      `json:"step_id,omitempty"`
+	ArtifactID string           `json:"artifact_id,omitempty"`
+	Document   string           `json:"document,omitempty"`
+	Part       int              `json:"part,omitempty"` // 1-based chunk of the document
+	By         core.PrincipalID `json:"by,omitempty"`   // who ingested it
 }
 
 // MemoryQuery finds the tenant's memories nearest to Embedding among those
-// made with EmbedModel that are tenant-scoped, or scoped to SessionID or
-// Workflow.
+// made with EmbedModel that are tenant-scoped, or scoped to SessionID,
+// Project or Workflow.
 type MemoryQuery struct {
 	TenantID   core.TenantID
 	Embedding  []float32
 	EmbedModel string
 	SessionID  core.SessionID
+	Project    string
 	Workflow   string
 	Limit      int
 }
@@ -65,20 +73,25 @@ type MemoryHit struct {
 // MemoryStore persists and searches long-term memory.
 type MemoryStore interface {
 	PutMemory(ctx context.Context, m Memory) (string, error)
+	// PutMemories saves all of ms or, on any error, none of them.
+	PutMemories(ctx context.Context, ms []Memory) ([]string, error)
 	SearchMemories(ctx context.Context, q MemoryQuery) ([]MemoryHit, error)
 }
 
 // ErrInvalidMemory is returned for a memory without content, embedding or a valid scope.
 var ErrInvalidMemory = errors.New("invalid memory")
 
+// ErrMemoryTooLarge is returned for a document too large to ingest.
+var ErrMemoryTooLarge = errors.New("document too large to ingest")
+
 // Validate checks the memory has what PutMemory needs.
 func (m Memory) Validate() error {
 	switch {
 	case m.Content == "" || len(m.Embedding) == 0 || m.EmbedModel == "":
 		return ErrInvalidMemory
-	case m.Scope == MemorySession && m.SessionID == "", m.Scope == MemoryWorkflow && m.Workflow == "":
+	case m.Scope == MemorySession && m.SessionID == "", m.Scope == MemoryWorkflow && m.Workflow == "", m.Scope == MemoryProject && m.Project == "":
 		return ErrInvalidMemory
-	case m.Scope != MemoryTenant && m.Scope != MemorySession && m.Scope != MemoryWorkflow:
+	case m.Scope != MemoryTenant && m.Scope != MemorySession && m.Scope != MemoryWorkflow && m.Scope != MemoryProject:
 		return ErrInvalidMemory
 	}
 	return nil
@@ -91,26 +104,42 @@ func (q MemoryQuery) visible(m Memory) bool {
 	switch m.Scope {
 	case MemorySession:
 		return m.SessionID == q.SessionID
+	case MemoryProject:
+		return q.Project != "" && m.Project == q.Project
 	case MemoryWorkflow:
 		return m.Workflow == q.Workflow
 	}
 	return true
 }
 
-func (m *MemStore) PutMemory(_ context.Context, mem Memory) (string, error) {
-	if err := mem.Validate(); err != nil {
+func (m *MemStore) PutMemory(ctx context.Context, mem Memory) (string, error) {
+	ids, err := m.PutMemories(ctx, []Memory{mem})
+	if err != nil {
 		return "", err
 	}
-	if mem.ID == "" {
-		mem.ID = core.NewID()
-	}
-	if mem.CreatedAt.IsZero() {
-		mem.CreatedAt = time.Now().UTC()
+	return ids[0], nil
+}
+
+func (m *MemStore) PutMemories(_ context.Context, ms []Memory) ([]string, error) {
+	ids := make([]string, len(ms))
+	for i := range ms {
+		if err := ms[i].Validate(); err != nil {
+			return nil, err
+		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.memories = append(m.memories, mem)
-	return mem.ID, nil
+	for i, mem := range ms {
+		if mem.ID == "" {
+			mem.ID = core.NewID()
+		}
+		if mem.CreatedAt.IsZero() {
+			mem.CreatedAt = time.Now().UTC()
+		}
+		m.memories = append(m.memories, mem)
+		ids[i] = mem.ID
+	}
+	return ids, nil
 }
 
 // SearchMemories ranks by cosine similarity.

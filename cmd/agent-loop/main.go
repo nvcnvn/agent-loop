@@ -65,7 +65,7 @@ func main() {
 		fatal("register tools", err)
 	}
 
-	registerMemory(reg, persistence)
+	memories := registerMemory(reg, persistence)
 	prov, modelName := openProvider()
 	cfg := fileConfig{Config: runtime.Config{Agents: []runtime.Agent{{
 		Name:         "echo",
@@ -109,6 +109,9 @@ func main() {
 	srv := api.NewServer(orch, persistence)
 	srv.Debug = *debug
 	srv.Auth = auth
+	if memories != nil {
+		srv.Memory = memories
+	}
 	maps.Copy(srv.Visibility, cfg.Visibility)
 	hs := srv.HTTPServer(*addr)
 	signals, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -253,8 +256,8 @@ func openStore() store.Store {
 
 // registerMemory adds the memory tools when an embedding model is configured:
 // LLM_EMBED_MODEL on the OpenAI-compatible endpoint, or OLLAMA_EMBED_MODEL on
-// Ollama. MEMORY_WRITE_SCOPE (session, workflow or tenant) is where agents save.
-func registerMemory(reg *tool.Registry, s store.Store) {
+// Ollama. MEMORY_WRITE_SCOPE (session, project, workflow or tenant) is where agents save.
+func registerMemory(reg *tool.Registry, s store.Store) *memory.Tools {
 	t := memory.Tools{Store: s, WriteScope: store.MemoryScope(os.Getenv("MEMORY_WRITE_SCOPE"))}
 	switch {
 	case os.Getenv("LLM_EMBED_MODEL") != "":
@@ -262,17 +265,18 @@ func registerMemory(reg *tool.Registry, s store.Store) {
 	case os.Getenv("OLLAMA_EMBED_MODEL") != "":
 		t.Model, t.Embedder = os.Getenv("OLLAMA_EMBED_MODEL"), model.WithRetry(ollama.New(cmp.Or(os.Getenv("OLLAMA_BASE_URL"), os.Getenv("OLLAMA_URL")), nil))
 	default:
-		return
+		return nil
 	}
 	switch t.WriteScope {
-	case "", store.MemorySession, store.MemoryWorkflow, store.MemoryTenant:
+	case "", store.MemorySession, store.MemoryProject, store.MemoryWorkflow, store.MemoryTenant:
 	default:
-		fatal("MEMORY_WRITE_SCOPE", fmt.Errorf("%q is not session, workflow or tenant", t.WriteScope))
+		fatal("MEMORY_WRITE_SCOPE", fmt.Errorf("%q is not session, project, workflow or tenant", t.WriteScope))
 	}
 	if err := t.Register(reg); err != nil {
 		fatal("register memory tools", err)
 	}
 	slog.Info("memory tools enabled", "embed_model", t.Model, "write_scope", cmp.Or(t.WriteScope, store.MemorySession))
+	return &t
 }
 
 func openProvider() (model.Provider, string) {

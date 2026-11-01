@@ -63,4 +63,18 @@ func Memories(t *testing.T, s store.MemoryStore, session, otherSession core.Sess
 	if _, err := s.PutMemory(ctx, store.Memory{TenantID: tenant, Scope: store.MemorySession, Content: "x", Embedding: []float32{1}, EmbedModel: "m"}); !errors.Is(err, store.ErrInvalidMemory) {
 		t.Fatalf("session memory without a session: err=%v", err)
 	}
+	if _, err := s.PutMemory(ctx, store.Memory{TenantID: tenant, Scope: store.MemoryProject, Content: "x", Embedding: []float32{1}, EmbedModel: "m"}); !errors.Is(err, store.ErrInvalidMemory) {
+		t.Fatalf("project memory without a project: err=%v", err)
+	}
+
+	put(store.Memory{Scope: store.MemoryProject, Project: "apollo", Content: "same project", Embedding: []float32{0, 0, 1}})
+	put(store.Memory{Scope: store.MemoryProject, Project: "zeus", Content: "other project", Embedding: []float32{0, 0, 1}})
+	project := store.MemoryQuery{TenantID: tenant, Embedding: []float32{0, 0, 1}, EmbedModel: "m", Project: "apollo", Limit: 1}
+	if hits, err := s.SearchMemories(ctx, project); err != nil || len(hits) != 1 || hits[0].Content != "same project" || hits[0].Project != "apollo" {
+		t.Fatalf("project hits=%+v err=%v", hits, err)
+	}
+	project.Project = ""
+	if hits, _ := s.SearchMemories(ctx, project); len(hits) == 1 && hits[0].Scope == store.MemoryProject {
+		t.Fatalf("a query without a project found %+v", hits[0])
+	}
 }

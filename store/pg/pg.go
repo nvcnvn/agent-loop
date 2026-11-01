@@ -121,13 +121,13 @@ func (s *Store) CreateSession(ctx context.Context, sess store.Session) (core.Ses
 	sess.UpdatedAt = now
 	_, err := s.pool.Exec(ctx, `
 		WITH created AS (
-			INSERT INTO sessions (session_id, tenant_id, created_by, title, status, metadata, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			INSERT INTO sessions (session_id, tenant_id, created_by, title, project, status, metadata, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$9,$5,$6,$7,$8)
 			RETURNING session_id, tenant_id, created_by, created_at)
 		INSERT INTO session_participants (session_id, tenant_id, principal_id, role, joined_at)
 		SELECT session_id, tenant_id, created_by, 'owner', created_at FROM created`,
 		string(sess.ID), string(sess.TenantID), string(sess.CreatedBy),
-		sess.Title, sess.Status, encJSON(sess.Metadata), sess.CreatedAt, sess.UpdatedAt,
+		sess.Title, sess.Status, encJSON(sess.Metadata), sess.CreatedAt, sess.UpdatedAt, sess.Project,
 	)
 	if err != nil {
 		return "", mapErr(err)
@@ -137,13 +137,13 @@ func (s *Store) CreateSession(ctx context.Context, sess store.Session) (core.Ses
 
 func (s *Store) GetSession(ctx context.Context, tenant core.TenantID, id core.SessionID) (store.Session, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT session_id, tenant_id, created_by, title, status, metadata, created_at, updated_at
+		SELECT session_id, tenant_id, created_by, title, project, status, metadata, created_at, updated_at
 		FROM sessions WHERE session_id=$1 AND tenant_id=$2`,
 		string(id), string(tenant))
 	var out store.Session
 	var meta []byte
 	var sid, tid, cb string
-	if err := row.Scan(&sid, &tid, &cb, &out.Title, &out.Status, &meta, &out.CreatedAt, &out.UpdatedAt); err != nil {
+	if err := row.Scan(&sid, &tid, &cb, &out.Title, &out.Project, &out.Status, &meta, &out.CreatedAt, &out.UpdatedAt); err != nil {
 		return store.Session{}, mapErr(err)
 	}
 	out.ID = core.SessionID(sid)
@@ -157,7 +157,7 @@ func (s *Store) GetSession(ctx context.Context, tenant core.TenantID, id core.Se
 
 func (s *Store) ListSessions(ctx context.Context, tenant core.TenantID, participant core.PrincipalID) ([]store.Session, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT session_id, tenant_id, created_by, title, status, metadata, created_at, updated_at
+		SELECT session_id, tenant_id, created_by, title, project, status, metadata, created_at, updated_at
 		FROM sessions s WHERE tenant_id=$1
 		  AND ($2::uuid IS NULL OR EXISTS (
 		      SELECT 1 FROM session_participants p WHERE p.session_id = s.session_id AND p.principal_id = $2::uuid))
@@ -171,7 +171,7 @@ func (s *Store) ListSessions(ctx context.Context, tenant core.TenantID, particip
 		var sess store.Session
 		var meta []byte
 		var sid, tid, createdBy string
-		if err := rows.Scan(&sid, &tid, &createdBy, &sess.Title, &sess.Status, &meta, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
+		if err := rows.Scan(&sid, &tid, &createdBy, &sess.Title, &sess.Project, &sess.Status, &meta, &sess.CreatedAt, &sess.UpdatedAt); err != nil {
 			return nil, err
 		}
 		sess.ID = core.SessionID(sid)

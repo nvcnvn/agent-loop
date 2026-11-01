@@ -17,9 +17,12 @@ func Participants(t *testing.T, s store.Store) {
 	ctx := context.Background()
 	owner, member := core.PrincipalID(core.NewID()), core.PrincipalID(core.NewID())
 	other := core.TenantID(core.NewID())
-	shared, err := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: owner})
+	shared, err := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: owner, Project: "apollo"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if sess, err := s.GetSession(ctx, core.DefaultTenant, shared); err != nil || sess.Project != "apollo" {
+		t.Fatalf("session=%+v err=%v", sess, err)
 	}
 	private, err := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: owner})
 	if err != nil {
@@ -71,6 +74,9 @@ func Participants(t *testing.T, s store.Store) {
 	}
 	if ids := sessionIDs(member); !slices.Equal(ids, []core.SessionID{shared}) {
 		t.Fatalf("member's sessions: %v", ids)
+	}
+	if list, _ := s.ListSessions(ctx, core.DefaultTenant, member); len(list) != 1 || list[0].Project != "apollo" {
+		t.Fatalf("listed sessions lose their project: %+v", list)
 	}
 	if ids := sessionIDs(""); !slices.Contains(ids, shared) || !slices.Contains(ids, private) {
 		t.Fatalf("all sessions: %v", ids)

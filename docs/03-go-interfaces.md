@@ -292,12 +292,17 @@ type ArtifactStore interface {
 }
 
 // MemoryStore keeps long-term memory. SearchMemories returns the tenant's memories made with
-// query.EmbedModel that are tenant-scoped or scoped to query.SessionID or query.Workflow,
+// query.EmbedModel that are tenant-scoped or scoped to query.SessionID, query.Project or query.Workflow,
 // nearest first by cosine similarity (MemoryHit.Score). storetest.Memories is the conformance check.
 type MemoryStore interface {
     PutMemory(ctx context.Context, m Memory) (string, error)
+    PutMemories(ctx context.Context, ms []Memory) ([]string, error) // all or none
     SearchMemories(ctx context.Context, query MemoryQuery) ([]MemoryHit, error)
 }
+
+// memory.Tools (tool/memory) registers memory.save and memory.search, and Ingest (api.Ingester) cuts a document
+// into parts and saves each at session, project or tenant scope with its provenance.
+func (t Tools) Ingest(ctx context.Context, tenant core.TenantID, session core.SessionID, scope MemoryScope, text string, src MemorySource) ([]string, error)
 
 // Store is what runtime and api take; /readyz calls Ping.
 type Store interface {

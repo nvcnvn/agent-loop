@@ -22,6 +22,7 @@ type Session struct {
 	TenantID  core.TenantID
 	CreatedBy core.PrincipalID
 	Title     string
+	Project   string // optional label; memories can be scoped to it
 	Status    string
 	Metadata  map[string]any
 	CreatedAt time.Time

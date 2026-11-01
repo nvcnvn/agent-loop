@@ -383,12 +383,14 @@ Requirements:
 - [x] Store long-term memory separate from transient conversation state (`memories`, pgvector).
 - [x] Support embeddings for retrieval over prior sessions (agents save and search with the
   `memory.save` and `memory.search` tools).
-- [ ] Ingest documents and artifacts into memory.
-- [x] Scope retrieval by tenant, session, or workflow.
-- [ ] Scope retrieval by project (there is no project entity yet).
+- [x] Ingest documents and text artifacts into memory (`POST /v1/sessions/{sid}/memories`,
+  `POST /v1/artifacts/{aid}/memories`).
+- [x] Scope retrieval by tenant, project, session, or workflow; a project is an optional label on
+  sessions.
 - [x] Allow memory write policies so not every message becomes permanent memory (only agents granted
   `memory.save` write, at the deployment's `MEMORY_WRITE_SCOPE`).
-- [x] Track provenance for retrieved memories (run, session, task and step, returned with each hit).
+- [x] Track provenance for retrieved memories (run, session, task and step, or the ingested document,
+  artifact, part and who ingested it, returned with each hit).
 
 ## 13. Artifacts and Outputs
 
@@ -454,7 +456,7 @@ The product vision is met when the framework can:
 - [x] Persist enough state to inspect and audit any run.
 - [ ] Persist enough state to resume and deterministically replay any run.
 - [x] Apply budgets, limits, and approval gates without relying on prompt discipline alone.
-- [ ] Support long-term memory and retrieval with clear provenance.
+- [x] Support long-term memory and retrieval with clear provenance.
 - [x] Expose operational telemetry sufficient for debugging and production monitoring.
 - [x] Remain provider-agnostic at the model layer.
 - [x] Remain protocol-agnostic at the tool layer (native Go and MCP tools).

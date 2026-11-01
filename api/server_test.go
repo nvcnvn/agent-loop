@@ -22,6 +22,7 @@ import (
 	"github.com/nvcnvn/agent-loop/runtime"
 	"github.com/nvcnvn/agent-loop/store"
 	"github.com/nvcnvn/agent-loop/tool"
+	"github.com/nvcnvn/agent-loop/tool/memory"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *runtime.Orchestrator, store.Store) {
@@ -1084,7 +1085,8 @@ func FuzzRESTBodies(f *testing.F) {
 		f.Fatal(err)
 	}
 	paths := []string{"/v1/sessions", "/v1/sessions/" + string(sid) + "/messages", "/v1/approvals/missing", "/v1/runs", "/v1/runs/" + string(rid) + "/cancel",
-		"/v1/sessions/" + string(sid) + "/participants/" + string(core.DefaultPrincipal)}
+		"/v1/sessions/" + string(sid) + "/participants/" + string(core.DefaultPrincipal), "/v1/sessions/" + string(sid) + "/memories"}
+	srv.Memory = &memory.Tools{Store: s, Embedder: model.NewMockProvider(), Model: "bow"}
 	f.Add(uint8(0), []byte(`{"title":"demo"}`))
 	f.Add(uint8(0), []byte(``))
 	f.Add(uint8(1), []byte(`{"role":"user","content":"hi"}`))
@@ -1101,6 +1103,9 @@ func FuzzRESTBodies(f *testing.F) {
 	f.Add(uint8(5), []byte(`{"role":"viewer"}`))
 	f.Add(uint8(5), []byte(`{"role":"boss"}`))
 	f.Add(uint8(5), []byte(`{"role":["owner"]}`))
+	f.Add(uint8(6), []byte(`{"name":"a.md","content":"one\n\ntwo","scope":"session"}`))
+	f.Add(uint8(6), []byte(`{"content":"","scope":"tenant"}`))
+	f.Add(uint8(6), []byte(`{"content":"x","scope":"project"}`))
 	f.Fuzz(func(t *testing.T, which uint8, body []byte) {
 		path := paths[int(which)%len(paths)]
 		method := http.MethodPost
@@ -1257,4 +1262,58 @@ func FuzzRESTQueries(f *testing.F) {
 			}
 		}
 	})
+}
+
+// Acceptance: §Memory and Retrieval #7 – documents and text artifacts are ingested over REST.
+func TestIngestIntoMemory(t *testing.T) {
+	s := store.NewMemStore()
+	srv := api.NewServer(runtime.NewOrchestrator(s, tool.NewRegistry(), nil), s)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal, Project: "apollo"})
+	text, _ := s.PutArtifact(ctx, store.Artifact{TenantID: core.DefaultTenant, SessionID: sid, Kind: "report", Name: "notes.md", MimeType: "text/markdown", Content: []byte("Ship on Friday.")})
+	binary, _ := s.PutArtifact(ctx, store.Artifact{TenantID: core.DefaultTenant, SessionID: sid, Kind: "file", Name: "logo.png", MimeType: "image/png", Content: []byte{0x89, 'P', 'N', 'G'}})
+	post := func(path, role, body string, want int) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("X-Role", role)
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Fatalf("POST %s as %s: %d want %d: %s", path, role, resp.StatusCode, want, out)
+		}
+	}
+	docs := "/v1/sessions/" + string(sid) + "/memories"
+	post(docs, "admin", `{"name":"a.md","content":"x"}`, http.StatusNotImplemented)
+	srv.Memory = &memory.Tools{Store: s, Embedder: model.NewMockProvider(), Model: "bow"}
+	post(docs, "admin", `{"name":"handbook.md","content":"Refunds take five days.\n\nShipping is free.","scope":"project"}`, http.StatusCreated)
+	post(docs, "member", `{"content":"Everyone must see this.","scope":"tenant"}`, http.StatusForbidden)
+	post(docs, "admin", `{"content":"x","scope":"workflow"}`, http.StatusBadRequest)
+	post("/v1/artifacts/"+text+"/memories", "admin", ``, http.StatusCreated)
+	post("/v1/artifacts/"+binary+"/memories", "admin", `{}`, http.StatusUnsupportedMediaType)
+	post("/v1/artifacts/"+core.NewID()+"/memories", "admin", `{}`, http.StatusNotFound)
+	post(docs, "viewer", `{"content":"x"}`, http.StatusForbidden)
+	post("/v1/sessions", "admin", `{"title":"t","project":"  apollo  "}`, http.StatusCreated)
+	post("/v1/sessions", "admin", `{"project":"`+strings.Repeat("p", 201)+`"}`, http.StatusBadRequest)
+	resp, err := ts.Client().Get(ts.URL + "/v1/sessions?project=apollo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct{ Sessions []store.Session }
+	_ = json.NewDecoder(resp.Body).Decode(&listed)
+	resp.Body.Close()
+	if len(listed.Sessions) != 2 || listed.Sessions[0].Project != "apollo" || listed.Sessions[1].Project != "apollo" {
+		t.Fatalf("project sessions: %+v", listed.Sessions)
+	}
+
+	vec, _ := model.NewMockProvider().Embed(ctx, "bow", []string{"ship friday"})
+	hits, _ := s.SearchMemories(ctx, store.MemoryQuery{TenantID: core.DefaultTenant, Embedding: vec[0], EmbedModel: "bow", SessionID: sid, Project: "apollo", Limit: 1})
+	if len(hits) != 1 || hits[0].Source.ArtifactID != text || hits[0].Source.Document != "notes.md" || hits[0].Source.By != core.DefaultPrincipal {
+		t.Fatalf("hits=%+v", hits)
+	}
 }

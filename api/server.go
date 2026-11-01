@@ -5,6 +5,8 @@
 //
 //	POST   /v1/sessions
 //	GET    /v1/sessions/{sid}
+//	POST   /v1/sessions/{sid}/memories   (ingest a document into memory)
+//	POST   /v1/artifacts/{aid}/memories  (ingest a text artifact into memory)
 //	GET    /v1/sessions/{sid}/participants
 //	PUT    /v1/sessions/{sid}/participants/{pid}
 //	DELETE /v1/sessions/{sid}/participants/{pid}
@@ -79,6 +81,8 @@ type Server struct {
 	Metrics *observe.Metrics
 	// Visibility is which event and message visibilities each role reads; NewServer sets policy.DefaultVisibility.
 	Visibility policy.Visibility
+	// Memory ingests documents and artifacts into long-term memory; nil answers those routes 501.
+	Memory Ingester
 
 	streamsClosed chan struct{}
 	closeStreams  sync.Once
@@ -128,6 +132,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{sid}/messages", s.listMessages)
 	mux.HandleFunc("GET /v1/sessions/{sid}/runs", s.listRuns)
 	mux.HandleFunc("GET /v1/sessions/{sid}/participants", s.listParticipants)
+	mux.HandleFunc("POST /v1/sessions/{sid}/memories", s.ingestDocument)
+	mux.HandleFunc("POST /v1/artifacts/{aid}/memories", s.ingestArtifact)
 	mux.HandleFunc("PUT /v1/sessions/{sid}/participants/{pid}", s.putParticipant)
 	mux.HandleFunc("DELETE /v1/sessions/{sid}/participants/{pid}", s.removeParticipant)
 	mux.HandleFunc("POST /v1/sessions/{sid}/messages", s.postMessage)
@@ -234,8 +240,12 @@ func (s *Server) debugConsole(w http.ResponseWriter, r *http.Request) {
 
 // ---- request/response shapes ----
 
+// maxProjectBytes caps a session's project label.
+const maxProjectBytes = 200
+
 type createSessionReq struct {
-	Title string `json:"title"`
+	Title   string `json:"title"`
+	Project string `json:"project"`
 }
 type createSessionResp struct {
 	SessionID core.SessionID `json:"session_id"`
@@ -299,10 +309,16 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		writeDecodeErr(w, err)
 		return
 	}
+	req.Project = strings.TrimSpace(req.Project)
+	if len(req.Project) > maxProjectBytes {
+		writeErr(w, http.StatusBadRequest, "validation_error", fmt.Sprintf("project is longer than %d bytes", maxProjectBytes))
+		return
+	}
 	id, err := s.Store.CreateSession(r.Context(), store.Session{
 		TenantID:  tenantOf(r),
 		CreatedBy: principalOf(r),
 		Title:     req.Title,
+		Project:   req.Project,
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -334,6 +350,9 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+	if project := r.URL.Query().Get("project"); project != "" {
+		sessions = slices.DeleteFunc(sessions, func(sess store.Session) bool { return sess.Project != project })
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
 }

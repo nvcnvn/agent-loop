@@ -53,6 +53,7 @@ CREATE TABLE sessions (
     tenant_id uuid NOT NULL REFERENCES tenants(tenant_id),
     created_by uuid NOT NULL REFERENCES principals(principal_id),
     title text,
+    project text NOT NULL DEFAULT '',
     status session_status NOT NULL DEFAULT 'active',
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     retention_policy jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -403,16 +404,18 @@ CREATE INDEX artifacts_run_idx ON artifacts (run_id, created_at);
 CREATE TABLE memories (
     memory_id uuid PRIMARY KEY,
     tenant_id uuid NOT NULL,
-    scope text NOT NULL CHECK (scope IN ('tenant', 'workflow', 'session')),
+    scope text NOT NULL CHECK (scope IN ('tenant', 'project', 'workflow', 'session')),
     session_id uuid,
+    project text,
     workflow text,
     content text NOT NULL,
     embedding vector NOT NULL,
     embed_model text NOT NULL,
-    source jsonb NOT NULL DEFAULT '{}'::jsonb, -- run_id, session_id, task_id, step_id
+    source jsonb NOT NULL DEFAULT '{}'::jsonb, -- run_id, session_id, task_id, step_id, artifact_id, document, part, by
     created_at timestamptz NOT NULL DEFAULT now(),
     CHECK (scope <> 'session' OR session_id IS NOT NULL),
-    CHECK (scope <> 'workflow' OR workflow IS NOT NULL)
+    CHECK (scope <> 'workflow' OR workflow IS NOT NULL),
+    CHECK (scope <> 'project' OR coalesce(project, '') <> '')
 );
 
 CREATE INDEX memories_lookup_idx ON memories (tenant_id, embed_model, scope);

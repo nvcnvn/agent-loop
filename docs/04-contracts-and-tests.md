@@ -48,6 +48,21 @@ belongs to its session: reusing it in another session answers 409. `GET /v1/sess
 participates in, unless it is an admin or operator. The `/v1/debug/*` endpoints need admin or
 operator.
 
+Sessions: `POST /v1/sessions` takes `{"title", "project"}`; `project` is an optional label of at most
+200 bytes, trimmed, that sessions share to share project memory, and `GET /v1/sessions?project=`
+lists one project's. Any session creator may use any label, so a project is not an access
+boundary.
+
+Memory: when the server has an embedding model, `POST /v1/sessions/{sid}/memories` with
+`{"name", "content", "scope"}` ingests a document, and `POST /v1/artifacts/{aid}/memories` with
+`{"scope"}` a text or JSON artifact, into long-term memory, answering 201 `{"memories": [ids],
+"scope"}`. Both need write access to the session. The text, at most 1 MiB (413 otherwise), is cut
+into parts of at most 2000 bytes at paragraph breaks, or at whitespace inside a longer paragraph,
+each embedded and saved with its `document` name, `part` number, the artifact's ID, run, task and
+step, and the principal who ingested it (`by`) as provenance. Every part is saved, or none. `scope` is `session` (default), `project` (the session needs a project; 400 otherwise)
+or `tenant` (admins and operators only, 403 otherwise). A binary artifact answers 415, and a server
+without an embedding model 501.
+
 Participants: `GET /v1/sessions/{sid}/participants` lists `{"participants": [{"tenant_id",
 "session_id", "principal_id", "role", "joined_at"}]}`; `PUT
 /v1/sessions/{sid}/participants/{principal}` with `{"role": "owner" | "member" | "viewer"}` adds a
@@ -614,12 +629,15 @@ Each error should include:
 
 1. Write memory only through `memory.save`, at the configured scope
    (`TestWriteScopeLimitsWhoFindsAMemory`).
-2. Retrieve memories scoped by tenant, session, and workflow, nearest first, on every store
+2. Retrieve memories scoped by tenant, project, session, and workflow, nearest first, on every store
    (`storetest.Memories`, run by `TestMemStoreMemories` and `TestPg_Memories`).
 3. Return memory provenance with each hit (`TestSaveThenSearchAcrossSessions`).
 4. Verify a rejected memory write creates no memory (`TestSaveRejectsEmptyAndOversizedMemories`).
 5. A hosted model saves facts in one session and recalls them in another
    (`TestLiveMemoryAcrossSessions`, paid).
+6. Share project memory between the sessions of a project only (`TestProjectScope`).
+7. Ingest documents and text artifacts in parts with their provenance (`TestIngestDocument`,
+   `TestIngestIntoMemory`).
 
 ### Observability and Operations
 

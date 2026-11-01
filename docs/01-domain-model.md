@@ -30,6 +30,9 @@ Important fields:
 - `status`
 - `metadata`
 - `retention_policy`
+- `project`: an optional label sessions share, which project-scoped memory follows. It is not an
+  access boundary: anyone who may create a session can give it any project label, and so read and
+  write that project's memory through its agents and ingestion.
 
 Session state:
 
@@ -382,18 +385,22 @@ Rules:
 ### Memory
 
 A `memory` is long-term retrievable state, separate from session messages: a statement an agent
-saved, its embedding and the embedding model, and where it came from.
+saved or a part of an ingested document, its embedding and the embedding model, and where it came
+from.
 
 Fields:
 - `memory_id`, `tenant_id`, `content`, `embedding`, `embed_model`, `created_at`
-- `scope`: who can retrieve it. `tenant` (every run of the tenant), `workflow` (runs of the same
-  workflow, by name) or `session` (runs in the same session, the default)
-- `source`: provenance, the run, session, task and step that saved it
+- `scope`: who can retrieve it. `tenant` (every run of the tenant), `project` (runs in sessions with
+  the same project label), `workflow` (runs of the same workflow, by name) or `session` (runs in
+  the same session, the default)
+- `source`: provenance: the run, session, task and step that saved it, or the document or artifact
+  ingested, which part of it, and who ingested it
 
 Rules:
 - Nothing becomes memory on its own. An agent writes one only by calling `memory.save`, which it
-  has only when granted, and only at the deployment's write scope (`MEMORY_WRITE_SCOPE`).
-- `memory.search` returns the tenant's memories visible from the run's session and workflow,
+  has only when granted, and only at the deployment's write scope (`MEMORY_WRITE_SCOPE`); a person
+  with write access to a session ingests documents and artifacts into it over REST.
+- `memory.search` returns the tenant's memories visible from the run's session, project and workflow,
   nearest first by cosine similarity among those made with the same embedding model, each with its
   scope, source and time.
 
