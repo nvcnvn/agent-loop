@@ -1568,6 +1568,48 @@ func TestWorkflowToolPolicy(t *testing.T) {
 	}
 }
 
+// An agent saves an artifact through a tool; it is stored with its run, task,
+// step and producer, and announced with artifact_created.
+func TestToolArtifactsAreStoredAndAnnounced(t *testing.T) {
+	prov := model.NewMockProvider(
+		model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "artifact.save", Input: json.RawMessage(`{"name":"report.md","content":"# Findings","kind":"report","mime_type":"text/markdown"}`)}}},
+		model.MockResponse{Content: "saved"},
+	)
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "writer", Model: "m", Provider: prov, Tools: []string{"artifact.save"}}})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "writer", Prompt: "x"}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	artifacts, _ := s.ListRunArtifacts(ctx, core.DefaultTenant, runID)
+	tasks, _ := s.ListRunTasks(ctx, core.DefaultTenant, runID)
+	if len(artifacts) != 1 || len(tasks) != 1 {
+		t.Fatalf("artifacts=%+v tasks=%d", artifacts, len(tasks))
+	}
+	a := artifacts[0]
+	if a.Name != "report.md" || a.Kind != "report" || a.MimeType != "text/markdown" || string(a.Content) != "# Findings" ||
+		a.Producer != "artifact.save" || a.TaskID != tasks[0].ID || a.StepID == "" || a.SessionID != sid {
+		t.Fatalf("artifact=%+v", a)
+	}
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, runID, 0, 0)
+	var announced, completed bool
+	for _, ev := range events {
+		switch ev.Type {
+		case core.EvArtifact:
+			announced = ev.StepID == a.StepID && ev.Visibility == core.VisibilityParticipant && strings.Contains(string(ev.Payload), a.ID)
+		case core.EvToolCompleted:
+			completed = strings.Contains(string(ev.Payload), `"artifacts":["`+a.ID+`"]`)
+		}
+	}
+	if !announced || !completed {
+		t.Fatalf("artifact_created=%v tool_call_completed lists it=%v", announced, completed)
+	}
+}
+
 func awaitApprovalRequest(t *testing.T, s store.Store, runID core.RunID) core.ApprovalID {
 	t.Helper()
 	ctx := context.Background()

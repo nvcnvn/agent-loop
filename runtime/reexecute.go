@@ -57,7 +57,7 @@ func (o *Orchestrator) ReExecute(ctx context.Context, tenant core.TenantID, runI
 		return Result{}, err
 	}
 	for _, a := range artifacts {
-		if a.Kind == inputImageKind {
+		if a.Kind == inputImageKind && a.Producer == "" {
 			if in.Images == nil {
 				in.Images = map[string]model.Image{}
 			}

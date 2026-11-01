@@ -28,9 +28,20 @@ type Call struct {
 	Metadata       map[string]any
 }
 
-// Result is the structured output of a tool invocation.
+// Result is the structured output of a tool invocation and the artifacts it produced.
 type Result struct {
-	Output   json.RawMessage
+	Output    json.RawMessage
+	Metadata  map[string]any
+	Artifacts []Artifact
+}
+
+// Artifact is a file or document a tool produced; the runtime stores it with
+// the run, task and step of the call.
+type Artifact struct {
+	Name     string
+	Kind     string // such as file, json, report, patch or test_result; empty means file
+	MimeType string // empty means application/octet-stream
+	Content  []byte
 	Metadata map[string]any
 }
 

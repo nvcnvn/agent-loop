@@ -10,6 +10,8 @@
 //	GET    /v1/runs/{rid}
 //	GET    /v1/runs/{rid}/events?after=<seq>
 //	GET    /v1/runs/{rid}/stream     (SSE; honours Last-Event-ID; ?deltas=1 adds reply deltas)
+//	GET    /v1/runs/{rid}/artifacts
+//	GET    /v1/artifacts/{aid}       (the content, as an attachment)
 //	POST   /v1/runs/{rid}/cancel
 //	POST   /v1/runs/{rid}/resume
 //	POST   /v1/runs/{rid}/reexecute  (replays recorded model and tool outputs; waits)
@@ -26,6 +28,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"embed"
 	"encoding/json"
@@ -34,6 +37,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"slices"
 	"sort"
@@ -118,6 +122,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{rid}", s.getRun)
 	mux.HandleFunc("GET /v1/runs/{rid}/events", s.listEvents)
 	mux.HandleFunc(streamRoute, s.streamEvents)
+	mux.HandleFunc("GET /v1/runs/{rid}/artifacts", s.listArtifacts)
+	mux.HandleFunc("GET /v1/artifacts/{aid}", s.downloadArtifact)
 	mux.HandleFunc("POST /v1/runs/{rid}/cancel", s.cancelRun)
 	mux.HandleFunc("POST /v1/runs/{rid}/resume", s.resumeRun)
 	mux.HandleFunc("POST /v1/runs/{rid}/reexecute", s.reExecuteRun)
@@ -441,6 +447,46 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 		visible = append(visible, e)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": visible})
+}
+
+func (s *Server) listArtifacts(w http.ResponseWriter, r *http.Request) {
+	rid := core.RunID(r.PathValue("rid"))
+	if _, err := s.Store.GetRun(r.Context(), tenantOf(r), rid); err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	// ponytail: the store reads every artifact's content to list them; add a metadata-only query if runs hold large files.
+	artifacts, err := s.Store.ListRunArtifacts(r.Context(), tenantOf(r), rid)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"artifacts": artifacts})
+}
+
+// downloadArtifact serves an artifact as an attachment that browsers neither
+// sniff nor run, since tools and models choose its content and MIME type.
+func (s *Server) downloadArtifact(w http.ResponseWriter, r *http.Request) {
+	aid := r.PathValue("aid")
+	if uuid.Validate(aid) != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "no such artifact")
+		return
+	}
+	a, err := s.Store.GetArtifact(r.Context(), tenantOf(r), aid)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	contentType := "application/octet-stream"
+	if _, _, err := mime.ParseMediaType(a.MimeType); err == nil {
+		contentType = a.MimeType
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", cmp.Or(mime.FormatMediaType("attachment", map[string]string{"filename": a.Name}), "attachment"))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "sandbox")
+	w.Header().Set("Content-Length", strconv.Itoa(len(a.Content)))
+	_, _ = w.Write(a.Content)
 }
 
 func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request) {

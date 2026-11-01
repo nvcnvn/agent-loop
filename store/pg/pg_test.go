@@ -440,3 +440,11 @@ func TestPg_Approvals(t *testing.T) {
 	other, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid})
 	storetest.Approvals(t, s, run, other)
 }
+
+func TestPg_Artifacts(t *testing.T) {
+	s := freshStore(t)
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant, CreatedBy: core.DefaultPrincipal})
+	run, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid})
+	storetest.Artifacts(t, s, sid, run)
+}

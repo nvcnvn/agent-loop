@@ -14,7 +14,7 @@ Define an OpenAPI document for:
 - cancel run
 - list runs
 - list run events
-- list artifacts
+- list and download artifacts (§10)
 - list pending approvals
 - approve or reject gated actions
 - subscribe to run events through SSE
@@ -353,10 +353,25 @@ Decide v1 deployment mode explicitly:
 
 ### 10. Storage and Artifact Contract
 
-Define artifact storage rules:
-- JSON and small reports may live in PostgreSQL
-- large files go to object storage or filesystem blob storage
-- every artifact has MIME type, checksum, size, version, producer step, and retention policy
+- A tool returns artifacts in `tool.Result.Artifacts` (name, kind, MIME type, content, metadata).
+  After a successful call the runtime stores each with the call's tenant, session, run, task and
+  step and the tool's name as `producer`; an empty kind is `file` and an empty name the tool's
+  name. Each gets an `artifact_created` event (visibility `participant`, with `artifact_id`,
+  `name`, `kind`, `mime_type`, `size` and `producer`), and `tool_call_completed` lists their IDs
+  in `artifacts`. If one cannot be stored, the call goes back to the model as an error, and those
+  stored before it remain. Resume reads back only the run's own input images, never an
+  artifact a tool produced, whatever its kind.
+- `artifact.save` (in `tool.RegisterBuiltins`) takes `{"name", "content", "kind", "mime_type"}`
+  and saves the content, `text/plain` by default.
+- `GET /v1/runs/{rid}/artifacts` lists a run's artifacts without their content, as
+  `{"artifacts": [{"artifact_id", "tenant_id", "session_id", "run_id", "task_id", "step_id",
+  "producer", "kind", "name", "mime_type", "size", "metadata", "created_at"}]}`, and `GET
+  /v1/artifacts/{aid}` returns the content with its MIME type, as an attachment with
+  `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, since tools and models
+  choose both.
+- Content is stored inline in PostgreSQL. Not yet: object storage for large files, checksums,
+  versions, and retention.
+- Re-execution answers tool calls from their recorded output, so its copy produces no artifacts.
 
 ### 11. Migration Contract
 

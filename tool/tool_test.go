@@ -63,7 +63,7 @@ func TestBuiltins(t *testing.T) {
 	if err := tool.RegisterBuiltins(r); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(r.List()); n != 3 {
+	if n := len(r.List()); n != 4 {
 		t.Fatalf("builtins=%d", n)
 	}
 	cases := []struct{ name, in, want string }{

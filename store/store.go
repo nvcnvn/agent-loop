@@ -103,20 +103,23 @@ type ApprovalFilter struct {
 	Limit  int             // zero means no limit
 }
 
-// Artifact is the stored shape of a produced artifact.
+// Artifact is the stored shape of an artifact: a run's input image, or an
+// output a tool produced at StepID.
 type Artifact struct {
-	ID        string
-	TenantID  core.TenantID
-	SessionID core.SessionID
-	RunID     core.RunID
-	TaskID    core.TaskID
-	Kind      string
-	Name      string
-	MimeType  string
-	Size      int64
-	Content   []byte
-	Metadata  map[string]any
-	CreatedAt time.Time
+	ID        string         `json:"artifact_id"`
+	TenantID  core.TenantID  `json:"tenant_id"`
+	SessionID core.SessionID `json:"session_id"`
+	RunID     core.RunID     `json:"run_id,omitempty"`
+	TaskID    core.TaskID    `json:"task_id,omitempty"`
+	StepID    core.StepID    `json:"step_id,omitempty"`
+	Producer  string         `json:"producer,omitempty"` // the tool that produced it
+	Kind      string         `json:"kind"`
+	Name      string         `json:"name"`
+	MimeType  string         `json:"mime_type"`
+	Size      int64          `json:"size"`
+	Content   []byte         `json:"-"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 // EventStore appends events and reads them back in deterministic order.
@@ -604,7 +607,9 @@ func (m *MemStore) ListRunArtifacts(_ context.Context, tenant core.TenantID, run
 			out = append(out, a)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.Before(out[j].CreatedAt) || out[i].CreatedAt.Equal(out[j].CreatedAt) && out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 

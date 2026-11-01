@@ -354,18 +354,16 @@ Rules:
 
 An `artifact` is a durable output beyond messages.
 
-Artifact types:
-- file
-- JSON document
-- report
-- code patch
-- test result
-- model transcript
+Artifact kinds: `input_image` (a run's input images), and what tools produce: `file`, `json`,
+`report`, `patch`, `test_result`, or any other kind a tool names.
 
 Rules:
-- Artifacts are versioned.
-- Each artifact links to producing run, task, and step.
-- Large artifacts should store metadata in PostgreSQL and bytes in object storage or filesystem-backed blob storage.
+- A tool produces artifacts by returning them with its result; agents save documents with the
+  built-in `artifact.save` tool. Each links to its session, run, task and step, and names the tool
+  that produced it (`producer`); the task gives the agent.
+- An artifact has a name, kind, MIME type, size and metadata. Its bytes are stored inline in
+  PostgreSQL.
+- Artifacts are not versioned: saving the same name again makes another artifact.
 
 ### Memory
 

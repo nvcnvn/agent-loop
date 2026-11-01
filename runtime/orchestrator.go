@@ -384,7 +384,7 @@ func (o *Orchestrator) resume(ctx context.Context, tenant core.TenantID, runID c
 		return err
 	}
 	for _, a := range artifacts {
-		if a.Kind == inputImageKind {
+		if a.Kind == inputImageKind && a.Producer == "" {
 			if in.Images == nil {
 				in.Images = map[string]model.Image{}
 			}
@@ -1715,7 +1715,19 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		}
 		return o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err), nil
 	}
+	artifacts, err := o.storeArtifacts(ctx, tenant, session, runID, taskID, call, res.Artifacts)
+	if err != nil {
+		if ctx.Err() != nil {
+			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err)
+			return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
+		}
+		return o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err), nil
+	}
 	o.Metrics.Add("agentloop_tool_calls_total", 1, "tool", call.Tool.Name, "outcome", "ok")
+	completed := map[string]any{"tool": call.Tool.Name, "output": json.RawMessage(res.Output)}
+	if len(artifacts) > 0 {
+		completed["artifacts"] = artifacts
+	}
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
 		SessionID:  session,
@@ -1724,7 +1736,7 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		StepID:     call.StepID,
 		Type:       core.EvToolCompleted,
 		Visibility: core.VisibilityInternal,
-		Payload:    mustJSON(map[string]any{"tool": call.Tool.Name, "output": json.RawMessage(res.Output)}),
+		Payload:    mustJSON(completed),
 	})
 	return model.Message{
 		Role:       model.RoleTool,
@@ -1732,6 +1744,37 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		ToolCallID: tc.ID,
 		Content:    string(res.Output),
 	}, nil
+}
+
+// storeArtifacts stores what a tool call produced, each with an
+// artifact_created event, and returns their IDs.
+func (o *Orchestrator) storeArtifacts(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, produced []tool.Artifact) ([]string, error) {
+	var ids []string
+	for _, p := range produced {
+		a := store.Artifact{
+			TenantID: tenant, SessionID: session, RunID: runID, TaskID: taskID, StepID: call.StepID, Producer: call.Tool.Name,
+			Kind: cmp.Or(p.Kind, "file"), Name: cmp.Or(p.Name, call.Tool.Name), MimeType: p.MimeType, Content: p.Content, Metadata: p.Metadata,
+		}
+		id, err := o.Store.PutArtifact(ctx, a)
+		if err != nil {
+			return nil, fmt.Errorf("store artifact %q: %w", a.Name, err)
+		}
+		ids = append(ids, id)
+		o.emit(ctx, core.Event{
+			TenantID:   tenant,
+			SessionID:  session,
+			RunID:      runID,
+			TaskID:     taskID,
+			StepID:     call.StepID,
+			Type:       core.EvArtifact,
+			Visibility: core.VisibilityParticipant,
+			Payload: mustJSON(map[string]any{
+				"artifact_id": id, "name": a.Name, "kind": a.Kind, "mime_type": cmp.Or(a.MimeType, "application/octet-stream"),
+				"size": len(a.Content), "producer": a.Producer,
+			}),
+		})
+	}
+	return ids, nil
 }
 
 func safeExecute(ctx context.Context, exec tool.Executor, call tool.Call) (res tool.Result, err error) {

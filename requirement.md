@@ -98,7 +98,7 @@ Each session must preserve:
 - [x] Tool invocations and results.
 - [x] Run-to-task relationships.
 - [x] Task-to-child-task relationships.
-- [ ] Artifacts produced during execution.
+- [x] Artifacts produced during execution.
 
 Chat-style sessions require:
 - [x] Runs pass the session's prior messages to the model: the latest history summary, then human
@@ -252,7 +252,7 @@ Expose HTTP APIs for:
 - [x] Start run.
 - [x] Resume run.
 - [x] List runs and events.
-- [ ] List and download artifacts.
+- [x] List and download artifacts.
 - [x] Approve or reject gated actions.
 - [x] List pending approvals (`GET /v1/approvals`).
 - [x] Subscribe to run events.
@@ -386,14 +386,14 @@ Agents will often produce outputs beyond messages.
 
 Support artifact storage for:
 - [x] Files, structured JSON outputs, reports, code patches, and test results, stored with a kind, MIME type, and metadata.
-- [ ] Agents and tools producing artifacts during a run (only a run's input images are stored, as
-  `input_image` artifacts).
+- [x] Agents and tools producing artifacts during a run (`tool.Result.Artifacts`; agents use the
+  built-in `artifact.save` tool).
 
 Requirements:
 - [ ] Artifact versioning.
 - [x] MIME type and metadata.
 - [x] Link artifacts to run and task.
-- [ ] Link artifacts to step and producer.
+- [x] Link artifacts to step and producer (the tool).
 
 ## 14. Testing Strategy
 

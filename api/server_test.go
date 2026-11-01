@@ -828,6 +828,52 @@ func TestListApprovals(t *testing.T) {
 	}
 }
 
+func TestArtifactEndpoints(t *testing.T) {
+	srv, _, s := newTestServer(t)
+	defer srv.Close()
+	ctx := context.Background()
+	sid, _ := s.CreateSession(ctx, store.Session{TenantID: core.DefaultTenant})
+	run, _ := s.CreateRun(ctx, store.Run{TenantID: core.DefaultTenant, SessionID: sid})
+	id, _ := s.PutArtifact(ctx, store.Artifact{TenantID: core.DefaultTenant, SessionID: sid, RunID: run, Producer: "artifact.save",
+		Kind: "report", Name: "rapport é.html", MimeType: "text/html", Content: []byte("<script>alert(1)</script>")})
+	get := func(path, tenant string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if tenant != "" {
+			req.Header.Set("X-Tenant-ID", tenant)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { resp.Body.Close() })
+		return resp
+	}
+	var list struct{ Artifacts []map[string]any }
+	_ = json.NewDecoder(get("/v1/runs/"+string(run)+"/artifacts", "").Body).Decode(&list)
+	if len(list.Artifacts) != 1 || list.Artifacts[0]["artifact_id"] != id || list.Artifacts[0]["producer"] != "artifact.save" ||
+		list.Artifacts[0]["size"] != 25.0 || list.Artifacts[0]["content"] != nil {
+		t.Fatalf("list=%v", list.Artifacts)
+	}
+	resp := get("/v1/artifacts/"+id, "")
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "<script>alert(1)</script>" || resp.Header.Get("Content-Type") != "text/html" ||
+		!strings.HasPrefix(resp.Header.Get("Content-Disposition"), "attachment;") || resp.Header.Get("X-Content-Type-Options") != "nosniff" ||
+		resp.Header.Get("Content-Security-Policy") != "sandbox" {
+		t.Fatalf("download: %d %q %v", resp.StatusCode, body, resp.Header)
+	}
+	other := core.NewID()
+	for _, path := range []string{"/v1/artifacts/" + id, "/v1/runs/" + string(run) + "/artifacts", "/v1/artifacts/missing"} {
+		tenant := other
+		if path == "/v1/artifacts/missing" {
+			tenant = ""
+		}
+		if code := get(path, tenant).StatusCode; code != http.StatusNotFound {
+			t.Fatalf("%s as another tenant: %d", path, code)
+		}
+	}
+}
+
 func TestResolveApprovalConflicts(t *testing.T) {
 	srv, _, s := newTestServer(t)
 	defer srv.Close()
@@ -989,7 +1035,7 @@ func TestDebugSetupEndpoints(t *testing.T) {
 	if err := json.NewDecoder(r.Body).Decode(&tools); err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 3 || tools.Tools[0].Name == "" {
+	if len(tools.Tools) != 4 || tools.Tools[0].Name == "" {
 		t.Fatalf("unexpected tools: %+v", tools.Tools)
 	}
 }

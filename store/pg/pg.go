@@ -635,11 +635,10 @@ func (s *Store) PutArtifact(ctx context.Context, a store.Artifact) (string, erro
 	}
 	a.Size = int64(len(a.Content))
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO artifacts (artifact_id, tenant_id, session_id, run_id, task_id,
-		                       kind, name, mime_type, size_bytes, content, metadata, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		INSERT INTO artifacts (`+artifactColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 		a.ID, string(a.TenantID), string(a.SessionID), nullableUUID(string(a.RunID)), nullableUUID(string(a.TaskID)),
-		a.Kind, a.Name, a.MimeType, a.Size, a.Content, encJSON(a.Metadata), a.CreatedAt,
+		nullableUUID(string(a.StepID)), a.Producer, a.Kind, a.Name, a.MimeType, a.Size, a.Content, encJSON(a.Metadata), a.CreatedAt,
 	)
 	if err != nil {
 		return "", mapErr(err)
@@ -647,27 +646,27 @@ func (s *Store) PutArtifact(ctx context.Context, a store.Artifact) (string, erro
 	return a.ID, nil
 }
 
-func (s *Store) GetArtifact(ctx context.Context, tenant core.TenantID, id string) (store.Artifact, error) {
-	row := s.pool.QueryRow(ctx, `
-		SELECT artifact_id, tenant_id, session_id, run_id, task_id, kind, name, mime_type, size_bytes, content, metadata, created_at
-		FROM artifacts WHERE artifact_id=$1 AND tenant_id=$2`, id, string(tenant))
+const artifactColumns = `artifact_id, tenant_id, session_id, run_id, task_id, step_id, producer, kind, name, mime_type, size_bytes, content, metadata, created_at`
+
+func scanArtifact(row rowScanner) (store.Artifact, error) {
 	var (
-		a             store.Artifact
-		aid, tid, sid string
-		rid, taskID   *string
-		meta          []byte
+		a                   store.Artifact
+		tid, sid            string
+		rid, taskID, stepID *string
+		meta                []byte
 	)
-	if err := row.Scan(&aid, &tid, &sid, &rid, &taskID, &a.Kind, &a.Name, &a.MimeType, &a.Size, &a.Content, &meta, &a.CreatedAt); err != nil {
+	if err := row.Scan(&a.ID, &tid, &sid, &rid, &taskID, &stepID, &a.Producer, &a.Kind, &a.Name, &a.MimeType, &a.Size, &a.Content, &meta, &a.CreatedAt); err != nil {
 		return store.Artifact{}, mapErr(err)
 	}
-	a.ID = aid
-	a.TenantID = core.TenantID(tid)
-	a.SessionID = core.SessionID(sid)
+	a.TenantID, a.SessionID = core.TenantID(tid), core.SessionID(sid)
 	if rid != nil {
 		a.RunID = core.RunID(*rid)
 	}
 	if taskID != nil {
 		a.TaskID = core.TaskID(*taskID)
+	}
+	if stepID != nil {
+		a.StepID = core.StepID(*stepID)
 	}
 	if len(meta) > 0 {
 		_ = json.Unmarshal(meta, &a.Metadata)
@@ -675,10 +674,14 @@ func (s *Store) GetArtifact(ctx context.Context, tenant core.TenantID, id string
 	return a, nil
 }
 
+func (s *Store) GetArtifact(ctx context.Context, tenant core.TenantID, id string) (store.Artifact, error) {
+	return scanArtifact(s.pool.QueryRow(ctx, `
+		SELECT `+artifactColumns+` FROM artifacts WHERE artifact_id=$1 AND tenant_id=$2`, id, string(tenant)))
+}
+
 func (s *Store) ListRunArtifacts(ctx context.Context, tenant core.TenantID, run core.RunID) ([]store.Artifact, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT artifact_id, tenant_id, session_id, run_id, task_id, kind, name, mime_type, size_bytes, content, metadata, created_at
-		FROM artifacts WHERE tenant_id=$1 AND run_id=$2 ORDER BY created_at`,
+		SELECT `+artifactColumns+` FROM artifacts WHERE tenant_id=$1 AND run_id=$2 ORDER BY created_at, artifact_id`,
 		string(tenant), string(run))
 	if err != nil {
 		return nil, mapErr(err)
@@ -686,30 +689,13 @@ func (s *Store) ListRunArtifacts(ctx context.Context, tenant core.TenantID, run 
 	defer rows.Close()
 	out := []store.Artifact{}
 	for rows.Next() {
-		var (
-			a             store.Artifact
-			aid, tid, sid string
-			rid, taskID   *string
-			meta          []byte
-		)
-		if err := rows.Scan(&aid, &tid, &sid, &rid, &taskID, &a.Kind, &a.Name, &a.MimeType, &a.Size, &a.Content, &meta, &a.CreatedAt); err != nil {
+		a, err := scanArtifact(rows)
+		if err != nil {
 			return nil, err
-		}
-		a.ID = aid
-		a.TenantID = core.TenantID(tid)
-		a.SessionID = core.SessionID(sid)
-		if rid != nil {
-			a.RunID = core.RunID(*rid)
-		}
-		if taskID != nil {
-			a.TaskID = core.TaskID(*taskID)
-		}
-		if len(meta) > 0 {
-			_ = json.Unmarshal(meta, &a.Metadata)
 		}
 		out = append(out, a)
 	}
-	return out, nil
+	return out, mapErr(rows.Err())
 }
 
 // ---- Events ----

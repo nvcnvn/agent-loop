@@ -23,7 +23,6 @@ CREATE TYPE side_effect_level AS ENUM ('none', 'read_external', 'write_internal'
 CREATE TYPE concurrency_class AS ENUM ('serial', 'parallel_read', 'parallel_isolated_write', 'exclusive', 'external_side_effect');
 CREATE TYPE invocation_status AS ENUM ('scheduled', 'running', 'succeeded', 'failed', 'retry_scheduled', 'timed_out', 'canceled');
 CREATE TYPE approval_status AS ENUM ('requested', 'approved', 'rejected', 'expired', 'canceled');
-CREATE TYPE artifact_kind AS ENUM ('file', 'json', 'report', 'code_patch', 'test_result', 'model_transcript');
 CREATE TYPE budget_dimension AS ENUM ('prompt_tokens', 'completion_tokens', 'cached_tokens', 'total_tokens', 'cost_units', 'runtime_ms', 'model_calls', 'tool_calls', 'subagents', 'concurrency_slots');
 CREATE TYPE budget_ledger_kind AS ENUM ('reserve', 'commit', 'release', 'adjust');
 
@@ -378,8 +377,9 @@ CREATE TABLE artifacts (
     session_id uuid NOT NULL REFERENCES sessions(session_id),
     run_id uuid REFERENCES runs(run_id),
     task_id uuid REFERENCES tasks(task_id),
-    step_id uuid REFERENCES steps(step_id),
-    kind artifact_kind NOT NULL,
+    step_id uuid,
+    producer text NOT NULL DEFAULT '',
+    kind text NOT NULL,
     name text NOT NULL,
     mime_type text NOT NULL DEFAULT 'application/octet-stream',
     version integer NOT NULL DEFAULT 1,

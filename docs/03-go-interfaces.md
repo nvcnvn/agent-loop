@@ -255,9 +255,9 @@ type ApprovalFilter struct {
 }
 
 type ArtifactStore interface {
-    PutArtifact(ctx context.Context, artifact Artifact) (ArtifactRef, error)
+    PutArtifact(ctx context.Context, artifact Artifact) (string, error)
     GetArtifact(ctx context.Context, tenantID core.TenantID, artifactID string) (Artifact, error)
-    ListRunArtifacts(ctx context.Context, tenantID core.TenantID, runID core.RunID) ([]ArtifactRef, error)
+    ListRunArtifacts(ctx context.Context, tenantID core.TenantID, runID core.RunID) ([]Artifact, error)
 }
 
 // MemoryStore keeps long-term memory. SearchMemories returns the tenant's memories made with
@@ -435,7 +435,16 @@ type Call struct {
 }
 
 type Result struct {
-    Output   json.RawMessage
+    Output    json.RawMessage
+    Metadata  map[string]any
+    Artifacts []Artifact // stored by the runtime with the call's run, task and step
+}
+
+type Artifact struct {
+    Name     string
+    Kind     string
+    MimeType string
+    Content  []byte
     Metadata map[string]any
 }
 

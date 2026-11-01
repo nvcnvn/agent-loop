@@ -1,0 +1,2 @@
+ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS step_id uuid;
+ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS producer text NOT NULL DEFAULT '';
