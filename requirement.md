@@ -508,6 +508,10 @@ The product vision is met when the framework can:
 
 Still open:
 - Object storage for artifacts too large to keep inline.
+- A request correlation ID on REST errors and logs.
+- Telling a store failure apart from an invalid request when a run starts: `POST /v1/runs` answers
+  both with 400 `validation_error`.
+- Fencing every write of a run by its lease: only the final status is checked against it.
 
 ## 18. First Implementation Milestones
 
