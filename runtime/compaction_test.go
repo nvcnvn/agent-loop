@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
@@ -161,5 +162,27 @@ func TestCompactionByTokens(t *testing.T) {
 	seen, _ = w.ask("again")
 	if len(w.sum.Calls()) != 1 || fmt.Sprint(contents(seen)) != "[user: Summary of the earlier conversation:\nS user: again]" {
 		t.Fatalf("main saw %q", contents(seen))
+	}
+}
+
+// Messages written in the same instant as the last summarized one stay in the
+// history after it.
+func TestCompactionKeepsMessagesWrittenInTheSameInstant(t *testing.T) {
+	w := newCompactionWorld(t, runtime.Compaction{MaxMessages: 3, KeepRecent: 1})
+	at := time.Now().UTC()
+	for _, text := range []string{"a1", "a2", "a3", "a4"} {
+		if err := w.store.AddMessage(context.Background(), store.MessageProjection{SessionID: w.sid, Role: "user", Visibility: core.VisibilityParticipant, Content: text, CreatedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.sum.Push(model.MockResponse{Content: "S1"})
+	w.ask("q1")
+	seen, runID := w.ask("q2")
+	if got := contents(seen); len(got) != 4 || got[1] != "user: a4" {
+		t.Fatalf("history after the summary: %q", got)
+	}
+	again, err := w.orch.ReExecute(context.Background(), core.DefaultTenant, runID)
+	if err != nil || again.Outputs["s"] != "answer to q2" {
+		t.Fatalf("re-execute: %+v %v", again, err)
 	}
 }

@@ -194,7 +194,7 @@ func (s *Store) ListMessages(ctx context.Context, tenant core.TenantID, id core.
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT message_id, session_id, run_id, event_id, role, visibility, content, created_at
-		FROM messages WHERE session_id=$1 ORDER BY created_at`, string(id))
+		FROM messages WHERE session_id=$1 ORDER BY created_at, message_id`, string(id))
 	if err != nil {
 		return nil, mapErr(err)
 	}

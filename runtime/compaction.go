@@ -35,9 +35,11 @@ const snapshotRole = "snapshot"
 // snapshot is the content of a snapshotRole message.
 type snapshot struct {
 	Summary string `json:"summary"`
-	// Through is when the last summarized message was written; later
-	// messages are not in the summary.
-	Through time.Time `json:"through"`
+	// ThroughID is the last summarized message; the messages after it are
+	// not in the summary. Through is when it was written, which snapshots
+	// without ThroughID are cut at.
+	ThroughID string    `json:"through_id,omitempty"`
+	Through   time.Time `json:"through"`
 	// Messages counts every message the summary covers.
 	Messages int `json:"messages"`
 }
@@ -69,7 +71,11 @@ func (o *Orchestrator) sessionHistory(ctx context.Context, in StartRunInput, run
 			tail = append(tail, m)
 		}
 	}
-	tail = slices.DeleteFunc(tail, func(m store.MessageProjection) bool { return !m.CreatedAt.After(last.Through) })
+	if i := slices.IndexFunc(tail, func(m store.MessageProjection) bool { return m.ID == last.ThroughID }); last.ThroughID != "" && i >= 0 {
+		tail = tail[i+1:]
+	} else {
+		tail = slices.DeleteFunc(tail, func(m store.MessageProjection) bool { return !m.CreatedAt.After(last.Through) })
+	}
 
 	if c := o.Compaction; c.Agent != "" && c.exceeded(tail) {
 		keep := min(max(c.KeepRecent, 0), len(tail))
@@ -143,9 +149,10 @@ func (o *Orchestrator) compact(ctx context.Context, in StartRunInput, runID core
 		return prev, err
 	}
 	next := snapshot{
-		Summary:  strings.TrimSpace(resp.Message.Content),
-		Through:  older[len(older)-1].CreatedAt,
-		Messages: prev.Messages + len(older),
+		Summary:   strings.TrimSpace(resp.Message.Content),
+		ThroughID: older[len(older)-1].ID,
+		Through:   older[len(older)-1].CreatedAt,
+		Messages:  prev.Messages + len(older),
 	}
 	if next.Summary == "" {
 		return prev, fmt.Errorf("agent %s wrote an empty summary", agent.Name)

@@ -202,11 +202,20 @@ func (o *Orchestrator) copyHistory(ctx context.Context, run store.Run) (core.Ses
 	if err != nil {
 		return "", err
 	}
+	copied := map[string]string{}
 	for _, m := range msgs {
 		if m.RunID == run.ID || !m.CreatedAt.Before(run.StartedAt) {
 			continue
 		}
-		m.ID, m.SessionID, m.EventID = "", sid, ""
+		copied[m.ID] = core.NewID()
+		m.ID, m.SessionID, m.EventID = copied[m.ID], sid, ""
+		if m.Role == snapshotRole {
+			var s snapshot
+			if json.Unmarshal([]byte(m.Content), &s) == nil && s.ThroughID != "" {
+				s.ThroughID = copied[s.ThroughID]
+				m.Content = string(mustJSON(s))
+			}
+		}
 		if err := o.Store.AddMessage(ctx, m); err != nil {
 			return "", err
 		}

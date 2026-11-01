@@ -335,7 +335,9 @@ A `snapshot` summarizes a session's earlier messages so agents see the summary p
 messages instead of the whole history. It is a session message with role `snapshot` and `internal`
 visibility, written by the run that made it, whose content is:
 - `summary`: the text agents see first, as a user turn "Summary of the earlier conversation: …"
-- `through`: when the last summarized message was written; messages after it follow the summary
+- `through_id`: the last summarized message; the messages after it, in the session's message order
+  (time written, then ID), follow the summary
+- `through`: when that message was written, which snapshots without `through_id` are cut at
 - `messages`: how many messages the summary covers, across every earlier snapshot
 
 Rules:
