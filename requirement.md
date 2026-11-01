@@ -283,7 +283,10 @@ SSE requirements:
 
 - [x] Provide a clean REST API first.
 - Keep room for future ADK-compatible inbound or outbound integration.
-- [ ] Document which parts are stable public API versus internal runtime contracts (OpenAPI).
+- [x] Document which parts are stable public API versus internal runtime contracts:
+  `api/openapi.json` (OpenAPI 3.1, served at `GET /v1/openapi.json`) describes every route and marks
+  each `x-stability: stable` (every `/v1` route except `/v1/debug/*`) or `internal` (`/healthz`,
+  `/readyz`, `/metrics`, and the `-debug` console and `/v1/debug/*`).
 
 ## 9. Safety and Control
 

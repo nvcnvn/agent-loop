@@ -1,39 +1,6 @@
-// Package api exposes the agent-loop runtime over HTTP REST + SSE.
-//
-// The handler set covers the first-slice contract from
-// docs/04-contracts-and-tests.md:
-//
-//	GET    /v1/agents
-//	PUT    /v1/agents/{name}         (admin)
-//	DELETE /v1/agents/{name}         (admin)
-//	POST   /v1/sessions
-//	GET    /v1/sessions/{sid}
-//	POST   /v1/sessions/{sid}/memories   (ingest a document into memory)
-//	POST   /v1/artifacts/{aid}/memories  (ingest a text artifact into memory)
-//	GET    /v1/sessions/{sid}/participants
-//	PUT    /v1/sessions/{sid}/participants/{pid}
-//	DELETE /v1/sessions/{sid}/participants/{pid}
-//	POST   /v1/sessions/{sid}/messages
-//	POST   /v1/runs
-//	GET    /v1/runs/{rid}
-//	GET    /v1/runs/{rid}/events?after=<seq>
-//	GET    /v1/runs/{rid}/stream     (SSE; honours Last-Event-ID; ?deltas=1 adds reply deltas)
-//	GET    /v1/runs/{rid}/artifacts
-//	GET    /v1/artifacts/{aid}       (the content, as an attachment)
-//	GET    /v1/artifacts/{aid}/versions
-//	POST   /v1/runs/{rid}/cancel
-//	POST   /v1/runs/{rid}/resume
-//	POST   /v1/runs/{rid}/reexecute  (replays recorded model and tool outputs; waits)
-//	GET    /v1/approvals?run_id=&status=&after=&limit=  (default status: requested; "all" for every status)
-//	POST   /v1/approvals/{aid}
-//	GET    /healthz                  (liveness)
-//	GET    /readyz                   (readiness: the store answers a ping)
-//	GET    /metrics                  (Prometheus text format)
-//
-// With Server.Debug set it also serves the debug console at / and /ui/, and:
-//
-//	GET    /v1/debug/agents
-//	GET    /v1/debug/tools
+// Package api exposes the agent-loop runtime over HTTP REST + SSE. The
+// embedded OpenAPI document openapi.json, served at /v1/openapi.json,
+// describes every route and marks each stable or internal.
 package api
 
 import (
@@ -119,49 +86,8 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 // Handler returns an http.Handler with all v1 routes wired.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	if s.Debug {
-		assets, err := fs.Sub(webFS, "web")
-		if err != nil {
-			panic(err)
-		}
-		mux.Handle("GET /ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(assets))))
-		mux.HandleFunc("GET /", s.debugConsole)
-		mux.HandleFunc("GET /v1/debug/agents", s.listAgents)
-		mux.HandleFunc("GET /v1/debug/tools", s.listTools)
-	}
-	mux.HandleFunc("GET /v1/agents", s.listTenantAgents)
-	mux.HandleFunc("PUT /v1/agents/{name}", s.putAgent)
-	mux.HandleFunc("DELETE /v1/agents/{name}", s.deleteAgent)
-	mux.HandleFunc("POST /v1/sessions", s.createSession)
-	mux.HandleFunc("GET /v1/sessions", s.listSessions)
-	mux.HandleFunc("GET /v1/sessions/{sid}", s.getSession)
-	mux.HandleFunc("GET /v1/sessions/{sid}/messages", s.listMessages)
-	mux.HandleFunc("GET /v1/sessions/{sid}/runs", s.listRuns)
-	mux.HandleFunc("GET /v1/sessions/{sid}/participants", s.listParticipants)
-	mux.HandleFunc("POST /v1/sessions/{sid}/memories", s.ingestDocument)
-	mux.HandleFunc("POST /v1/artifacts/{aid}/memories", s.ingestArtifact)
-	mux.HandleFunc("PUT /v1/sessions/{sid}/participants/{pid}", s.putParticipant)
-	mux.HandleFunc("DELETE /v1/sessions/{sid}/participants/{pid}", s.removeParticipant)
-	mux.HandleFunc("POST /v1/sessions/{sid}/messages", s.postMessage)
-	mux.HandleFunc("POST /v1/runs", s.startRun)
-	mux.HandleFunc("GET /v1/runs/{rid}", s.getRun)
-	mux.HandleFunc("GET /v1/runs/{rid}/events", s.listEvents)
-	mux.HandleFunc(streamRoute, s.streamEvents)
-	mux.HandleFunc("GET /v1/runs/{rid}/artifacts", s.listArtifacts)
-	mux.HandleFunc("GET /v1/artifacts/{aid}", s.downloadArtifact)
-	mux.HandleFunc("GET /v1/artifacts/{aid}/versions", s.listArtifactVersions)
-	mux.HandleFunc("POST /v1/runs/{rid}/cancel", s.cancelRun)
-	mux.HandleFunc("POST /v1/runs/{rid}/resume", s.resumeRun)
-	mux.HandleFunc("POST /v1/runs/{rid}/reexecute", s.reExecuteRun)
-	mux.HandleFunc("GET /v1/approvals", s.listApprovals)
-	mux.HandleFunc("POST /v1/approvals/{aid}", s.resolveApproval)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	mux.HandleFunc("GET /readyz", s.readyz)
-	if s.Metrics != nil {
-		mux.Handle("GET /metrics", s.Metrics)
+	for pattern, h := range s.routes() {
+		mux.HandleFunc(pattern, h)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.MaxBodyBytes > 0 {
@@ -192,13 +118,74 @@ func (s *Server) Handler() http.Handler {
 	})
 }
 
+// routes maps each pattern the server serves, every one described in openapi.json, to its handler.
+func (s *Server) routes() map[string]http.HandlerFunc {
+	routes := map[string]http.HandlerFunc{
+		"GET /v1/openapi.json":                         serveOpenAPI,
+		"GET /v1/agents":                               s.listTenantAgents,
+		"PUT /v1/agents/{name}":                        s.putAgent,
+		"DELETE /v1/agents/{name}":                     s.deleteAgent,
+		"POST /v1/sessions":                            s.createSession,
+		"GET /v1/sessions":                             s.listSessions,
+		"GET /v1/sessions/{sid}":                       s.getSession,
+		"GET /v1/sessions/{sid}/messages":              s.listMessages,
+		"GET /v1/sessions/{sid}/runs":                  s.listRuns,
+		"GET /v1/sessions/{sid}/participants":          s.listParticipants,
+		"POST /v1/sessions/{sid}/memories":             s.ingestDocument,
+		"POST /v1/artifacts/{aid}/memories":            s.ingestArtifact,
+		"PUT /v1/sessions/{sid}/participants/{pid}":    s.putParticipant,
+		"DELETE /v1/sessions/{sid}/participants/{pid}": s.removeParticipant,
+		"POST /v1/sessions/{sid}/messages":             s.postMessage,
+		"POST /v1/runs":                                s.startRun,
+		"GET /v1/runs/{rid}":                           s.getRun,
+		"GET /v1/runs/{rid}/events":                    s.listEvents,
+		streamRoute:                                    s.streamEvents,
+		"GET /v1/runs/{rid}/artifacts":                 s.listArtifacts,
+		"GET /v1/artifacts/{aid}":                      s.downloadArtifact,
+		"GET /v1/artifacts/{aid}/versions":             s.listArtifactVersions,
+		"POST /v1/runs/{rid}/cancel":                   s.cancelRun,
+		"POST /v1/runs/{rid}/resume":                   s.resumeRun,
+		"POST /v1/runs/{rid}/reexecute":                s.reExecuteRun,
+		"GET /v1/approvals":                            s.listApprovals,
+		"POST /v1/approvals/{aid}":                     s.resolveApproval,
+		"GET /readyz":                                  s.readyz,
+		"GET /healthz": func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		},
+	}
+	if s.Debug {
+		assets, err := fs.Sub(webFS, "web")
+		if err != nil {
+			panic(err)
+		}
+		routes["GET /ui/"] = http.StripPrefix("/ui/", http.FileServer(http.FS(assets))).ServeHTTP
+		routes["GET /"] = s.debugConsole
+		routes["GET /v1/debug/agents"] = s.listAgents
+		routes["GET /v1/debug/tools"] = s.listTools
+	}
+	if s.Metrics != nil {
+		routes["GET /metrics"] = s.Metrics.ServeHTTP
+	}
+	return routes
+}
+
+//go:embed openapi.json
+var openAPI []byte
+
+func serveOpenAPI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(openAPI)
+}
+
 // publicRoutes need no identity; every other route, matched or not, does.
 var publicRoutes = map[string]bool{
-	"GET /healthz": true,
-	"GET /readyz":  true,
-	"GET /metrics": true,
-	"GET /":        true,
-	"GET /ui/":     true,
+	"GET /healthz":         true,
+	"GET /readyz":          true,
+	"GET /metrics":         true,
+	"GET /":                true,
+	"GET /ui/":             true,
+	"GET /v1/openapi.json": true,
 }
 
 // resolve authenticates a request whose r.Pattern is the route it will match.

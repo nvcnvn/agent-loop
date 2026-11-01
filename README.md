@@ -48,6 +48,7 @@ The recommended first vertical slice from
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
 | Re-execution of a finished run from its recorded model requests/responses and tool results (`POST /v1/runs/{rid}/reexecute`) | [runtime/reexecute.go](runtime/reexecute.go) |
 | REST + SSE API with `Last-Event-ID` resume and heartbeats; `/healthz` liveness and `/readyz` readiness (pings the store); read/idle timeouts and a 1 MiB request body limit (413) | [api/server.go](api/server.go) |
+| OpenAPI 3.1 document of every route, served at `GET /v1/openapi.json`, marking each operation `x-stability: stable` (every `/v1` route except `/v1/debug/*`) or `internal` (probes, metrics, debug console); a test keeps it in step with the registered routes | [api/openapi.json](api/openapi.json) |
 | Embedded responsive debug console (served with `-debug`) for session resume, chat-style run testing, setup inspection, REST checkpoints, request logs, and HTTP SSE | [api/web/index.html](api/web/index.html) |
 | MCP tools: servers over stdio or streamable HTTP, tools discovered and translated at startup and kept in step with the server, auth headers from the config file's `${VAR}`, reconnects, retries of idempotent calls, a circuit breaker; servers whose tools only one tenant sees (`tenant_mcp_servers`) | [tool/mcp/mcp.go](tool/mcp/mcp.go), [runtime/tenanttools.go](runtime/tenanttools.go) |
 | OpenTelemetry traces of runs, stages, tasks (including delegated ones), model calls, tool calls and approval waits | [runtime/orchestrator.go](runtime/orchestrator.go) |
@@ -126,7 +127,8 @@ authenticated. In production set `AGENT_LOOP_API_KEYS` to comma-separated
 <key>` (SSE clients may pass `?access_token=<key>` instead), and the key alone
 decides the tenant, principal and role. `-trust-identity-headers` takes them from
 `X-Tenant-ID`, `X-Principal-ID` (UUIDs) and `X-Role` (default `admin`) unchecked, for local
-development only. `/healthz`, `/readyz` and `/metrics` need no key. Tools read their credentials by
+development only. `/healthz`, `/readyz`, `/metrics`, `/v1/openapi.json` and, with `-debug`, the
+console at `/` and `/ui/` need no key. Tools read their credentials by
 name from the files of `AGENT_LOOP_SECRETS_DIR` (`<tenant>/<name>`, else `<name>`) or, without it,
 from `AGENT_LOOP_SECRET_<NAME>` variables; those secrets, the API keys and other known credentials
 are redacted from logs and trace errors, as are the config file's `redact` patterns.
@@ -257,9 +259,8 @@ workflow on every push and PR.
 While implementing, the following gaps in `requirement.md` and `docs/`
 were resolved in code:
 
-1. **Concrete REST contract** — handlers and request/response shapes in
-   [api/server.go](api/server.go) materialize the OpenAPI surface that
-   doc 4 only described.
+1. **Concrete REST contract** — [api/openapi.json](api/openapi.json)
+   is the OpenAPI document doc 4 called for, each route marked stable or internal.
 2. **CI-friendly persistence** — an in-memory `EventStore` /
    `RunStore` / `TaskStore` / `ApprovalStore` / `ArtifactStore` that
    satisfies the same interfaces a Postgres driver would. Tests run

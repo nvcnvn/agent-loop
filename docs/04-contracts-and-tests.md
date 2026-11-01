@@ -6,18 +6,30 @@ The requirements need more than entities, SQL, and interfaces before development
 
 ### 1. Public REST API Contract
 
-Define an OpenAPI document for:
-- create session
-- post human message
-- start run
-- resume run
-- cancel run
-- list runs
-- list run events
-- list and download artifacts (§10)
-- list pending approvals
-- approve or reject gated actions
-- subscribe to run events through SSE
+[api/openapi.json](../api/openapi.json), an OpenAPI 3.1 document served without identity at
+`GET /v1/openapi.json`, describes every route the server registers: parameters, request and
+response bodies, and status codes. `TestOpenAPIDescribesEveryRoute` fails when a registered route
+is missing from it or it describes one that is not registered.
+
+Stability: each operation's `x-stability` is `stable` for the public API clients build on, which is
+every `/v1` route except `/v1/debug/*`, or `internal` for operators and the bundled debug console:
+`/healthz`, `/readyz` and `/metrics`, and `/`, `/ui/` and `/v1/debug/*`, which only a server started
+with `-debug` serves. Within v1 stable routes change only compatibly; internal ones may change in
+any release. Run fields that name the process holding a run (`Owner`, `LeaseUntil`,
+`CancelRequested`) are runtime details even on stable routes.
+
+Identity: every route except `/healthz`, `/readyz`, `/metrics`, `/`, `/ui/` and `/v1/openapi.json`
+needs one, and so does a request no route matches (401 otherwise). An
+API key from `AGENT_LOOP_API_KEYS`, sent as `Authorization: Bearer <key>` (the SSE stream also takes
+it as `?access_token=`, since `EventSource` cannot send headers), fixes the caller's tenant,
+principal and role. A server started with `-trust-identity-headers` instead trusts `X-Tenant-ID`,
+`X-Principal-ID` and `X-Role` as sent, for local development.
+
+Errors are `{"code", "message", "retryable", "correlation_id"}` with a code from §12. A request
+body over the server's cap (1 MiB by default) answers 413. `POST /v1/runs` and a message post that
+starts a run take an idempotency key as `idempotency_key` or the `Idempotency-Key` header. Run
+events page by run sequence (`?after=`, `?limit=`) and approvals by ID (`?after=`, `?limit=`,
+`next_after`); the other lists are not paged.
 
 Approvals: `GET /v1/approvals` lists the caller's tenant's approvals that are still `requested`
 and not expired, oldest first, as `{"approvals": [{"approval_id", "tenant_id", "run_id",
@@ -106,13 +118,6 @@ every lease period, the unfinished runs whose lease has passed (paused runs exce
 process's runs are taken over within two lease periods. A graceful shutdown releases the leases of
 the runs it checkpoints so another process takes them at its next recovery, and a process
 restarted with the same `Owner` takes its own back at once.
-
-Key decisions:
-- idempotency headers for `POST` endpoints
-- tenant and principal identity propagation
-- error response shape
-- pagination and event cursor shape
-- which fields are stable public API vs internal runtime details
 
 ### 2. SSE Event Contract
 

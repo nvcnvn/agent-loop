@@ -1,0 +1,1012 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "agent-loop REST and SSE API",
+    "version": "v1",
+    "description": "The HTTP API of the agent-loop runtime (package api). docs/04-contracts-and-tests.md §1 and §2 describe the behaviour behind each operation.\n\nStability: every operation carries `x-stability`. `stable` is the public API clients build on: every `/v1` route except `/v1/debug/*`. Within v1 its paths, parameters, status codes and documented fields change only compatibly. `internal` marks routes for operators and the bundled debug console: `/healthz`, `/readyz` and `/metrics`, which sit outside `/v1`, and `/`, `/ui/` and `/v1/debug/*`, which the server serves only when started with `-debug`. Internal routes may change in any release.\n\nIdentity: every route except `/healthz`, `/readyz`, `/metrics`, `/`, `/ui/` and `/v1/openapi.json` needs one, and an unmatched route needs one too; without it the server answers 401 with `WWW-Authenticate: Bearer`. A server with `AGENT_LOOP_API_KEYS` takes `Authorization: Bearer <key>`; a server started with `-trust-identity-headers` (development only) instead trusts `X-Tenant-ID` and `X-Principal-ID` (UUIDs) and `X-Role` (`admin`, `operator`, `member` or `viewer`; `admin` when absent) as sent.\n\nErrors: every error the handlers produce is an `Error` body. Request bodies are capped (1 MiB by default); a larger one answers 413. A caller who may not read a session gets 404 for it and everything in it; one who may read it but not do more gets 403.\n\nDurations (`max_runtime`, `timeout`, `backoff`, ...) are integer nanoseconds. Times are RFC 3339; an unset time is `0001-01-01T00:00:00Z` unless the schema says it is omitted."
+  },
+  "servers": [{"url": "/"}],
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "debugConsole",
+        "summary": "Debug console page (served with -debug)",
+        "x-stability": "internal",
+        "security": [],
+        "responses": {
+          "200": {"description": "The console's HTML page.", "content": {"text/html": {"schema": {"type": "string"}}}},
+          "404": {"description": "Any other path that no route matches."}
+        }
+      }
+    },
+    "/ui/": {
+      "get": {
+        "operationId": "debugConsoleAssets",
+        "summary": "Debug console assets under /ui/ (served with -debug)",
+        "x-stability": "internal",
+        "security": [],
+        "responses": {
+          "200": {"description": "A static file of the console, by its path below /ui/."},
+          "404": {"description": "No such file."}
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "summary": "Liveness",
+        "x-stability": "internal",
+        "security": [],
+        "responses": {
+          "200": {"description": "The process serves requests.", "content": {"text/plain": {"schema": {"const": "ok"}}}}
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "readyz",
+        "summary": "Readiness: the store answers a ping within 2s",
+        "x-stability": "internal",
+        "security": [],
+        "responses": {
+          "200": {"description": "Ready.", "content": {"text/plain": {"schema": {"const": "ok"}}}},
+          "503": {"description": "The store is unreachable (`not_ready`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "metrics",
+        "summary": "Prometheus metrics (served when the server has metrics)",
+        "x-stability": "internal",
+        "security": [],
+        "responses": {
+          "200": {"description": "Metrics in the Prometheus text format.", "content": {"text/plain": {"schema": {"type": "string"}}}}
+        }
+      }
+    },
+    "/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPI",
+        "summary": "This document",
+        "x-stability": "stable",
+        "security": [],
+        "responses": {
+          "200": {"description": "The OpenAPI document.", "content": {"application/json": {"schema": {"type": "object"}}}}
+        }
+      }
+    },
+    "/v1/debug/agents": {
+      "get": {
+        "operationId": "debugListAgents",
+        "summary": "The configured agents with their instructions (served with -debug; admins and operators)",
+        "x-stability": "internal",
+        "responses": {
+          "200": {"description": "The agents, by name.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["agents"],
+            "properties": {"agents": {"type": "array", "items": {"$ref": "#/components/schemas/DebugAgent"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/v1/debug/tools": {
+      "get": {
+        "operationId": "debugListTools",
+        "summary": "The tools the caller's tenant's runs may call (served with -debug; admins and operators)",
+        "x-stability": "internal",
+        "responses": {
+          "200": {"description": "The tools, by name.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["tools"],
+            "properties": {"tools": {"type": "array", "items": {"$ref": "#/components/schemas/ToolDefinition"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/v1/agents": {
+      "get": {
+        "operationId": "listAgents",
+        "summary": "List the agents the caller's runs may use",
+        "description": "The config file's agents (`source: config`) and the tenant's (`source: api`, with `version`), by name. Only admins and operators see `instructions`, and the config file's only when the server runs with -debug.",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The agents.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["agents"],
+            "properties": {"agents": {"type": "array", "items": {"$ref": "#/components/schemas/AgentInfo"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/agents/{name}": {
+      "parameters": [{"name": "name", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"}}],
+      "put": {
+        "operationId": "putAgent",
+        "summary": "Create or replace one of the tenant's agents (admins)",
+        "description": "The name comes from the path; a `name` in the body is ignored. Unknown fields answer 400.",
+        "x-stability": "stable",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Agent"}}}},
+        "responses": {
+          "200": {"description": "Stored.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["name", "version"],
+            "properties": {"name": {"type": "string"}, "version": {"type": "integer", "minimum": 1}}
+          }}}},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"description": "The config file defines an agent of this name (`conflict`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      },
+      "delete": {
+        "operationId": "deleteAgent",
+        "summary": "Remove one of the tenant's agents (admins)",
+        "x-stability": "stable",
+        "responses": {
+          "204": {"description": "Removed."},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "A config file agent (`conflict`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/sessions": {
+      "post": {
+        "operationId": "createSession",
+        "summary": "Create a session owned by the caller (not viewers)",
+        "x-stability": "stable",
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "title": {"type": "string"},
+            "project": {"type": "string", "maxLength": 200, "description": "Optional label, trimmed, at most 200 bytes; sessions sharing it share project memory."}
+          }
+        }}}},
+        "responses": {
+          "201": {"description": "Created.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["session_id"],
+            "properties": {"session_id": {"$ref": "#/components/schemas/ID"}}
+          }}}},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      },
+      "get": {
+        "operationId": "listSessions",
+        "summary": "List the tenant's sessions the caller participates in (all of them for admins and operators)",
+        "x-stability": "stable",
+        "parameters": [{"name": "project", "in": "query", "schema": {"type": "string"}, "description": "Only sessions with this project label."}],
+        "responses": {
+          "200": {"description": "The sessions.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["sessions"],
+            "properties": {"sessions": {"type": "array", "items": {"$ref": "#/components/schemas/Session"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/sessions/{sid}": {
+      "parameters": [{"$ref": "#/components/parameters/sid"}],
+      "get": {
+        "operationId": "getSession",
+        "summary": "Get a session",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The session.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Session"}}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/sessions/{sid}/messages": {
+      "parameters": [{"$ref": "#/components/parameters/sid"}],
+      "get": {
+        "operationId": "listMessages",
+        "summary": "List a session's messages the caller's role may read",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The messages, oldest first.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["messages"],
+            "properties": {"messages": {"type": "array", "items": {"$ref": "#/components/schemas/Message"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      },
+      "post": {
+        "operationId": "postMessage",
+        "summary": "Post a human message, answering an agent's question or starting a run",
+        "description": "Without `run`, the message answers the oldest open `ask_human` question of the session's runs, if any. With `run` (or an `Idempotency-Key` header) it starts a run with the message as input `message`; an invalid run answers 400 and posts nothing, and a reused idempotency key answers 201 with `replayed` and posts nothing.",
+        "x-stability": "stable",
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "role": {"type": "string"},
+            "content": {"type": "string"},
+            "run": {
+              "type": "object",
+              "description": "Needs `workflow.stages` or `template`.",
+              "properties": {
+                "idempotency_key": {"type": "string"},
+                "workflow": {"$ref": "#/components/schemas/Workflow"},
+                "template": {"type": "string"},
+                "input": {"type": "object", "additionalProperties": {"type": "string"}},
+                "limits": {"$ref": "#/components/schemas/Limits"}
+              }
+            }
+          }
+        }}}},
+        "responses": {
+          "201": {"description": "Posted.", "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "event": {"$ref": "#/components/schemas/Event", "description": "The `human_message_created` event; absent when `replayed`."},
+              "answered_run_id": {"$ref": "#/components/schemas/ID"},
+              "answered_approval_id": {"$ref": "#/components/schemas/ID"},
+              "run_id": {"$ref": "#/components/schemas/ID"},
+              "replayed": {"const": true},
+              "run_error": {"$ref": "#/components/schemas/Error", "description": "The run could not start once the message was stored."}
+            }
+          }}}},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "503": {"$ref": "#/components/responses/Overloaded"}
+        }
+      }
+    },
+    "/v1/sessions/{sid}/runs": {
+      "parameters": [{"$ref": "#/components/parameters/sid"}],
+      "get": {
+        "operationId": "listRuns",
+        "summary": "List a session's runs",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The runs.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["runs"],
+            "properties": {"runs": {"type": "array", "items": {"$ref": "#/components/schemas/Run"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/sessions/{sid}/participants": {
+      "parameters": [{"$ref": "#/components/parameters/sid"}],
+      "get": {
+        "operationId": "listParticipants",
+        "summary": "List a session's participants",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The participants.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["participants"],
+            "properties": {"participants": {"type": "array", "items": {"$ref": "#/components/schemas/Participant"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/sessions/{sid}/participants/{pid}": {
+      "parameters": [
+        {"$ref": "#/components/parameters/sid"},
+        {"name": "pid", "in": "path", "required": true, "description": "The participant's principal ID.", "schema": {"$ref": "#/components/schemas/ID"}}
+      ],
+      "put": {
+        "operationId": "putParticipant",
+        "summary": "Add a participant or change its role (session owners)",
+        "x-stability": "stable",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object", "required": ["role"],
+          "properties": {"role": {"$ref": "#/components/schemas/SessionRole"}}
+        }}}},
+        "responses": {
+          "200": {"description": "The participant.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Participant"}}}},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      },
+      "delete": {
+        "operationId": "removeParticipant",
+        "summary": "Remove a participant (session owners)",
+        "x-stability": "stable",
+        "responses": {
+          "204": {"description": "Removed."},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/sessions/{sid}/memories": {
+      "parameters": [{"$ref": "#/components/parameters/sid"}],
+      "post": {
+        "operationId": "ingestDocument",
+        "summary": "Ingest a document into long-term memory",
+        "description": "Needs write access to the session. The content, at most 1 MiB, is cut into parts that are each embedded and saved with provenance; every part is saved, or none.",
+        "x-stability": "stable",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string", "description": "The document name kept as provenance."},
+            "content": {"type": "string"},
+            "scope": {"$ref": "#/components/schemas/MemoryScope"}
+          }
+        }}}},
+        "responses": {
+          "201": {"$ref": "#/components/responses/Ingested"},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "500": {"$ref": "#/components/responses/Internal"},
+          "501": {"$ref": "#/components/responses/NoMemory"}
+        }
+      }
+    },
+    "/v1/artifacts/{aid}/memories": {
+      "parameters": [{"$ref": "#/components/parameters/aid"}],
+      "post": {
+        "operationId": "ingestArtifact",
+        "summary": "Ingest a text or JSON artifact into its session's long-term memory",
+        "x-stability": "stable",
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {"scope": {"$ref": "#/components/schemas/MemoryScope"}}
+        }}}},
+        "responses": {
+          "201": {"$ref": "#/components/responses/Ingested"},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "415": {"description": "A binary artifact (`unsupported_media_type`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "500": {"$ref": "#/components/responses/Internal"},
+          "501": {"$ref": "#/components/responses/NoMemory"}
+        }
+      }
+    },
+    "/v1/runs": {
+      "post": {
+        "operationId": "startRun",
+        "summary": "Start a run in a session",
+        "x-stability": "stable",
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object", "required": ["session_id"],
+          "description": "Needs `workflow.stages` or `template`. `idempotency_key` takes precedence over the header; a key reused in the same session answers the earlier run, in another session 409.",
+          "properties": {
+            "session_id": {"$ref": "#/components/schemas/ID"},
+            "idempotency_key": {"type": "string"},
+            "workflow": {"$ref": "#/components/schemas/Workflow"},
+            "template": {"type": "string", "description": "A workflow template from the server's config file."},
+            "input": {"type": "object", "additionalProperties": {"type": "string"}},
+            "images": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/Image"}},
+            "limits": {"$ref": "#/components/schemas/Limits"}
+          }
+        }}}},
+        "responses": {
+          "202": {"description": "Queued.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["run_id"],
+            "properties": {"run_id": {"$ref": "#/components/schemas/ID"}}
+          }}}},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "503": {"$ref": "#/components/responses/Overloaded"}
+        }
+      }
+    },
+    "/v1/runs/{rid}": {
+      "parameters": [{"$ref": "#/components/parameters/rid"}],
+      "get": {
+        "operationId": "getRun",
+        "summary": "Get a run",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The run.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Run"}}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/runs/{rid}/events": {
+      "parameters": [{"$ref": "#/components/parameters/rid"}],
+      "get": {
+        "operationId": "listEvents",
+        "summary": "List a run's events the caller's role may read, in sequence order",
+        "x-stability": "stable",
+        "parameters": [
+          {"name": "after", "in": "query", "schema": {"type": "integer", "format": "int64", "default": 0}, "description": "Only events with a greater run sequence."},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 0}, "description": "At most this many events before visibility filtering; 0 means all."}
+        ],
+        "responses": {
+          "200": {"description": "The events.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["events"],
+            "properties": {"events": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/runs/{rid}/stream": {
+      "parameters": [{"$ref": "#/components/parameters/rid"}],
+      "get": {
+        "operationId": "streamEvents",
+        "summary": "Stream a run's events as server-sent events",
+        "description": "Replays the stored events after the cursor, then live ones, in sequence order, and closes after the run's terminal `run_state_changed`. Each event is `id: <sequence>`, `event: <type>` and `data: <EventEnvelope>`. With `deltas=1` it also carries `agent_message_delta` events (`data: <Delta>`, no `id`). A `: heartbeat` comment every 15s does not advance the sequence. Since EventSource cannot send headers, the API key may be passed as `access_token`.",
+        "x-stability": "stable",
+        "security": [{"bearerAuth": []}, {"accessToken": []}],
+        "parameters": [
+          {"name": "Last-Event-ID", "in": "header", "schema": {"type": "integer", "format": "int64"}, "description": "Resume after this run sequence; takes precedence over `after`."},
+          {"name": "after", "in": "query", "schema": {"type": "integer", "format": "int64", "default": 0}},
+          {"name": "deltas", "in": "query", "schema": {"const": "1"}}
+        ],
+        "responses": {
+          "200": {"description": "The event stream.", "content": {"text/event-stream": {"schema": {"type": "string"}, "x-sse-data": {"oneOf": [{"$ref": "#/components/schemas/EventEnvelope"}, {"$ref": "#/components/schemas/Delta"}]}}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/runs/{rid}/artifacts": {
+      "parameters": [{"$ref": "#/components/parameters/rid"}],
+      "get": {
+        "operationId": "listArtifacts",
+        "summary": "List a run's artifacts",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The artifacts.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["artifacts"],
+            "properties": {"artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/artifacts/{aid}": {
+      "parameters": [{"$ref": "#/components/parameters/aid"}],
+      "get": {
+        "operationId": "downloadArtifact",
+        "summary": "Download an artifact's content as an attachment",
+        "description": "Served with the artifact's MIME type (`application/octet-stream` if it does not parse), `Content-Disposition: attachment` with its name, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`.",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The content.", "content": {"*/*": {"schema": {"type": "string", "contentMediaType": "application/octet-stream"}}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/artifacts/{aid}/versions": {
+      "parameters": [{"$ref": "#/components/parameters/aid"}],
+      "get": {
+        "operationId": "listArtifactVersions",
+        "summary": "List every version of the artifact's name in its session",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The versions.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["artifacts"],
+            "properties": {"artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}}
+          }}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/runs/{rid}/cancel": {
+      "parameters": [{"$ref": "#/components/parameters/rid"}],
+      "post": {
+        "operationId": "cancelRun",
+        "summary": "Ask for a run to be canceled",
+        "x-stability": "stable",
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {"reason": {"type": "string", "maxLength": 1024}}
+        }}}},
+        "responses": {
+          "202": {"description": "Cancellation requested."},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "The run has finished (`conflict`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "413": {"$ref": "#/components/responses/TooLarge"}
+        }
+      }
+    },
+    "/v1/runs/{rid}/resume": {
+      "parameters": [{"$ref": "#/components/parameters/rid"}],
+      "post": {
+        "operationId": "resumeRun",
+        "summary": "Resume an interrupted, paused, failed or timed-out run",
+        "x-stability": "stable",
+        "responses": {
+          "202": {"description": "Resumed."},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "The run cannot be resumed, or another process holds it (`conflict`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "500": {"$ref": "#/components/responses/Internal"},
+          "503": {"$ref": "#/components/responses/Overloaded"}
+        }
+      }
+    },
+    "/v1/runs/{rid}/reexecute": {
+      "parameters": [{"$ref": "#/components/parameters/rid"}],
+      "post": {
+        "operationId": "reExecuteRun",
+        "summary": "Re-execute a finished run from its recorded model and tool outputs, and wait for the copy",
+        "description": "The copy is a child run in a new session. The response is its result, whatever its status.",
+        "x-stability": "stable",
+        "responses": {
+          "200": {"description": "The copy's result.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Result"}}}},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "The run has not finished (`conflict`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "422": {"description": "The run was recorded before requests were stored (`not_recorded`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/approvals": {
+      "get": {
+        "operationId": "listApprovals",
+        "summary": "List the tenant's approvals in the runs the caller participates in (all of them for admins and operators), oldest first",
+        "x-stability": "stable",
+        "parameters": [
+          {"name": "run_id", "in": "query", "schema": {"$ref": "#/components/schemas/ID"}, "description": "Only this run's; 404 if the caller may not read it."},
+          {"name": "status", "in": "query", "schema": {"enum": ["requested", "approved", "rejected", "expired", "canceled", "all"], "default": "requested"}, "description": "`requested` leaves out approvals past `expires_at`; `all` shows such an approval as `requested`."},
+          {"name": "after", "in": "query", "schema": {"$ref": "#/components/schemas/ID"}, "description": "The `next_after` of the previous page."},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 100}}
+        ],
+        "responses": {
+          "200": {"description": "A page of approvals; a full page carries `next_after`.", "content": {"application/json": {"schema": {
+            "type": "object", "required": ["approvals"],
+            "properties": {
+              "approvals": {"type": "array", "items": {"$ref": "#/components/schemas/Approval"}},
+              "next_after": {"$ref": "#/components/schemas/ID"}
+            }
+          }}}},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    },
+    "/v1/approvals/{aid}": {
+      "parameters": [{"name": "aid", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/ID"}}],
+      "post": {
+        "operationId": "resolveApproval",
+        "summary": "Approve or reject a requested approval as the caller",
+        "x-stability": "stable",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object", "required": ["decision"],
+          "properties": {
+            "decision": {"enum": ["approved", "rejected"]},
+            "payload": {"description": "Stored as the resolution; an `ask_human` question takes its `answer`."},
+            "reason": {"type": "string", "description": "Accepted and not stored."}
+          }
+        }}}},
+        "responses": {
+          "200": {"description": "Resolved."},
+          "400": {"$ref": "#/components/responses/ValidationError"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "Already resolved or expired (`conflict`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "413": {"$ref": "#/components/responses/TooLarge"},
+          "500": {"$ref": "#/components/responses/Internal"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {"type": "http", "scheme": "bearer", "description": "An API key from `AGENT_LOOP_API_KEYS`, which fixes the caller's tenant, principal and role."},
+      "accessToken": {"type": "apiKey", "in": "query", "name": "access_token", "description": "The API key as a query parameter, accepted only by the SSE stream route."}
+    },
+    "parameters": {
+      "sid": {"name": "sid", "in": "path", "required": true, "description": "Session ID.", "schema": {"$ref": "#/components/schemas/ID"}},
+      "rid": {"name": "rid", "in": "path", "required": true, "description": "Run ID.", "schema": {"$ref": "#/components/schemas/ID"}},
+      "aid": {"name": "aid", "in": "path", "required": true, "description": "Artifact ID.", "schema": {"$ref": "#/components/schemas/ID"}},
+      "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "schema": {"type": "string"}, "description": "Used when the body has no `idempotency_key`."}
+    },
+    "responses": {
+      "ValidationError": {"description": "The request is malformed or invalid (`validation_error`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Unauthorized": {"description": "No valid identity (`unauthorized`).", "headers": {"WWW-Authenticate": {"schema": {"const": "Bearer"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Forbidden": {"description": "The caller's role does not allow this (`forbidden`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "NotFound": {"description": "No such resource, or one the caller may not read (`not_found`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Conflict": {"description": "The idempotency key belongs to another session, or the state forbids this (`conflict`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "TooLarge": {"description": "The request body is over the server's cap (`validation_error`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Overloaded": {"description": "The run queue is full (`overloaded`).", "headers": {"Retry-After": {"schema": {"const": "1"}}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Internal": {"description": "The store or runtime failed (`internal_error`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "NoMemory": {"description": "The server has no embedding model (`not_implemented`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Ingested": {"description": "Ingested.", "content": {"application/json": {"schema": {
+        "type": "object", "required": ["memories", "scope"],
+        "properties": {
+          "memories": {"type": "array", "items": {"type": "string"}, "description": "The IDs of the saved parts."},
+          "scope": {"$ref": "#/components/schemas/MemoryScope"}
+        }
+      }}}}
+    },
+    "schemas": {
+      "ID": {"type": "string", "format": "uuid"},
+      "Duration": {"type": "integer", "format": "int64", "description": "Nanoseconds."},
+      "Time": {"type": "string", "format": "date-time"},
+      "Error": {
+        "type": "object", "required": ["code", "message", "retryable"],
+        "properties": {
+          "code": {"type": "string", "description": "`validation_error`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `overloaded`, `not_recorded`, `unsupported_media_type`, `not_implemented`, `not_ready` or `internal_error`."},
+          "message": {"type": "string"},
+          "retryable": {"type": "boolean"},
+          "correlation_id": {"type": "string"}
+        }
+      },
+      "RunStatus": {"enum": ["queued", "running", "awaiting_approval", "paused", "canceling", "canceled", "succeeded", "failed", "timed_out"]},
+      "Visibility": {"enum": ["public", "participant", "internal", "hidden_reasoning", "audit"]},
+      "SessionRole": {"enum": ["owner", "member", "viewer"]},
+      "MemoryScope": {"enum": ["session", "project", "workflow", "tenant"], "default": "session", "description": "`project` needs a session with a project; `tenant` needs an admin or operator."},
+      "Limits": {
+        "type": "object",
+        "properties": {
+          "max_depth": {"type": "integer"},
+          "max_sub_agents": {"type": "integer"},
+          "max_concurrent": {"type": "integer"},
+          "max_tool_calls": {"type": "integer"},
+          "max_model_calls": {"type": "integer"},
+          "max_runtime": {"$ref": "#/components/schemas/Duration"},
+          "max_prompt_tokens": {"type": "integer", "format": "int64"},
+          "max_completion_tokens": {"type": "integer", "format": "int64"},
+          "max_cost_units": {"type": "integer", "format": "int64"}
+        }
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "prompt_tokens": {"type": "integer", "format": "int64"},
+          "completion_tokens": {"type": "integer", "format": "int64"},
+          "cached_tokens": {"type": "integer", "format": "int64"},
+          "total_tokens": {"type": "integer", "format": "int64"},
+          "cost_units": {"type": "integer", "format": "int64"},
+          "model_calls": {"type": "integer", "format": "int64"},
+          "tool_calls": {"type": "integer", "format": "int64"},
+          "sub_agents": {"type": "integer", "format": "int64"},
+          "runtime": {"$ref": "#/components/schemas/Duration"}
+        }
+      },
+      "Session": {
+        "type": "object",
+        "description": "Field names are the Go field names of store.Session.",
+        "properties": {
+          "ID": {"$ref": "#/components/schemas/ID"},
+          "TenantID": {"$ref": "#/components/schemas/ID"},
+          "CreatedBy": {"$ref": "#/components/schemas/ID"},
+          "Title": {"type": "string"},
+          "Project": {"type": "string"},
+          "Status": {"type": "string"},
+          "Metadata": {"type": ["object", "null"]},
+          "CreatedAt": {"$ref": "#/components/schemas/Time"},
+          "UpdatedAt": {"$ref": "#/components/schemas/Time"}
+        }
+      },
+      "Participant": {
+        "type": "object",
+        "properties": {
+          "tenant_id": {"$ref": "#/components/schemas/ID"},
+          "session_id": {"$ref": "#/components/schemas/ID"},
+          "principal_id": {"$ref": "#/components/schemas/ID"},
+          "role": {"$ref": "#/components/schemas/SessionRole"},
+          "joined_at": {"$ref": "#/components/schemas/Time"}
+        }
+      },
+      "Message": {
+        "type": "object",
+        "description": "Field names are the Go field names of store.MessageProjection.",
+        "properties": {
+          "ID": {"type": "string"},
+          "SessionID": {"$ref": "#/components/schemas/ID"},
+          "RunID": {"type": "string"},
+          "EventID": {"type": "string"},
+          "Role": {"type": "string"},
+          "Visibility": {"$ref": "#/components/schemas/Visibility"},
+          "Content": {"type": "string"},
+          "CreatedAt": {"$ref": "#/components/schemas/Time"}
+        }
+      },
+      "Run": {
+        "type": "object",
+        "description": "Field names are the Go field names of store.Run. `Owner`, `LeaseUntil` and `CancelRequested` are the process holding the run and are runtime details.",
+        "properties": {
+          "ID": {"$ref": "#/components/schemas/ID"},
+          "TenantID": {"$ref": "#/components/schemas/ID"},
+          "SessionID": {"$ref": "#/components/schemas/ID"},
+          "ParentRunID": {"type": "string", "description": "The original run of a re-execution; empty otherwise."},
+          "StartedBy": {"$ref": "#/components/schemas/ID"},
+          "Status": {"$ref": "#/components/schemas/RunStatus"},
+          "Limits": {"$ref": "#/components/schemas/Limits"},
+          "Usage": {"$ref": "#/components/schemas/Usage"},
+          "FailureReason": {"type": "string"},
+          "IdempotencyKey": {"type": "string"},
+          "QueuedAt": {"$ref": "#/components/schemas/Time"},
+          "StartedAt": {"$ref": "#/components/schemas/Time"},
+          "EndedAt": {"$ref": "#/components/schemas/Time"},
+          "Workflow": {"description": "The workflow the run started with."},
+          "Input": {"description": "The run input."},
+          "Output": {"description": "The stage outputs of a finished run."},
+          "Owner": {"type": "string"},
+          "LeaseUntil": {"$ref": "#/components/schemas/Time"},
+          "CancelRequested": {"type": "boolean"}
+        }
+      },
+      "Result": {
+        "type": "object",
+        "description": "Field names are the Go field names of runtime.Result.",
+        "properties": {
+          "RunID": {"$ref": "#/components/schemas/ID"},
+          "Status": {"$ref": "#/components/schemas/RunStatus"},
+          "Outputs": {"type": ["object", "null"], "additionalProperties": {"type": "string"}, "description": "Stage name to its output."},
+          "Usage": {"$ref": "#/components/schemas/Usage"},
+          "FailureReason": {"type": "string"}
+        }
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "id": {"$ref": "#/components/schemas/ID"},
+          "tenant_id": {"$ref": "#/components/schemas/ID"},
+          "session_id": {"$ref": "#/components/schemas/ID"},
+          "run_id": {"$ref": "#/components/schemas/ID"},
+          "sequence": {"type": "integer", "format": "int64"},
+          "session_sequence": {"type": "integer", "format": "int64"},
+          "type": {"type": "string"},
+          "visibility": {"$ref": "#/components/schemas/Visibility"},
+          "actor_id": {"$ref": "#/components/schemas/ID"},
+          "task_id": {"type": "string"},
+          "step_id": {"type": "string"},
+          "parent_event_id": {"type": "string"},
+          "correlation_id": {"type": "string"},
+          "causation_id": {"type": "string"},
+          "payload": {},
+          "hidden_payload": {"description": "Only for roles that read `hidden_reasoning`."},
+          "occurred_at": {"$ref": "#/components/schemas/Time"},
+          "recorded_at": {"$ref": "#/components/schemas/Time"}
+        }
+      },
+      "EventEnvelope": {
+        "type": "object",
+        "description": "The `data` of an SSE event; it never carries `hidden_payload`.",
+        "required": ["schema_version", "tenant_id", "session_id", "run_id", "sequence", "visibility", "occurred_at", "payload", "event_id", "correlation_id", "actor_id"],
+        "properties": {
+          "schema_version": {"const": "2026-05-09"},
+          "tenant_id": {"$ref": "#/components/schemas/ID"},
+          "session_id": {"$ref": "#/components/schemas/ID"},
+          "run_id": {"$ref": "#/components/schemas/ID"},
+          "sequence": {"type": "integer", "format": "int64"},
+          "visibility": {"$ref": "#/components/schemas/Visibility"},
+          "occurred_at": {"$ref": "#/components/schemas/Time"},
+          "payload": {},
+          "event_id": {"$ref": "#/components/schemas/ID"},
+          "correlation_id": {"type": "string"},
+          "actor_id": {"type": "string"},
+          "parent_event_id": {"type": "string"},
+          "causation_id": {"type": "string"}
+        }
+      },
+      "Delta": {
+        "type": "object",
+        "description": "The `data` of an `agent_message_delta` SSE event.",
+        "properties": {
+          "run_id": {"$ref": "#/components/schemas/ID"},
+          "task_id": {"type": "string"},
+          "step_id": {"type": "string"},
+          "agent": {"type": "string"},
+          "content": {"type": "string"}
+        }
+      },
+      "Artifact": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {"$ref": "#/components/schemas/ID"},
+          "tenant_id": {"$ref": "#/components/schemas/ID"},
+          "session_id": {"$ref": "#/components/schemas/ID"},
+          "run_id": {"type": "string"},
+          "task_id": {"type": "string"},
+          "step_id": {"type": "string"},
+          "producer": {"type": "string", "description": "The tool that produced it."},
+          "kind": {"type": "string"},
+          "name": {"type": "string"},
+          "version": {"type": "integer"},
+          "mime_type": {"type": "string"},
+          "size": {"type": "integer", "format": "int64"},
+          "metadata": {"type": "object"},
+          "created_at": {"$ref": "#/components/schemas/Time"}
+        }
+      },
+      "Approval": {
+        "type": "object",
+        "properties": {
+          "approval_id": {"$ref": "#/components/schemas/ID"},
+          "tenant_id": {"$ref": "#/components/schemas/ID"},
+          "run_id": {"type": "string"},
+          "step_id": {"type": "string"},
+          "reason": {"type": "string"},
+          "status": {"enum": ["requested", "approved", "rejected", "expired", "canceled"]},
+          "request": {"description": "What is to be approved: a tool call (`tool`, `input`), a stage gate (`gate`, `stage`, `output`) or an agent's question (`gate: input`, `question`)."},
+          "resolution": {},
+          "created_at": {"$ref": "#/components/schemas/Time"},
+          "resolved_at": {"$ref": "#/components/schemas/Time"},
+          "resolved_by": {"type": "string"},
+          "expires_at": {"$ref": "#/components/schemas/Time"}
+        }
+      },
+      "Image": {
+        "type": "object", "required": ["mime_type", "data"],
+        "properties": {
+          "mime_type": {"type": "string"},
+          "data": {"type": "string", "contentEncoding": "base64"}
+        }
+      },
+      "Workflow": {
+        "type": "object",
+        "description": "docs/04-contracts-and-tests.md §3.",
+        "properties": {
+          "name": {"type": "string"},
+          "input_schema": {"type": "object", "description": "JSON Schema the run input must satisfy."},
+          "tool_policy": {"$ref": "#/components/schemas/ToolPolicy"},
+          "stages": {"type": "array", "items": {"$ref": "#/components/schemas/Stage"}}
+        }
+      },
+      "Stage": {
+        "type": "object", "required": ["name", "agents"],
+        "properties": {
+          "name": {"type": "string"},
+          "kind": {"enum": ["sequential", "parallel"]},
+          "agents": {"type": "array", "items": {
+            "type": "object", "required": ["name", "prompt"],
+            "properties": {
+              "name": {"type": "string"},
+              "prompt": {"type": "string"},
+              "images": {"type": "array", "items": {"type": "string"}}
+            }
+          }},
+          "failure_policy": {"enum": ["fail_fast", "wait_all", "best_effort", "quorum"]},
+          "quorum": {"type": "integer"},
+          "depends_on": {"type": "array", "items": {"type": "string"}},
+          "timeout": {"$ref": "#/components/schemas/Duration"},
+          "retry": {
+            "type": "object",
+            "properties": {"max_attempts": {"type": "integer"}, "backoff": {"$ref": "#/components/schemas/Duration"}}
+          },
+          "hand_back": {
+            "type": "object", "required": ["when", "to"],
+            "properties": {"when": {"type": "string"}, "to": {"type": "string"}, "max_times": {"type": "integer"}}
+          },
+          "stop_when": {"type": "string"},
+          "output_schema": {"type": "object"},
+          "approve_start": {"type": "boolean"},
+          "approve_output": {"type": "boolean"}
+        }
+      },
+      "ToolPolicy": {
+        "type": "object",
+        "properties": {
+          "allowlist": {"type": "array", "items": {"type": "string"}},
+          "denylist": {"type": "array", "items": {"type": "string"}},
+          "approval_required": {"type": "array", "items": {"type": "string"}},
+          "deny_side_effects": {"type": "array", "items": {"$ref": "#/components/schemas/SideEffect"}},
+          "approve_side_effects": {"type": "array", "items": {"$ref": "#/components/schemas/SideEffect"}},
+          "budgets": {"type": "object", "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "max_calls": {"type": "integer"},
+              "max_time": {"$ref": "#/components/schemas/Duration"},
+              "max_cost_units": {"type": "integer", "format": "int64"}
+            }
+          }},
+          "timeouts": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/Duration"}}
+        }
+      },
+      "SideEffect": {"enum": ["none", "read_external", "write_internal", "write_external", "dangerous"]},
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "role": {"type": "string"},
+          "instructions": {"type": "string"},
+          "model": {"type": "string"},
+          "tools": {"type": "array", "items": {"type": "string"}},
+          "children": {"type": "array", "items": {"type": "string"}},
+          "max_tool_loops": {"type": "integer"},
+          "ask_human": {"type": "boolean"},
+          "timeout": {"$ref": "#/components/schemas/Duration"}
+        },
+        "additionalProperties": false
+      },
+      "AgentInfo": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "role": {"type": "string"},
+          "instructions": {"type": "string"},
+          "model": {"type": "string"},
+          "tools": {"type": "array", "items": {"type": "string"}},
+          "children": {"type": "array", "items": {"type": "string"}},
+          "max_tool_loops": {"type": "integer"},
+          "ask_human": {"type": "boolean"},
+          "timeout": {"$ref": "#/components/schemas/Duration"},
+          "source": {"enum": ["config", "api"]},
+          "version": {"type": "integer"}
+        }
+      },
+      "DebugAgent": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "role": {"type": "string"},
+          "instructions": {"type": "string"},
+          "model": {"type": "string"},
+          "tools": {"type": "array", "items": {"type": "string"}},
+          "children": {"type": "array", "items": {"type": "string"}},
+          "max_tool_loops": {"type": "integer"}
+        }
+      },
+      "ToolDefinition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "version": {"type": "string"},
+          "description": {"type": "string"},
+          "input_schema": {},
+          "output_schema": {},
+          "idempotency": {"enum": ["unknown", "idempotent", "conditionally_idempotent", "non_idempotent"]},
+          "side_effect": {"$ref": "#/components/schemas/SideEffect"},
+          "concurrency": {"enum": ["serial", "parallel_read", "parallel_isolated_write", "exclusive", "external_side_effect"]},
+          "requires_approval": {"type": "boolean"},
+          "timeout": {"$ref": "#/components/schemas/Duration"}
+        }
+      }
+    }
+  }
+}
