@@ -1010,6 +1010,7 @@ func FuzzRESTBodies(f *testing.F) {
 	f.Add(uint8(3), []byte(`{"session_id":"x","workflow":{"name":"wf","stages":[{"name":"a","kind":"sequential","agents":[{"name":"missing","prompt":"p"}]}]}}`))
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","workflow":{"stages":[{"name":"a","kind":"parallel","agents":[{"name":"missing"}]}]},"limits":{"max_concurrent":-1,"max_tool_calls":-1}}`))
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","template":"missing","workflow":{"stages":[{"name":"a","depends_on":["a"],"agents":[{"name":"x"}]}]}}`))
+	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","workflow":{"tool_policy":{"deny_side_effects":["x"],"allowlist":[1]},"stages":[{"name":"a","agents":[{"name":"x"}]}]}}`))
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","workflow":{"input_schema":{"$ref":"file:///etc/passwd"},"stages":[{"name":"a","hand_back":{"when":"(","to":"b"},"output_schema":{"type":5},"agents":[{"name":"x"}]}]}}`))
 	f.Add(uint8(3), []byte(`{"session_id":"`+string(sid)+`","images":{"p":{"mime_type":"image/png","data":"not base64!"}},"workflow":{"stages":[{"name":"a","agents":[{"name":"x","images":["p","q"]}]}]}}`))
 	f.Fuzz(func(t *testing.T, which uint8, body []byte) {

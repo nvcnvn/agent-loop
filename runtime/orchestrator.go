@@ -209,7 +209,7 @@ func (o *Orchestrator) StartRun(ctx context.Context, in StartRunInput) (core.Run
 		}
 	}
 	if in.Template != "" {
-		if len(in.Workflow.Stages) > 0 {
+		if w := in.Workflow; len(w.Stages) > 0 || w.ToolPolicy != nil || w.Name != "" || len(w.InputSchema) > 0 {
 			return "", errors.New("give a workflow or a template, not both")
 		}
 		wf, ok := o.Workflows[in.Template]
@@ -1109,12 +1109,16 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 
 	toolSpecs := []model.ToolSpec{}
 	allowed := map[string]allowedTool{}
+	policies := []policy.ToolPolicy{o.Policy}
+	if in.Workflow.ToolPolicy != nil {
+		policies = append(policies, *in.Workflow.ToolPolicy)
+	}
 	for _, name := range agent.Tools {
 		def, _, ok := o.Tools.Get(name)
 		if !ok {
 			continue
 		}
-		ok2, requiresApproval, reason := o.Policy.Authorize(def)
+		ok2, requiresApproval, reason := policy.AuthorizeAll(def, policies...)
 		if !ok2 {
 			o.systemEvent(ctx, in, runID, taskID, map[string]any{"event": "tool_denied", "tool": def.Name, "reason": reason})
 			continue

@@ -17,6 +17,7 @@ import (
 
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
+	"github.com/nvcnvn/agent-loop/policy"
 	"github.com/nvcnvn/agent-loop/tool"
 )
 
@@ -99,7 +100,9 @@ type Workflow struct {
 	Name string `json:"name"`
 	// InputSchema is a JSON Schema the run input, a JSON object of strings, must satisfy.
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
-	Stages      []Stage         `json:"stages"`
+	// ToolPolicy applies to the workflow's runs on top of Orchestrator.Policy.
+	ToolPolicy *policy.ToolPolicy `json:"tool_policy,omitempty"`
+	Stages     []Stage            `json:"stages"`
 }
 
 const defaultHandBacks = 3
@@ -143,6 +146,11 @@ func compileWorkflow(wf Workflow, agents map[string]Agent) (*plan, error) {
 		graph = graph || len(s.DependsOn) > 0
 	}
 	var err error
+	if wf.ToolPolicy != nil {
+		if err := wf.ToolPolicy.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	if len(wf.InputSchema) > 0 {
 		if p.input, err = tool.CompileSchema(wf.InputSchema); err != nil {
 			return nil, fmt.Errorf("input_schema: %w", err)

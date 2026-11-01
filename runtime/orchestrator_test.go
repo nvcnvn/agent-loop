@@ -1504,6 +1504,70 @@ func TestSideEffectPolicyRequiresApproval(t *testing.T) {
 	}
 }
 
+// A workflow's tool policy narrows what its runs may call, on top of the server's.
+func TestWorkflowToolPolicy(t *testing.T) {
+	call := model.MockResponse{ToolCalls: []model.ToolCall{{ID: "1", Name: "echo", Input: json.RawMessage(`{"text":"x"}`)}}}
+	prov := model.NewMockProvider(call, model.MockResponse{Content: "done"}, call, model.MockResponse{Content: "done"})
+	orch, s, sid := setup(t, []runtime.Agent{{Name: "ag", Model: "m", Provider: prov, Tools: []string{"echo"}}})
+	ctx, cancel := waitCtx()
+	defer cancel()
+	run := func(p *policy.ToolPolicy) (core.RunID, []model.ToolSpec) {
+		t.Helper()
+		runID, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{
+			ToolPolicy: p,
+			Stages:     []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res, err := orch.Wait(ctx, core.DefaultTenant, runID); err != nil {
+			t.Fatalf("res=%+v err=%v", res, err)
+		}
+		calls := prov.Calls()
+		return runID, calls[len(calls)-2].Tools
+	}
+	denied, tools := run(&policy.ToolPolicy{DenySideEffects: []core.SideEffectLevel{core.SideNone}})
+	if len(tools) != 0 {
+		t.Fatalf("denied tool offered: %v", tools)
+	}
+	events, _ := s.ListRunEvents(ctx, core.DefaultTenant, denied, 0, 0)
+	for _, ev := range events {
+		if ev.Type == core.EvToolCompleted && !strings.Contains(string(ev.Payload), "not available") {
+			t.Fatalf("denied tool ran: %s", ev.Payload)
+		}
+	}
+	if _, tools := run(nil); len(tools) != 1 {
+		t.Fatalf("a run without the policy lost the tool: %v", tools)
+	}
+	orch.Workflows["t"] = runtime.Workflow{Name: "t", Stages: []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}}}
+	if _, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Template: "t", Workflow: runtime.Workflow{
+		ToolPolicy: &policy.ToolPolicy{Denylist: []string{"echo"}},
+	}}); err == nil {
+		t.Fatal("a template run dropped the policy sent with it instead of refusing it")
+	}
+	prov.Push(call)
+	prov.Push(model.MockResponse{Content: "done"})
+	gated, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{
+		ToolPolicy: &policy.ToolPolicy{ApproveSideEffects: []core.SideEffectLevel{core.SideNone}},
+		Stages:     []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResolveApproval(ctx, core.DefaultTenant, awaitApprovalRequest(t, s, gated), "approved", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := orch.Wait(ctx, core.DefaultTenant, gated); err != nil || res.Outputs["s"] != "done" {
+		t.Fatalf("approved run: %+v %v", res, err)
+	}
+	if _, err := orch.StartRun(ctx, runtime.StartRunInput{SessionID: sid, Workflow: runtime.Workflow{
+		ToolPolicy: &policy.ToolPolicy{ApproveSideEffects: []core.SideEffectLevel{"emails"}},
+		Stages:     []runtime.Stage{{Name: "s", Agents: []runtime.AgentStep{{Name: "ag", Prompt: "x"}}}},
+	}}); err == nil {
+		t.Fatal("unknown side effect accepted")
+	}
+}
+
 func awaitApprovalRequest(t *testing.T, s store.Store, runID core.RunID) core.ApprovalID {
 	t.Helper()
 	ctx := context.Background()

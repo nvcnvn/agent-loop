@@ -150,11 +150,16 @@ them. Request bodies are capped at 1 MiB by default (`api.Server.MaxBodyBytes`).
 `input_schema` is a JSON Schema that the run input, a JSON object of strings, must satisfy. Schemas
 cannot reference other documents.
 
+`tool_policy` (§8) applies to the workflow's runs on top of the server's policy, so it can only
+narrow it: a tool must pass both, and a call needs approval when either asks. A client sets a
+policy for one run by sending the workflow with the run; a run that names a `template` cannot also
+send a workflow or policy.
+
 `StartRun` rejects an invalid workflow before creating a run (REST answers 400): a missing,
 duplicate or unknown stage, agent, kind, failure policy or image; a `quorum` that is missing, out of
 range or set without `failure_policy: quorum`; a dependency cycle; a hand-back to a stage
-the handing stage does not depend on; an invalid regexp or schema; a negative timeout or retry; or
-input that does not match `input_schema`.
+the handing stage does not depend on; an invalid regexp or schema; a negative timeout or retry; an
+unknown side-effect level in `tool_policy`; or input that does not match `input_schema`.
 
 The run records its workflow decisions as `system_event_recorded` events whose `event` is
 `stage_handed_back`, `workflow_stopped`, `task_retry_scheduled` or `output_rejected`. Stage gates
@@ -320,6 +325,7 @@ file) decides for each tool whether agents may call it and whether each call wai
   `write_internal`, `write_external` and `dangerous`; a tool registered without one, or an MCP tool
   without annotations, is `dangerous` (§5). Re-execution never asks for approval, and it uses the
   policy in force now, so a tool denied since the run fails the copy (§7).
+- A workflow's own `tool_policy` (§3) applies to its runs as well, under the same rules.
 
 The rest of the policy matrix:
 - recursion depth

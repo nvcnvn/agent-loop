@@ -43,6 +43,28 @@ func TestToolPolicyAuthorize(t *testing.T) {
 	}
 }
 
+func TestAuthorizeAllNeedsEveryPolicy(t *testing.T) {
+	refund := core.ToolDefinition{Name: "refund", SideEffect: core.SideWriteExternal}
+	server := policy.ToolPolicy{Allowlist: []string{"refund", "echo"}}
+	for name, tc := range map[string]struct {
+		run           policy.ToolPolicy
+		allowed, appr bool
+	}{
+		"no run policy":            {policy.ToolPolicy{}, true, false},
+		"run denies":               {policy.ToolPolicy{Denylist: []string{"refund"}}, false, false},
+		"run allowlist without it": {policy.ToolPolicy{Allowlist: []string{"echo"}}, false, false},
+		"run asks approval":        {policy.ToolPolicy{ApproveSideEffects: []core.SideEffectLevel{core.SideWriteExternal}}, true, true},
+	} {
+		allowed, appr, reason := policy.AuthorizeAll(refund, server, tc.run)
+		if allowed != tc.allowed || appr != tc.appr || (appr || !allowed) && reason == "" {
+			t.Errorf("%s: allowed=%v approval=%v reason=%q", name, allowed, appr, reason)
+		}
+	}
+	if allowed, _, _ := policy.AuthorizeAll(core.ToolDefinition{Name: "shell"}, server, policy.ToolPolicy{Allowlist: []string{"shell"}}); allowed {
+		t.Error("a run policy allowed a tool the server policy does not")
+	}
+}
+
 func TestToolPolicyValidate(t *testing.T) {
 	if err := (policy.ToolPolicy{ApproveSideEffects: []core.SideEffectLevel{core.SideDangerous}}).Validate(); err != nil {
 		t.Fatal(err)

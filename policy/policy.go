@@ -71,6 +71,21 @@ func (p ToolPolicy) Authorize(t core.ToolDefinition) (allowed bool, requiresAppr
 	return true, false, ""
 }
 
+// AuthorizeAll applies every policy to t: each must allow it, and a call
+// needs approval when any policy asks for it.
+func AuthorizeAll(t core.ToolDefinition, policies ...ToolPolicy) (allowed bool, requiresApproval bool, reason string) {
+	for _, p := range policies {
+		ok, approve, why := p.Authorize(t)
+		if !ok {
+			return false, false, why
+		}
+		if approve && !requiresApproval {
+			requiresApproval, reason = true, why
+		}
+	}
+	return true, requiresApproval, reason
+}
+
 // BudgetManager tracks per-run usage against limits with reserve/commit/release.
 type BudgetManager struct {
 	mu     sync.Mutex
