@@ -258,6 +258,17 @@ Every call's input is validated against the schema before it is approved or run;
 not match goes back to the model as a tool error naming the mismatch, and still counts toward the
 tool-call budget.
 
+Each call carries its step ID as `tool.Call.IdempotencyKey`, the same on every retry. A call that
+fails with `tool.ErrTransient`, or runs past its own timeout, is retried as
+`Orchestrator.ToolRetry` allows (by default 3 attempts, backoff from 200ms doubling) when the tool is
+`idempotent`, or `conditionally_idempotent` and so able to use the key; other tools are never
+retried. Each retry records an internal `tool_call_retried` system event and counts toward the
+run's tool calls and toward retry storms (§8); when the run has no tool calls left, the last error
+goes back to the model instead. A tool reports what a call cost in `tool.Result.CostUnits`, which
+`tool_call_completed` records as `cost_units` and which counts toward the run's cost budget: a cost
+that passes `max_cost_units` fails the run once the call is recorded. A failed call that fails its
+task records the error's code as `fatal`. MCP tools retry lost connections themselves (below).
+
 MCP servers are listed under `mcp_servers` in the `-config` file (§4):
 
 ```json
@@ -346,7 +357,8 @@ Two kinds of replay use them:
   through the current runtime, as a child run (`parent_run_id`) in a new session that holds the
   history the original saw. Every model call is answered with the response recorded for an
   identical request, and every tool call with the result recorded for the same tool and input, in
-  recorded order; approvals are not asked again, since their outcome is in the recorded result.
+  recorded order, with its recorded cost; approvals are not asked again, since their outcome is in
+  the recorded result, and a call whose error failed its task (`fatal`) fails the copy's alike.
   The copy ends like the original unless the runtime now builds different requests or treats the
   same responses differently; a request that was never recorded fails the copy with
   `model.ErrNoFixture`, naming the request. A run recorded before requests were stored answers 422
@@ -361,7 +373,8 @@ file) decides for each tool whether agents may call it and whether each call wai
 
 ```json
 "tool_policy": {"allowlist": [], "denylist": ["shell.exec"], "approval_required": ["orders.refund"],
-                "deny_side_effects": ["dangerous"], "approve_side_effects": ["write_external"]}
+                "deny_side_effects": ["dangerous"], "approve_side_effects": ["write_external"],
+                "budgets": {"search.web": {"max_calls": 20, "max_time": 60000000000, "max_cost_units": 500}}}
 ```
 
 - A tool is denied when `denylist` names it, its side-effect level is in `deny_side_effects`, or
@@ -372,7 +385,13 @@ file) decides for each tool whether agents may call it and whether each call wai
   `write_internal`, `write_external` and `dangerous`; a tool registered without one, or an MCP tool
   without annotations, is `dangerous` (§5). Re-execution never asks for approval, and it uses the
   policy in force now, so a tool denied since the run fails the copy (§7).
-- A workflow's own `tool_policy` (§3) applies to its runs as well, under the same rules.
+- `budgets` limits, per run, how often a tool is called (retries and calls refused approval do not
+  count), the time its calls' attempts take together, and the cost units they report. A call
+  starts with at most the time left, which concurrent calls of the tool each get in full, so
+  they can overrun it together. A call past a budget, or cut short by the time budget, goes back
+  to the model as a tool error.
+- A workflow's own `tool_policy` (§3) applies to its runs as well, under the same rules; each
+  budget of either applies.
 
 The rest of the policy matrix:
 - recursion depth
@@ -556,6 +575,9 @@ Each error should include:
     fails the copy (`TestReExecuteDetectsDivergence`).
 3. Replay from snapshot plus tail events and verify the same terminal state.
 4. Detect replay mismatch when a stored tool result differs from a recomputed result.
+5. Retry a failed tool call only when the tool is idempotent (`TestTransientToolFailuresAreRetriedWhenSafe`,
+   `TestTimedOutCallOfAnIdempotentToolIsRetried`), and re-execute a run that a tool's cost ended
+   (`TestReExecuteToolCostOverrun`).
 
 ### Snapshot and Compaction
 
@@ -577,6 +599,8 @@ Each error should include:
    hand-back drafts (`TestNearIdenticalHandBackDraftsFailTheRun`) or delegations
    (`TestRepeatedDelegationFailsTheRun`), and after a retry storm (`TestRetryStormFailsTheRun`).
 5. Detect long idle wait and emit diagnostic event.
+6. Limit a tool's calls, time and cost per run (`TestToolBudgets`, `TestEveryToolBudgetApplies`,
+   `TestRejectedCallLeavesTheToolBudget`).
 
 ### Human Approval
 

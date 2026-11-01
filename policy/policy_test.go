@@ -214,3 +214,39 @@ func TestLoopDetectorRetryStormAndClear(t *testing.T) {
 		t.Fatalf("after clearing the tool key: stalled=%v n=%d", stalled, n)
 	}
 }
+
+func TestToolBudgetValidation(t *testing.T) {
+	if err := (policy.ToolPolicy{Budgets: map[string]policy.ToolBudget{"x": {MaxCalls: -1}}}).Validate(); err == nil {
+		t.Fatal("accepted a negative budget")
+	}
+	b := policy.NewBudgetManager()
+	tight, loose := policy.ToolBudget{MaxTime: time.Second, MaxCalls: 1}, policy.ToolBudget{MaxTime: time.Minute}
+	if left, usedUp := b.ToolTimeLeft("r", "x", tight, loose); left != time.Second || usedUp {
+		t.Fatalf("left=%s usedUp=%v; the tightest budget must win", left, usedUp)
+	}
+	if err := b.ReserveTool("r", "x", tight); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ReserveTool("r", "x", tight); err == nil {
+		t.Fatal("a second call passed max_calls 1")
+	}
+	b.ReleaseTool("r", "x")
+	if err := b.ReserveTool("r", "x", tight); err != nil {
+		t.Fatalf("a released call still counts: %v", err)
+	}
+	b.CommitTool("r", "x", 400*time.Millisecond, -5)
+	if left, _ := b.ToolTimeLeft("r", "x", tight); left != 600*time.Millisecond {
+		t.Fatalf("left=%s after 400ms", left)
+	}
+	b.CommitTool("r", "x", time.Second, 0)
+	if left, usedUp := b.ToolTimeLeft("r", "x", tight); left != 0 || !usedUp {
+		t.Fatalf("left=%s usedUp=%v after the budget", left, usedUp)
+	}
+	if left, usedUp := b.ToolTimeLeft("r", "x"); left != 0 || usedUp {
+		t.Fatalf("no budget: left=%s usedUp=%v", left, usedUp)
+	}
+	b.Forget("r")
+	if left, _ := b.ToolTimeLeft("r", "x", tight); left != time.Second {
+		t.Fatalf("left=%s after Forget", left)
+	}
+}

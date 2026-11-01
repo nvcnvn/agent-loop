@@ -114,14 +114,16 @@ func recordedOutputs(events []core.Event) (*model.Replayer, *toolReplay, error) 
 			toolInputs[ev.StepID] = toolKey(p.Tool, p.Input)
 		case core.EvToolCompleted:
 			var p struct {
-				Output json.RawMessage `json:"output"`
-				Error  string          `json:"error"`
+				Output    json.RawMessage `json:"output"`
+				Error     string          `json:"error"`
+				Fatal     string          `json:"fatal"`
+				CostUnits int64           `json:"cost_units"`
 			}
 			if err := json.Unmarshal(ev.Payload, &p); err != nil {
 				return nil, nil, fmt.Errorf("tool call %s: %w", ev.StepID, err)
 			}
 			if key, ok := toolInputs[ev.StepID]; ok {
-				tools.results[key] = append(tools.results[key], toolResult{output: p.Output, err: p.Error})
+				tools.results[key] = append(tools.results[key], toolResult{output: p.Output, err: p.Error, fatal: p.Fatal, cost: p.CostUnits})
 			}
 		}
 	}
@@ -132,6 +134,8 @@ func recordedOutputs(events []core.Event) (*model.Replayer, *toolReplay, error) 
 type toolResult struct {
 	output json.RawMessage
 	err    string
+	fatal  string // the code of an error that failed the task
+	cost   int64
 }
 
 // toolReplay answers tool calls with recorded results, in recorded order per
@@ -159,10 +163,16 @@ func (t *toolReplay) Execute(_ context.Context, c tool.Call) (tool.Result, error
 		return tool.Result{}, fmt.Errorf("%w: no recorded result for tool %s with input %s", ErrNotRecorded, c.Tool.Name, c.Input)
 	}
 	t.results[key] = q[1:]
-	if q[0].err != "" {
-		return tool.Result{}, errors.New(q[0].err)
+	r := q[0]
+	switch {
+	case r.fatal == "budget_exceeded":
+		return tool.Result{}, fmt.Errorf("%w: %s", core.ErrBudgetExceeded, r.err)
+	case r.fatal == "loop_detected", r.fatal == "paused":
+		return tool.Result{}, fmt.Errorf("%w: %s", errLoopDetected, r.err)
+	case r.err != "":
+		return tool.Result{}, errors.New(r.err)
 	}
-	return tool.Result{Output: q[0].output}, nil
+	return tool.Result{Output: r.output, CostUnits: r.cost}, nil
 }
 
 // replayOrchestrator is a copy of o whose agents and tools answer from records.

@@ -147,7 +147,9 @@ Requirements:
 
 The framework must:
 - [x] Resume interrupted, failed and timed-out runs (`Orchestrator.Resume`, `POST /v1/runs/{rid}/resume`).
-- [ ] Retry failed steps safely.
+- [x] Retry failed steps safely: a tool call that failed transiently or timed out is retried only when
+  the tool is idempotent, or conditionally so with the step's idempotency key; model calls are
+  retried by `model.WithRetry`.
 - [x] Replay a run for debugging by rebuilding its terminal state from stored events.
 - [x] Store the workflow, input, limits, tool inputs and outputs, and model output for each run.
 - [x] Store model requests (messages, tools, parameters).
@@ -195,7 +197,7 @@ The framework should support policy enforcement per agent or workflow:
   as `tool_policy` in the `-config` file.
 - [x] Approval required before tools flagged or listed as needing it.
 - [x] Max tool calls per run.
-- [ ] Max cost or time budget per tool.
+- [x] Max calls, cost or time budget per tool and run (`budgets` in the tool policy).
 
 ### 6.4 Concurrent Tool Execution
 

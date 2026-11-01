@@ -34,11 +34,11 @@ The recommended first vertical slice from
 | Artifacts produced by tools and agents, linked to run, task, step and producing tool; versioned by name within a session; listed with `GET /v1/runs/{rid}/artifacts` and `GET /v1/artifacts/{aid}/versions`, downloaded with `GET /v1/artifacts/{aid}`; capped at `max_artifact_bytes` | [runtime/orchestrator.go](runtime/orchestrator.go), [api/server.go](api/server.go) |
 | Roles (`admin`, `operator`, `member`, `viewer`) on API keys, session participants (`owner`, `member`, `viewer`) and per-role event visibility | [policy/access.go](policy/access.go), [api/access.go](api/access.go) |
 | Tool policy (allow / deny / approval, by tool name or side-effect level; `tool_policy` in the config file or a workflow) | [policy/policy.go](policy/policy.go) |
-| Budget manager (model calls, tool calls, sub-agents, tokens, cost) | [policy/policy.go](policy/policy.go) |
+| Budget manager (model calls, tool calls, sub-agents, tokens, cost; per-tool calls, time and cost) | [policy/policy.go](policy/policy.go) |
 | Prometheus metrics at `/metrics` (runs, model calls, tokens, cost, tools, queue depth, HTTP latency) | [observe/metrics.go](observe/metrics.go) |
 | Loop / stall detector (identical tool calls, near-identical rejected answers, hand-back drafts and delegations, retry storms) that fails, pauses or asks approval for a run; approval past a cost threshold; idle-wait diagnostics (`idle_wait` events) | [policy/loop.go](policy/loop.go), [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Workflows as stage graphs (`depends_on`) with hand-backs to earlier stages, stop conditions, retries, stage/agent/tool timeouts, stage approval gates, and JSON Schema for input and stage outputs; agents delegating to child agents at runtime (`delegate` tool, depth-limited); agents and named workflow templates loaded from a JSON config | [runtime/workflow.go](runtime/workflow.go), [runtime/config.go](runtime/config.go) |
-| Orchestrator with session history passed to every agent, sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`, `quorum`), parallel tool calls for read-safe tools, resuming interrupted runs (also on startup), run queueing with backpressure, concurrency limits per tenant/workflow/agent/tool, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
+| Orchestrator with session history passed to every agent, sequential and parallel sub-agent stages, fan-in policies (`fail_fast`, `wait_all`, `best_effort`, `quorum`), parallel tool calls for read-safe tools, retries of idempotent tool calls that failed transiently, resuming interrupted runs (also on startup), run queueing with backpressure, concurrency limits per tenant/workflow/agent/tool, idempotent run start, cancellation | [runtime/orchestrator.go](runtime/orchestrator.go) |
 | Long-term memory: `memory.save` / `memory.search` tools over embeddings (Ollama or OpenAI-compatible), scoped by session, workflow or tenant, with provenance; pgvector in Postgres | [tool/memory/memory.go](tool/memory/memory.go), [store/memory.go](store/memory.go), [store/pg/memory.go](store/pg/memory.go) |
 | Session history compaction: summaries of older messages by a configured agent, at the start of a run | [runtime/compaction.go](runtime/compaction.go) |
 | Strict replay (rebuild terminal state from events) | [runtime/replay.go](runtime/replay.go) |
@@ -258,7 +258,7 @@ were resolved in code:
 4. **Loop / stall detector algorithm** — a counter on
    `(tool, hash(input))` per run; word-set similarity between the rejected
    answers of one agent task, the drafts a hand-back returns, and the tasks one
-   agent delegates; and task retries within a sliding window. Verified by
+   agent delegates; and task and tool-call retries within a sliding window. Verified by
    `TestLoopDetectorTripsOnRepeats`, `TestNearIdenticalRepliesFailTheRun`,
    `TestNearIdenticalHandBackDraftsFailTheRun`, `TestRepeatedDelegationFailsTheRun`
    and `TestRetryStormFailsTheRun`.

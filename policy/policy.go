@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/nvcnvn/agent-loop/core"
 )
@@ -21,10 +22,24 @@ type ToolPolicy struct {
 	// every tool with one of the listed side-effect levels.
 	DenySideEffects    []core.SideEffectLevel `json:"deny_side_effects,omitempty"`
 	ApproveSideEffects []core.SideEffectLevel `json:"approve_side_effects,omitempty"`
+	// Budgets limits, per run, how much each named tool may be used.
+	Budgets map[string]ToolBudget `json:"budgets,omitempty"`
 }
 
-// Validate checks every listed side-effect level is a known one.
+// ToolBudget limits one tool's use in a run; zero fields are unlimited.
+type ToolBudget struct {
+	MaxCalls     int           `json:"max_calls,omitempty"`
+	MaxTime      time.Duration `json:"max_time,omitempty"` // summed over its calls; each call gets what is left
+	MaxCostUnits int64         `json:"max_cost_units,omitempty"`
+}
+
+// Validate checks every listed side-effect level is a known one and no budget is negative.
 func (p ToolPolicy) Validate() error {
+	for name, b := range p.Budgets {
+		if b.MaxCalls < 0 || b.MaxTime < 0 || b.MaxCostUnits < 0 {
+			return fmt.Errorf("tool policy: budget of %s must not be negative", name)
+		}
+	}
 	for _, level := range slices.Concat(p.DenySideEffects, p.ApproveSideEffects) {
 		switch level {
 		case core.SideNone, core.SideReadExternal, core.SideWriteInternal, core.SideWriteExternal, core.SideDangerous:
@@ -91,13 +106,88 @@ type BudgetManager struct {
 	mu     sync.Mutex
 	usage  map[core.RunID]*core.Usage
 	limits map[core.RunID]core.Limits
+	tools  map[core.RunID]map[string]*toolUse
+}
+
+type toolUse struct {
+	calls int
+	time  time.Duration
+	cost  int64
 }
 
 func NewBudgetManager() *BudgetManager {
 	return &BudgetManager{
 		usage:  map[core.RunID]*core.Usage{},
 		limits: map[core.RunID]core.Limits{},
+		tools:  map[core.RunID]map[string]*toolUse{},
 	}
+}
+
+// ReserveTool counts a call of a tool in a run against budgets, refusing it
+// with core.ErrBudgetExceeded when one is used up.
+func (b *BudgetManager) ReserveTool(run core.RunID, name string, budgets ...ToolBudget) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	u := b.toolUse(run, name)
+	for _, bud := range budgets {
+		switch {
+		case bud.MaxCalls > 0 && u.calls >= bud.MaxCalls:
+			return fmt.Errorf("%w: tool %s may be called %d times in a run", core.ErrBudgetExceeded, name, bud.MaxCalls)
+		case bud.MaxTime > 0 && u.time >= bud.MaxTime:
+			return fmt.Errorf("%w: tool %s used its %s in this run", core.ErrBudgetExceeded, name, bud.MaxTime)
+		case bud.MaxCostUnits > 0 && u.cost >= bud.MaxCostUnits:
+			return fmt.Errorf("%w: tool %s used its %d cost units in this run", core.ErrBudgetExceeded, name, bud.MaxCostUnits)
+		}
+	}
+	u.calls++
+	return nil
+}
+
+// ReleaseTool gives back a reserved call that never ran.
+func (b *BudgetManager) ReleaseTool(run core.RunID, name string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if u := b.toolUse(run, name); u.calls > 0 {
+		u.calls--
+	}
+}
+
+// ToolTimeLeft returns how much of the tightest time budget a tool has left in
+// a run, zero when none limits it, and whether one is used up.
+func (b *BudgetManager) ToolTimeLeft(run core.RunID, name string, budgets ...ToolBudget) (left time.Duration, usedUp bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	u := b.toolUse(run, name)
+	limited := false
+	for _, bud := range budgets {
+		if bud.MaxTime <= 0 {
+			continue
+		}
+		if rest := bud.MaxTime - u.time; !limited || rest < left {
+			left = rest
+		}
+		limited = true
+	}
+	return max(left, 0), limited && left <= 0
+}
+
+// CommitTool records the time a tool call's attempts took and what they cost.
+func (b *BudgetManager) CommitTool(run core.RunID, name string, took time.Duration, cost int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	u := b.toolUse(run, name)
+	u.time += took
+	u.cost += max(cost, 0)
+}
+
+func (b *BudgetManager) toolUse(run core.RunID, name string) *toolUse {
+	if b.tools[run] == nil {
+		b.tools[run] = map[string]*toolUse{}
+	}
+	if b.tools[run][name] == nil {
+		b.tools[run][name] = &toolUse{}
+	}
+	return b.tools[run][name]
 }
 
 // Init declares the limits for a run. Idempotent.
@@ -193,6 +283,7 @@ func (b *BudgetManager) Forget(run core.RunID) {
 	defer b.mu.Unlock()
 	delete(b.usage, run)
 	delete(b.limits, run)
+	delete(b.tools, run)
 }
 
 // Snapshot returns the current accumulated usage.

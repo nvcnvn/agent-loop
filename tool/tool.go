@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -33,7 +34,12 @@ type Result struct {
 	Output    json.RawMessage
 	Metadata  map[string]any
 	Artifacts []Artifact
+	CostUnits int64 // what the call cost, counted toward the run's and the tool's cost budgets
 }
+
+// ErrTransient marks a tool error worth retrying: the runtime retries calls
+// that fail with it, or time out, when the tool is idempotent.
+var ErrTransient = errors.New("transient tool failure")
 
 // Artifact is a file or document a tool produced; the runtime stores it with
 // the run, task and step of the call.

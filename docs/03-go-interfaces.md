@@ -185,6 +185,9 @@ type StepExecutor interface {
     ExecuteStep(ctx context.Context, step StepContext) (StepResult, error)
 }
 
+// Orchestrator.ToolRetry (a RetryPolicy, by default 3 attempts from 200ms) retries tool calls of
+// idempotent tools that failed with tool.ErrTransient or timed out.
+
 // LoopResponse (Orchestrator.LoopResponse) is what a detected loop does: LoopFail (default),
 // LoopPause (the run waits in paused for Resume or Cancel) or LoopApprove (a human decides).
 type LoopResponse string
@@ -467,7 +470,12 @@ type Result struct {
     Output    json.RawMessage
     Metadata  map[string]any
     Artifacts []Artifact // stored by the runtime with the call's run, task and step
+    CostUnits int64      // counted toward the run's and the tool's cost budgets
 }
+
+// ErrTransient marks an error worth retrying; the runtime retries idempotent tools after it or a
+// timeout (Orchestrator.ToolRetry), with the step ID as Call.IdempotencyKey on every attempt.
+var ErrTransient error
 
 type Artifact struct {
     Name     string
@@ -533,6 +541,15 @@ type Engine interface {
     AuthorizeToolCall(ctx context.Context, request ToolAuthorization) (Decision, error)
     AuthorizeDelegation(ctx context.Context, request DelegationAuthorization) (Decision, error)
     AuthorizeMemoryWrite(ctx context.Context, request MemoryAuthorization) (Decision, error)
+}
+
+// ToolPolicy.Budgets limits each named tool per run; BudgetManager.ReserveTool counts a call
+// against them (ReleaseTool gives back one that never ran), ToolTimeLeft gives a call its time and
+// CommitTool records what its attempts took and cost.
+type ToolBudget struct {
+    MaxCalls     int
+    MaxTime      time.Duration
+    MaxCostUnits int64
 }
 
 type BudgetManager interface {

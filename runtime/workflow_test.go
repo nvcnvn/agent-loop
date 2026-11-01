@@ -599,6 +599,7 @@ func TestParseConfig(t *testing.T) {
 func FuzzParseConfig(f *testing.F) {
 	f.Add([]byte(sampleConfig))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"compaction":{"agent":"a","max_tokens":8000,"keep_recent":6}}`))
+	f.Add([]byte(`{"agents":[{"name":"a"}],"tool_policy":{"budgets":{"echo":{"max_calls":2,"max_time":1000,"max_cost_units":-1}}}}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"max_artifact_bytes":1048576}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"loop_response":"pause","approve_above":{"total_tokens":100,"cost_units":5}}`))
 	f.Add([]byte(`{"agents":[{"name":"a"}],"workflows":[{"name":"w","stages":[{"name":"s","depends_on":["s"],"agents":[{"name":"a"}]}]}]}`))

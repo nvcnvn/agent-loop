@@ -112,6 +112,8 @@ type Orchestrator struct {
 	ApproveAbove core.Usage
 	// MaxArtifactBytes caps the content of each stored artifact, input images included; zero means no cap.
 	MaxArtifactBytes int64
+	// ToolRetry retries a call of an idempotent tool that failed with tool.ErrTransient or timed out.
+	ToolRetry RetryPolicy
 
 	mu        sync.Mutex
 	runs      map[core.RunID]*runState
@@ -152,6 +154,7 @@ type allowedTool struct {
 	def              core.ToolDefinition
 	requiresApproval bool
 	approvalReason   string
+	budgets          []policy.ToolBudget
 }
 
 // NewOrchestrator wires sensible defaults around the provided store.
@@ -177,6 +180,7 @@ func NewOrchestrator(s store.Store, reg *tool.Registry, agents []Agent) *Orchest
 		ApprovalTimeout:    15 * time.Minute,
 		IdleWarnAfter:      2 * time.Minute,
 		MaxArtifactBytes:   10 << 20,
+		ToolRetry:          RetryPolicy{MaxAttempts: 3, Backoff: 200 * time.Millisecond},
 		MaxHistoryMessages: 50,
 		MaxActiveRuns:      64,
 		MaxQueuedRuns:      256,
@@ -1206,7 +1210,13 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 			o.systemEvent(ctx, in, runID, taskID, map[string]any{"event": "tool_denied", "tool": def.Name, "reason": reason})
 			continue
 		}
-		allowed[def.Name] = allowedTool{def: def, requiresApproval: requiresApproval && !o.skipApprovals, approvalReason: reason}
+		at := allowedTool{def: def, requiresApproval: requiresApproval && !o.skipApprovals, approvalReason: reason}
+		for _, p := range policies {
+			if b, ok := p.Budgets[def.Name]; ok {
+				at.budgets = append(at.budgets, b)
+			}
+		}
+		allowed[def.Name] = at
 		toolSpecs = append(toolSpecs, model.ToolSpec{
 			Name:        def.Name,
 			Description: def.Description,
@@ -1647,6 +1657,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 		approvalReason   string
 		runParallel      bool
 		refused          error
+		budgets          []policy.ToolBudget
 	}
 
 	if err := o.Budget.ReserveToolCalls(runID, len(calls)); err != nil {
@@ -1669,13 +1680,15 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 				return nil, err
 			}
 		}
+		stepID := core.StepID(core.NewID())
 		callRec := tool.Call{
-			TenantID: tenant,
-			RunID:    runID,
-			TaskID:   taskID,
-			StepID:   core.StepID(core.NewID()),
-			Tool:     core.ToolDefinition{Name: tc.Name},
-			Input:    tc.Input,
+			TenantID:       tenant,
+			RunID:          runID,
+			TaskID:         taskID,
+			StepID:         stepID,
+			Tool:           core.ToolDefinition{Name: tc.Name},
+			Input:          tc.Input,
+			IdempotencyKey: string(stepID),
 		}
 		if tc.Name == delegateTool && delegate != nil {
 			callRec.Tool = core.ToolDefinition{ID: delegateTool, Name: delegateTool}
@@ -1699,7 +1712,12 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 		}
 		def := allowedTool.def
 		callRec.Tool = def
+		if err := o.Budget.ReserveTool(runID, def.Name, allowedTool.budgets...); err != nil {
+			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, refused: err})
+			continue
+		}
 		plans = append(plans, plannedTool{
+			budgets:          allowedTool.budgets,
 			idx:              i,
 			tc:               tc,
 			call:             callRec,
@@ -1741,13 +1759,14 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			}
 			if status != "approved" {
 				plans[i].refused = fmt.Errorf("call to tool %s was not approved (%s)", plans[i].call.Tool.Name, status)
+				o.Budget.ReleaseTool(runID, plans[i].call.Tool.Name)
 			}
 		}
 	}
 
 	for _, plan := range plans {
 		if plan.refused != nil {
-			results <- toolOut{idx: plan.idx, msg: o.toolFailed(ctx, tenant, session, runID, taskID, plan.call, plan.tc, plan.refused)}
+			results <- toolOut{idx: plan.idx, msg: o.toolFailed(ctx, tenant, session, runID, taskID, plan.call, plan.tc, plan.refused, false)}
 			continue
 		}
 		if plan.runParallel {
@@ -1761,12 +1780,12 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			go func(plan plannedTool) {
 				defer wg.Done()
 				defer func() { <-group }()
-				msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, tenant, session, runID, taskID)
+				msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, plan.budgets, tenant, session, runID, taskID)
 				results <- toolOut{idx: plan.idx, msg: msg, err: err}
 			}(plan)
 		} else {
 			wg.Wait()
-			msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, tenant, session, runID, taskID)
+			msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, plan.budgets, tenant, session, runID, taskID)
 			results <- toolOut{idx: plan.idx, msg: msg, err: err}
 		}
 	}
@@ -1875,7 +1894,8 @@ func (o *Orchestrator) closeApproval(ctx context.Context, tenant core.TenantID, 
 	return o.Approvals.GetApproval(ctx, tenant, id)
 }
 
-func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call tool.Call, tc model.ToolCall, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (_ model.Message, err error) {
+// invokeTool runs a tool call, retrying it as ToolRetry allows, within its time budgets.
+func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call tool.Call, tc model.ToolCall, budgets []policy.ToolBudget, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (_ model.Message, err error) {
 	ctx, span := o.startSpan(ctx, "execute_tool "+call.Tool.Name,
 		attribute.String("gen_ai.operation.name", "execute_tool"),
 		attribute.String("gen_ai.tool.name", call.Tool.Name),
@@ -1904,35 +1924,43 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		Payload:    mustJSON(map[string]any{"tool": call.Tool.Name}),
 	})
 	callStart := time.Now()
-	tctx, cancel := ctx, context.CancelFunc(func() {})
-	if call.Tool.Timeout > 0 {
-		tctx, cancel = context.WithTimeout(ctx, call.Tool.Timeout)
-	}
-	res, err := safeExecute(tctx, exec, call)
-	cancel()
+	res, took, cost, err := o.executeWithRetries(ctx, exec, call, budgets, tenant, session, runID, taskID)
 	if err != nil {
 		span.RecordError(err)
 	}
 	o.Metrics.Observe("agentloop_tool_call_duration_seconds", time.Since(callStart).Seconds(), "tool", call.Tool.Name)
+	o.Budget.CommitTool(runID, call.Tool.Name, took, cost)
+	var costErr error
+	if cost > 0 {
+		costErr = o.Budget.Commit(runID, core.Usage{CostUnits: cost})
+		o.persistUsage(ctx, tenant, runID)
+	}
 	if err != nil {
-		if ctx.Err() != nil || errors.Is(err, core.ErrBudgetExceeded) || errors.Is(err, errLoopDetected) {
-			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err)
+		if fatal := ctx.Err() != nil || errors.Is(err, core.ErrBudgetExceeded) || errors.Is(err, errLoopDetected); fatal {
+			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err, true)
 			return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
 		}
-		return o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err), nil
+		if costErr != nil {
+			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, costErr, true)
+			return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, costErr)
+		}
+		return o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err, false), nil
 	}
 	artifacts, err := o.storeArtifacts(ctx, tenant, session, runID, taskID, call, res.Artifacts)
 	if err != nil {
 		if ctx.Err() != nil {
-			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err)
+			o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err, true)
 			return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
 		}
-		return o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err), nil
+		return o.toolFailed(ctx, tenant, session, runID, taskID, call, tc, err, false), nil
 	}
 	o.Metrics.Add("agentloop_tool_calls_total", 1, "tool", call.Tool.Name, "outcome", "ok")
 	completed := map[string]any{"tool": call.Tool.Name, "output": json.RawMessage(res.Output)}
 	if len(artifacts) > 0 {
 		completed["artifacts"] = artifacts
+	}
+	if cost > 0 {
+		completed["cost_units"] = cost
 	}
 	o.emit(ctx, core.Event{
 		TenantID:   tenant,
@@ -1944,12 +1972,23 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 		Visibility: core.VisibilityInternal,
 		Payload:    mustJSON(completed),
 	})
+	if costErr != nil {
+		return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, costErr)
+	}
 	return model.Message{
 		Role:       model.RoleTool,
 		Name:       call.Tool.Name,
 		ToolCallID: tc.ID,
 		Content:    string(res.Output),
 	}, nil
+}
+
+func failedPayload(name string, err error, fatal bool) map[string]any {
+	p := map[string]any{"tool": name, "error": err.Error()}
+	if fatal {
+		p["fatal"] = errorCode(err)
+	}
+	return p
 }
 
 // storeArtifacts stores what a tool call produced, each with an
@@ -1995,6 +2034,79 @@ func (o *Orchestrator) checkArtifactSize(name string, size int) error {
 	return nil
 }
 
+// executeWithRetries calls exec until it succeeds or may not be retried, and
+// returns how long its attempts took together and what they cost. Only
+// idempotent and conditionally idempotent tools (each call carries its step ID
+// as idempotency key) are retried, after tool.ErrTransient or a timeout of
+// the call itself, while the run has tool calls and the tool time left.
+func (o *Orchestrator) executeWithRetries(ctx context.Context, exec tool.Executor, call tool.Call, budgets []policy.ToolBudget, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (res tool.Result, took time.Duration, cost int64, err error) {
+	left, usedUp := o.Budget.ToolTimeLeft(runID, call.Tool.Name, budgets...)
+	if usedUp {
+		return res, 0, 0, fmt.Errorf("tool %s used its time budget for this run", call.Tool.Name)
+	}
+	bctx := ctx
+	if left > 0 {
+		var cancel context.CancelFunc
+		bctx, cancel = context.WithTimeout(ctx, left)
+		defer cancel()
+	}
+	outOfTime := func(err error) error {
+		return fmt.Errorf("tool %s used the rest of its time budget for this run: %w", call.Tool.Name, err)
+	}
+	backoff := o.ToolRetry.Backoff
+	for attempt := 1; ; attempt++ {
+		tctx, cancel := bctx, context.CancelFunc(func() {})
+		if call.Tool.Timeout > 0 {
+			tctx, cancel = context.WithTimeout(bctx, call.Tool.Timeout)
+		}
+		start := time.Now()
+		res, err = safeExecute(tctx, exec, call)
+		cancel()
+		took += time.Since(start)
+		cost += max(res.CostUnits, 0)
+		if err != nil && bctx.Err() != nil && ctx.Err() == nil {
+			return res, took, cost, outOfTime(err)
+		}
+		if err == nil || !o.retriesTool(ctx, call, attempt, err) {
+			return res, took, cost, err
+		}
+		if stalled, n := o.LoopDet.ObserveRetry(runID); stalled {
+			storm := fmt.Errorf("%w: %d retries within %s, the last of tool %s after: %w", errLoopDetected, n, o.LoopDet.RetryWindow, call.Tool.Name, err)
+			if lerr := o.onLoop(ctx, tenant, session, runID, taskID, "", map[string]any{"kind": "retry_storm", "retries": n, "tool": call.Tool.Name}, storm); lerr != nil {
+				return res, took, cost, lerr
+			}
+		}
+		if o.Budget.ReserveToolCall(runID) != nil {
+			return res, took, cost, err
+		}
+		o.emit(ctx, core.Event{
+			TenantID:   tenant,
+			SessionID:  session,
+			RunID:      runID,
+			TaskID:     taskID,
+			StepID:     call.StepID,
+			Type:       core.EvSystem,
+			Visibility: core.VisibilityInternal,
+			Payload:    mustJSON(map[string]any{"event": "tool_call_retried", "tool": call.Tool.Name, "attempt": attempt + 1, "error": err.Error()}),
+		})
+		select {
+		case <-ctx.Done():
+			return res, took, cost, ctx.Err()
+		case <-bctx.Done():
+			return res, took, cost, outOfTime(err)
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+}
+
+// retriesTool reports whether a failed call may run again.
+func (o *Orchestrator) retriesTool(ctx context.Context, call tool.Call, attempt int, err error) bool {
+	safe := call.Tool.Idempotency == core.IdemIdempotent || call.Tool.Idempotency == core.IdemConditionalIdempotent
+	return safe && attempt < o.ToolRetry.MaxAttempts && ctx.Err() == nil &&
+		(errors.Is(err, tool.ErrTransient) || errors.Is(err, context.DeadlineExceeded))
+}
+
 func safeExecute(ctx context.Context, exec tool.Executor, call tool.Call) (res tool.Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -2004,7 +2116,9 @@ func safeExecute(ctx context.Context, exec tool.Executor, call tool.Call) (res t
 	return exec.Execute(ctx, call)
 }
 
-func (o *Orchestrator) toolFailed(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, tc model.ToolCall, err error) model.Message {
+// toolFailed records a failed call and returns what the model is told. A fatal
+// error, which fails the task, is recorded with its code so re-execution fails the same way.
+func (o *Orchestrator) toolFailed(ctx context.Context, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID, call tool.Call, tc model.ToolCall, err error, fatal bool) model.Message {
 	o.Log.WarnContext(ctx, "tool call failed", "run_id", runID, "task_id", taskID, "tool", call.Tool.Name, "err", err)
 	// A refused call's name comes from model output, so it must not become a label value.
 	label := call.Tool.Name
@@ -2020,7 +2134,7 @@ func (o *Orchestrator) toolFailed(ctx context.Context, tenant core.TenantID, ses
 		StepID:     call.StepID,
 		Type:       core.EvToolCompleted,
 		Visibility: core.VisibilityInternal,
-		Payload:    mustJSON(map[string]any{"tool": call.Tool.Name, "error": err.Error()}),
+		Payload:    mustJSON(failedPayload(call.Tool.Name, err, fatal)),
 	})
 	return model.Message{
 		Role:       model.RoleTool,
