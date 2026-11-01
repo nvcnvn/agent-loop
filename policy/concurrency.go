@@ -6,8 +6,8 @@ import (
 )
 
 // ConcurrencyLimits bounds work executing at once; zero means unlimited.
-// Workflow keys are per tenant; agent and tool keys are shared by all tenants
-// because agents and tools are server resources.
+// Workflow keys are per tenant, as are the keys of agents and tools that only
+// one tenant has; the keys of shared agents and tools are shared by all tenants.
 type ConcurrencyLimits struct {
 	PerTenant   int // runs per tenant
 	PerWorkflow int // runs per tenant and workflow name

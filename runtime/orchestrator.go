@@ -72,9 +72,14 @@ type Result struct {
 
 // Orchestrator is the central runtime entry point.
 type Orchestrator struct {
-	Store  store.Store // any driver: store.MemStore or store/pg.Store
-	Tools  *tool.Registry
-	Agents map[string]Agent
+	Store store.Store // any driver: store.MemStore or store/pg.Store
+	// Tools are the tools every tenant's runs may call; TenantTools adds a
+	// tenant's own, which no other tenant sees and which replace shared ones of the same name.
+	Tools       *tool.Registry
+	TenantTools map[core.TenantID]*tool.Registry
+	// TenantPolicies apply to a tenant's runs on top of Policy.
+	TenantPolicies map[core.TenantID]policy.ToolPolicy
+	Agents         map[string]Agent
 	// Provider and Model run the agents tenants define over the API; Model unless the agent names one.
 	Provider model.Provider
 	Model    string
@@ -167,6 +172,9 @@ type runState struct {
 
 type allowedTool struct {
 	def              core.ToolDefinition
+	reg              *tool.Registry
+	exec             tool.Executor
+	slot             string
 	requiresApproval bool
 	approvalReason   string
 	budgets          []policy.ToolBudget
@@ -1237,21 +1245,22 @@ func (o *Orchestrator) agentLoop(ctx context.Context, runID core.RunID, in Start
 
 	toolSpecs := []model.ToolSpec{}
 	allowed := map[string]allowedTool{}
-	policies := []policy.ToolPolicy{o.Policy}
-	if in.Workflow.ToolPolicy != nil {
-		policies = append(policies, *in.Workflow.ToolPolicy)
-	}
+	policies := o.toolPolicies(in)
 	for _, name := range agent.Tools {
-		def, _, ok := o.Tools.Get(name)
+		if name == delegateTool || name == askHumanTool {
+			continue
+		}
+		reg, slot, ok := o.registryFor(in.TenantID, name)
 		if !ok {
 			continue
 		}
+		def, exec, _ := reg.Get(name)
 		ok2, requiresApproval, reason := policy.AuthorizeAll(def, policies...)
 		if !ok2 {
 			o.systemEvent(ctx, in, runID, taskID, map[string]any{"event": "tool_denied", "tool": def.Name, "reason": reason})
 			continue
 		}
-		at := allowedTool{def: def, requiresApproval: requiresApproval && !o.skipApprovals, approvalReason: reason}
+		at := allowedTool{def: def, reg: reg, exec: exec, slot: slot, requiresApproval: requiresApproval && !o.skipApprovals, approvalReason: reason}
 		for _, p := range policies {
 			if b, ok := p.Budgets[def.Name]; ok {
 				at.budgets = append(at.budgets, b)
@@ -1715,6 +1724,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 		tc               model.ToolCall
 		call             tool.Call
 		exec             tool.Executor
+		slot             string
 		requiresApproval bool
 		approvalReason   string
 		runParallel      bool
@@ -1763,12 +1773,7 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, refused: fmt.Errorf("%w: tool %s is not available to this agent", core.ErrPolicyDenied, tc.Name)})
 			continue
 		}
-		_, exec, found := o.Tools.Get(tc.Name)
-		if !found {
-			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, refused: fmt.Errorf("unknown tool %s", tc.Name)})
-			continue
-		}
-		if err := o.Tools.CheckInput(tc.Name, tc.Input); err != nil {
+		if err := allowedTool.reg.CheckInput(tc.Name, tc.Input); err != nil {
 			callRec.Tool = allowedTool.def
 			plans = append(plans, plannedTool{idx: i, tc: tc, call: callRec, refused: fmt.Errorf("invalid input for tool %s: %w", tc.Name, err)})
 			continue
@@ -1784,7 +1789,8 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			idx:              i,
 			tc:               tc,
 			call:             callRec,
-			exec:             exec,
+			exec:             allowedTool.exec,
+			slot:             allowedTool.slot,
 			requiresApproval: allowedTool.requiresApproval,
 			approvalReason:   allowedTool.approvalReason,
 			runParallel:      def.Concurrency == core.ConcurrencyParallelRead || def.Concurrency == core.ConcurrencyParallelIsolatedWrite,
@@ -1844,12 +1850,12 @@ func (o *Orchestrator) runToolCalls(ctx context.Context, tenant core.TenantID, s
 			go func(plan plannedTool) {
 				defer wg.Done()
 				defer func() { <-group }()
-				msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, plan.budgets, tenant, session, runID, taskID)
+				msg, err := o.invokeTool(gctx, plan.exec, plan.slot, plan.call, plan.tc, plan.budgets, tenant, session, runID, taskID)
 				results <- toolOut{idx: plan.idx, msg: msg, err: err}
 			}(plan)
 		} else {
 			wg.Wait()
-			msg, err := o.invokeTool(gctx, plan.exec, plan.call, plan.tc, plan.budgets, tenant, session, runID, taskID)
+			msg, err := o.invokeTool(gctx, plan.exec, plan.slot, plan.call, plan.tc, plan.budgets, tenant, session, runID, taskID)
 			results <- toolOut{idx: plan.idx, msg: msg, err: err}
 		}
 	}
@@ -1959,7 +1965,7 @@ func (o *Orchestrator) closeApproval(ctx context.Context, tenant core.TenantID, 
 }
 
 // invokeTool runs a tool call, retrying it as ToolRetry allows, within its time budgets.
-func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call tool.Call, tc model.ToolCall, budgets []policy.ToolBudget, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (_ model.Message, err error) {
+func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, slot string, call tool.Call, tc model.ToolCall, budgets []policy.ToolBudget, tenant core.TenantID, session core.SessionID, runID core.RunID, taskID core.TaskID) (_ model.Message, err error) {
 	ctx, span := o.startSpan(ctx, "execute_tool "+call.Tool.Name,
 		attribute.String("gen_ai.operation.name", "execute_tool"),
 		attribute.String("gen_ai.tool.name", call.Tool.Name),
@@ -1967,12 +1973,12 @@ func (o *Orchestrator) invokeTool(ctx context.Context, exec tool.Executor, call 
 	defer func() { o.endSpan(span, err) }()
 	// Built-ins take no slot: a delegating task holding one its descendants
 	// wait for would deadlock, and a question would block other runs' questions.
-	if string(call.Tool.ID) != call.Tool.Name {
+	if slot != "" {
 		limit := o.Concurrency.PerTool
 		if call.Tool.Concurrency == core.ConcurrencyExclusive {
 			limit = 1
 		}
-		releaseTool, err := o.sems.Acquire(ctx, "tool:"+call.Tool.Name, limit)
+		releaseTool, err := o.sems.Acquire(ctx, slot, limit)
 		if err != nil {
 			return model.Message{}, fmt.Errorf("tool %s: %w", call.Tool.Name, err)
 		}

@@ -210,6 +210,10 @@ func (o *Orchestrator) ListAgents(ctx context.Context, tenant core.TenantID) ([]
 func (o *Orchestrator) PutAgent(ctx context.Context, tenant core.TenantID, a Agent) (int, error)
 func (o *Orchestrator) DeleteAgent(ctx context.Context, tenant core.TenantID, name string) error
 
+// Orchestrator.TenantTools (map of tenant to *tool.Registry) adds tools only that tenant's runs
+// see, replacing shared ones of the same name; TenantPolicies adds a tool policy per tenant.
+// ListTools(tenant) lists what a tenant's runs may call.
+
 // Compaction (Orchestrator.Compaction) summarizes session history when a run starts.
 type Compaction struct {
     Agent       string // writes the summary; empty disables compaction

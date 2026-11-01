@@ -89,7 +89,7 @@ func (o *Orchestrator) PutAgent(ctx context.Context, tenant core.TenantID, a Age
 		return 0, fmt.Errorf("%w: timeout and max_tool_loops must not be negative", ErrInvalidAgent)
 	}
 	for _, name := range a.Tools {
-		if _, _, ok := o.Tools.Get(name); !ok {
+		if _, _, ok := o.registryFor(tenant, name); !ok {
 			return 0, fmt.Errorf("%w: unknown tool %q", ErrInvalidAgent, name)
 		}
 	}

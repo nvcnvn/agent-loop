@@ -791,9 +791,7 @@ func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
 	if !allowRole(w, identityOf(r).Role.Operates()) {
 		return
 	}
-	tools := s.Orch.Tools.List()
-	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
-	writeJSON(w, http.StatusOK, map[string]any{"tools": tools})
+	writeJSON(w, http.StatusOK, map[string]any{"tools": s.Orch.ListTools(tenantOf(r))})
 }
 
 // streamEvents serves SSE. It honours Last-Event-ID by parsing the last seen

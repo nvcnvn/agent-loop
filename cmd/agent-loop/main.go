@@ -27,16 +27,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/nvcnvn/agent-loop/api"
+	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/model"
 	"github.com/nvcnvn/agent-loop/model/ollama"
 	"github.com/nvcnvn/agent-loop/model/openai"
@@ -90,14 +93,20 @@ func main() {
 			fatal("config redact", err)
 		}
 	}
-	for _, s := range cfg.MCPServers {
+	servers := slices.Concat(cfg.MCPServers, slices.Concat(slices.Collect(maps.Values(cfg.TenantMCPServers))...))
+	for _, s := range servers {
 		for k, v := range s.Headers {
 			if credentialHeader(k) {
 				redactor.Add(v)
 			}
 		}
 	}
-	mcpClients := connectMCP(cfg.MCPServers, reg)
+	mcpClients := connectMCP("", cfg.MCPServers, reg)
+	tenantTools := map[core.TenantID]*tool.Registry{}
+	for tenant, servers := range cfg.TenantMCPServers {
+		tenantTools[tenant] = tool.NewRegistry()
+		mcpClients = append(mcpClients, connectMCP(tenant, servers, tenantTools[tenant])...)
+	}
 	for i := range cfg.Agents {
 		cfg.Agents[i].Provider = prov
 		if cfg.Agents[i].Model == "" {
@@ -107,6 +116,7 @@ func main() {
 	orch := runtime.NewOrchestrator(persistence, reg, cfg.Agents)
 	orch.Provider, orch.Model = prov, modelName
 	cfg.Apply(orch)
+	orch.TenantTools = tenantTools
 	orch.Redactor, orch.Secrets = redactor, toolSecrets()
 	if n, err := orch.Recover(context.Background()); err != nil {
 		slog.Error("recover runs", "resumed", n, "err", err)
@@ -159,6 +169,8 @@ func main() {
 type fileConfig struct {
 	runtime.Config
 	MCPServers []mcp.Server `json:"mcp_servers,omitempty"`
+	// TenantMCPServers are MCP servers whose tools only the tenant's runs see.
+	TenantMCPServers map[core.TenantID][]mcp.Server `json:"tenant_mcp_servers,omitempty"`
 	// Visibility replaces, for each role it lists, the event visibilities that role reads.
 	Visibility policy.Visibility `json:"visibility,omitempty"`
 	// Redact lists more Go regular expressions whose matches logs and traces hide.
@@ -201,29 +213,39 @@ func loadConfig(path string) fileConfig {
 	if err := cfg.Visibility.Validate(); err != nil {
 		fatal("config "+path, err)
 	}
+	for tenant := range cfg.TenantMCPServers {
+		if uuid.Validate(string(tenant)) != nil {
+			fatal("config "+path, fmt.Errorf("tenant_mcp_servers: tenant ID %q is not a UUID", tenant))
+		}
+	}
 	slog.Info("loaded config", "path", path, "agents", len(cfg.Agents), "workflows", len(cfg.Workflows), "mcp_servers", len(cfg.MCPServers))
 	return cfg
 }
 
-func connectMCP(servers []mcp.Server, reg *tool.Registry) []*mcp.Client {
+// connectMCP registers the tools of servers in reg; tenant is empty for shared servers.
+func connectMCP(tenant core.TenantID, servers []mcp.Server, reg *tool.Registry) []*mcp.Client {
 	var clients []*mcp.Client
 	seen := map[string]bool{}
+	where := "mcp server "
+	if tenant != "" {
+		where = "tenant " + string(tenant) + " mcp server "
+	}
 	for _, s := range servers {
 		if seen[s.Name] {
-			fatal("mcp", fmt.Errorf("mcp server name %q is used twice", s.Name))
+			fatal("mcp", fmt.Errorf("%s%q is listed twice", where, s.Name))
 		}
 		seen[s.Name] = true
 		c, err := mcp.New(s)
 		if err != nil {
-			fatal("mcp", err)
+			fatal(where+s.Name, err)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		names, err := c.Register(ctx, reg)
 		cancel()
 		if err != nil {
-			fatal("mcp server "+s.Name, err)
+			fatal(where+s.Name, err)
 		}
-		slog.Info("registered MCP tools", "server", s.Name, "tools", names)
+		slog.Info("registered MCP tools", "tenant_id", tenant, "server", s.Name, "tools", names)
 		clients = append(clients, c)
 	}
 	return clients

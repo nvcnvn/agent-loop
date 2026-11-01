@@ -177,9 +177,22 @@ func (t *toolReplay) Execute(_ context.Context, c tool.Call) (tool.Result, error
 
 // replayOrchestrator is a copy of o whose agents and tools answer from records.
 func (o *Orchestrator) replayOrchestrator(p model.Provider, tools tool.Executor) (*Orchestrator, error) {
-	reg := tool.NewRegistry()
-	for _, def := range o.Tools.List() {
-		if err := reg.Register(def, tools); err != nil {
+	replay := func(src *tool.Registry) (*tool.Registry, error) {
+		reg := tool.NewRegistry()
+		for _, def := range src.List() {
+			if err := reg.Register(def, tools); err != nil {
+				return nil, err
+			}
+		}
+		return reg, nil
+	}
+	reg, err := replay(o.Tools)
+	if err != nil {
+		return nil, err
+	}
+	tenantTools := map[core.TenantID]*tool.Registry{}
+	for tenant, src := range o.TenantTools {
+		if tenantTools[tenant], err = replay(src); err != nil {
 			return nil, err
 		}
 	}
@@ -191,7 +204,7 @@ func (o *Orchestrator) replayOrchestrator(p model.Provider, tools tool.Executor)
 	c := NewOrchestrator(o.Store, reg, agents)
 	c.Provider, c.Model, c.replayTools = p, o.Model, tools
 	c.Workflows, c.MaxLimits, c.MaxHistoryMessages, c.Concurrency, c.Compaction = o.Workflows, o.MaxLimits, o.MaxHistoryMessages, o.Concurrency, o.Compaction
-	c.Policy, c.skipApprovals = o.Policy, true
+	c.Policy, c.TenantPolicies, c.TenantTools, c.skipApprovals = o.Policy, o.TenantPolicies, tenantTools, true
 	c.Log, c.Tracer = o.Log, o.Tracer
 	return c, nil
 }

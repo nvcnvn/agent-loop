@@ -239,14 +239,14 @@ for output gates, `output`, where tool approvals have `tool`.
 Agents are `runtime.Agent` values registered in Go, or come from the JSON file passed to
 `cmd/agent-loop -config` (or named by `AGENT_LOOP_CONFIG`), which also holds the deployment's
 settings: the named workflow templates, history compaction, the tool policy (§8: allow, deny,
-approval, budgets and per-tool `timeouts`), the loop response and cost approval threshold (§8), the
+approval, budgets and per-tool `timeouts`) and `tenant_tool_policies`, the loop response and cost approval threshold (§8), the
 artifact size cap (`max_artifact_bytes`, §10), the run `limits` (`default` fills what a run does
 not ask for, `max` caps what it may), the worker pool (`concurrency`: `max_active_runs` executing,
 `max_queued_runs` waiting in first-in-first-out order beyond them, and `per_tenant`,
 `per_workflow`, `per_agent` and `per_tool` bounds), `approval_timeout`, `idle_warn_after`,
 `max_history_messages`, `tool_retry`, the `retention` of idle sessions and of memories
 (`{"sessions", "memories"}`, durations; `cmd/agent-loop` applies it at startup and every hour), the
-MCP servers, in `visibility` which event visibilities each role reads, and in `redact` more patterns
+MCP servers (`mcp_servers`, and `tenant_mcp_servers` per tenant), in `visibility` which event visibilities each role reads, and in `redact` more patterns
 that logs and traces hide (§9). Durations are nanoseconds.
 
 `${NAME}` anywhere in the file, an MCP header included, is replaced by the environment variable
@@ -356,10 +356,11 @@ MCP servers are listed under `mcp_servers` in the `-config` file (§4):
 - At startup each server's tools are listed and registered as `<server>.<tool>`, the names agents
   list in `tools`. A server that cannot be reached stops startup; a tool whose input schema does not compile is skipped with a warning. When the server
   sends `notifications/tools/list_changed`, and after every reconnect, the list is read again:
-  new and changed tools are registered and tools the server dropped are unregistered, so a later
-  call to one goes back to the model as an unknown tool. A task offers the model the tools
-  registered when it started. A server tool whose name another tool already has (another server's,
-  or a builtin) is skipped with a warning, and two servers may not share a name.
+  new and changed tools are registered and tools the server dropped are unregistered. A task offers
+  the model the tools registered when it started and calls them through the server they came from;
+  a dropped tool's call returns the server's error to the model. A server tool whose name another
+  tool in the same registry already has is skipped with a warning, and two servers in one list may
+  not share a name.
 - The schemas are copied (a missing input schema becomes `{"type": "object"}`), the version is the
   one the server reports, and the timeout is the
   server's `timeout` (default 30s). The tool's annotations, which are hints the server is trusted to
@@ -518,6 +519,13 @@ Decide v1 deployment mode explicitly:
   `api.HeaderIdentity` trusts them and is for local development only
 - authorization: tenant-scoped checks on every store method, then the role and session membership
   rules of §1 (`policy.Access`)
+- tools: a tenant's runs call the shared tools (`Orchestrator.Tools`, the config file's
+  `mcp_servers`) and the tenant's own (`Orchestrator.TenantTools`, the file's `tenant_mcp_servers`
+  keyed by tenant ID). A tenant's own tool replaces a shared one of the same name for that tenant,
+  takes its own `per_tool` concurrency slots, and is invisible to other tenants' runs, agent
+  definitions and `/v1/debug/tools`. The built-in `delegate` and `ask_human` names are reserved: a
+  registry tool of either name is never offered. `tenant_tool_policies` (keyed by tenant ID) applies
+  on top of the file's `tool_policy`, and a workflow's on top of both
 - secrets: tools ask `tool.Call.Secrets` for credentials by name. `cmd/agent-loop` reads them from
   `$AGENT_LOOP_SECRETS_DIR/<tenant>/<name>`, else `$AGENT_LOOP_SECRETS_DIR/<name>` (a mounted secret
   volume), when that variable is set, and otherwise from `AGENT_LOOP_SECRET_<NAME>` variables. MCP
@@ -741,7 +749,8 @@ Each error should include:
 ### Security
 
 1. Prevent cross-tenant reads for sessions, runs, events, tools, artifacts, and memory, and
-   cross-tenant run cancellation.
+   cross-tenant run cancellation; keep a tenant's own tools and tool policy to its runs
+   (`TestTenantScopedTools`).
 2. Redact secrets from logs, traces and stored errors (`TestToolSecretsAreRedacted`,
    `TestToolSecretsStayOutOfStoredEvents`, `TestRedactor`), and read tools' credentials per tenant
    (`TestSecrets`).

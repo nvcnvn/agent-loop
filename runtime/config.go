@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/nvcnvn/agent-loop/core"
 	"github.com/nvcnvn/agent-loop/policy"
 )
@@ -20,8 +22,9 @@ type Config struct {
 	Agents     []Agent     `json:"agents"`
 	Workflows  []Workflow  `json:"workflows,omitempty"`
 	Compaction *Compaction `json:"compaction,omitempty"`
-	// ToolPolicy applies to every run.
-	ToolPolicy *policy.ToolPolicy `json:"tool_policy,omitempty"`
+	// ToolPolicy applies to every run, and TenantToolPolicies to the runs of each tenant as well.
+	ToolPolicy         *policy.ToolPolicy                  `json:"tool_policy,omitempty"`
+	TenantToolPolicies map[core.TenantID]policy.ToolPolicy `json:"tenant_tool_policies,omitempty"`
 	// LoopResponse and ApproveAbove set the Orchestrator fields of the same names.
 	LoopResponse LoopResponse `json:"loop_response,omitempty"`
 	ApproveAbove *core.Usage  `json:"approve_above,omitempty"`
@@ -73,6 +76,9 @@ func (c Config) Apply(o *Orchestrator) {
 	}
 	if c.ToolPolicy != nil {
 		o.Policy = *c.ToolPolicy
+	}
+	if c.TenantToolPolicies != nil {
+		o.TenantPolicies = c.TenantToolPolicies
 	}
 	o.LoopResponse = c.LoopResponse
 	if c.ApproveAbove != nil {
@@ -182,6 +188,14 @@ func (c Config) Validate() error {
 	if c.ToolPolicy != nil {
 		if err := c.ToolPolicy.Validate(); err != nil {
 			return err
+		}
+	}
+	for tenant, p := range c.TenantToolPolicies {
+		if uuid.Validate(string(tenant)) != nil {
+			return fmt.Errorf("tenant_tool_policies: tenant ID %q is not a UUID", tenant)
+		}
+		if err := p.Validate(); err != nil {
+			return fmt.Errorf("tenant %s: %w", tenant, err)
 		}
 	}
 	if a := c.ApproveAbove; a != nil && (a.TotalTokens < 0 || a.CostUnits < 0) {

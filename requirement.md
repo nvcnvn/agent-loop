@@ -367,7 +367,8 @@ Operational requirements:
 Requirements:
 - [x] Tenant-scoped reads and writes in both stores.
 - [x] Tenant-scoped run cancellation.
-- [ ] Tenant-scoped tool registries.
+- [x] Tenant-scoped tool registries: tools only one tenant's runs see (`tenant_mcp_servers`,
+  `Orchestrator.TenantTools`) and tool policies per tenant (`tenant_tool_policies`).
 - [x] Authentication and authorization: `/v1` requests authenticate with an API key that fixes their
   tenant and principal (`AGENT_LOOP_API_KEYS`), and every store call is scoped to that tenant. Trusting
   `X-Tenant-ID`/`X-Principal-ID` needs `-trust-identity-headers`.
